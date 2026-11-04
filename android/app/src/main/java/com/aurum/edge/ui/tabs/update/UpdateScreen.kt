@@ -1,6 +1,8 @@
 package com.aurum.edge.ui
 
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +21,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -31,6 +34,10 @@ import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.theme.AurumColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 
 @Composable
 fun UpdateScreen(viewModel: AurumViewModel) {
@@ -39,6 +46,21 @@ fun UpdateScreen(viewModel: AurumViewModel) {
     // The signature of THIS installation does not change while the screen is open; reading the
     // package manager on every recomposition would be wasteful and could show a half-written value.
     val signing = remember { viewModel.updateSigningSummary }
+    val screenshotBackup by viewModel.screenshotBackup.collectAsStateWithLifecycle()
+    val crashReports by viewModel.crashReports.collectAsStateWithLifecycle()
+    // انتخاب فایل ZIP بکاپ تصاویر برای بازگردانی (فقط ZIP؛ هر جای گوشی یا Drive)
+    val restoreZipLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri -> viewModel.restoreScreenshotBackupFromZip(uri) }
+    // انتخاب مقصد توسط خود کاربر؛ مجوز/توکن حساب Drive در اپ ذخیره نمی‌شود.
+    val pendingBackupStampMs = remember { AtomicLong(0L) }
+    val saveBackupToLocationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri -> viewModel.saveScreenshotBackupToUri(uri, pendingBackupStampMs.get()) }
+    LaunchedEffect(Unit) {
+        viewModel.refreshScreenshotBackupStats()
+        viewModel.refreshCrashReports()
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -146,6 +168,142 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                     Text("اجازه نصب از Aurum Edge در Android")
                 }
             }
+        }
+
+        SectionCard(
+            "🩺 عیب‌یابی کرش، بسته شدن و کندی برنامه",
+            "اگر اپ بسته شد یا پیام «صبر کن / ببند» آمد، متن خطا همین‌جا ذخیره می‌شود",
+        ) {
+            if (crashReports.isEmpty()) {
+                Text(
+                    "هیچ گزارشی ثبت نشده است. اگر برنامه بسته شد یا پیام «اپ پاسخ نمی‌دهد» آمد، دوباره اپ را باز کنید و " +
+                        "همین کارت را ببینید؛ گزارش با نام صفحه‌ای که در آن بودید و مسیر دقیق کدی که رشتهٔ اصلی را " +
+                        "قفل کرده بود ذخیره می‌شود.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AurumColors.TextSecondary,
+                )
+            } else {
+                val latest = crashReports.first()
+                Text(
+                    latest.headlineFa,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (latest.detailFa.isNotBlank()) {
+                    Text(
+                        latest.detailFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                Text(
+                    "تعداد گزارش‌های نگه‌داری‌شده: ${crashReports.size} (حداکثر ۸ مورد، قدیمی‌ترها خودکار پاک می‌شوند)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = viewModel::copyLatestCrashReport,
+                    modifier = Modifier.weight(1f),
+                ) { Text("📋 کپی گزارش", style = MaterialTheme.typography.labelMedium) }
+                OutlinedButton(
+                    onClick = viewModel::refreshCrashReports,
+                    modifier = Modifier.weight(1f),
+                ) { Text("🔄 تازه‌سازی", style = MaterialTheme.typography.labelMedium) }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = viewModel::clearCrashReports,
+                    modifier = Modifier.weight(1f),
+                ) { Text("🗑️ پاک کردن گزارش‌ها", style = MaterialTheme.typography.labelMedium) }
+            }
+            Text(
+                "گزارش شامل نوع خطا، stack trace، نام صفحه (تب)، نسخهٔ اپ، مدل گوشی و حافظهٔ مجاز برنامه است؛ " +
+                    "هیچ داده‌ای از ژورنال، حساب یا تصاویر در آن نوشته نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+
+        SectionCard(
+            "بکاپ اسکرین‌شات‌های آرشیو",
+            "تمام تصاویر ثبت‌شده از معاملات (باز و بسته) در یک فایل ZIP",
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatTile("تعداد تصویر", screenshotBackup.imageCount.toString(), AurumColors.Gold, Modifier.weight(1f))
+                StatTile("حجم تصاویر", formatUpdateBytes(screenshotBackup.imageBytes), AurumColors.Cyan, Modifier.weight(1f))
+                StatTile("رکورد فهرست", screenshotBackup.recordCount.toString(), AurumColors.TextSecondary, Modifier.weight(1f))
+            }
+            Text(
+                "هر معامله دو تصویر دارد (لحظهٔ ورود و لحظهٔ بسته شدن) و هر تصویر، قیمت ورود/حد ضرر/حد سود و نتیجه را " +
+                    "به‌صورت دادهٔ خواندنی داخل خودش نگه می‌دارد. این بکاپ همهٔ آن‌ها را در یک فایل ZIP جمع می‌کند " +
+                    "تا از گوشی بیرون ببرید یا جای دیگری نگه دارید.",
+                style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = viewModel::saveScreenshotBackupToDownloads,
+                    modifier = Modifier.weight(1f),
+                ) { Text("💾 ذخیره در دانلود", style = MaterialTheme.typography.labelMedium) }
+                OutlinedButton(
+                    onClick = {
+                        val stamp = System.currentTimeMillis()
+                        pendingBackupStampMs.set(stamp)
+                        val label = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(stamp))
+                        saveBackupToLocationLauncher.launch("AurumScreenshots_$label.zip")
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text("☁️ Drive / حافظه", style = MaterialTheme.typography.labelMedium) }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = viewModel::shareScreenshotBackup,
+                    modifier = Modifier.weight(1f),
+                ) { Text("📤 ارسال", style = MaterialTheme.typography.labelSmall) }
+                OutlinedButton(
+                    onClick = { restoreZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
+                    modifier = Modifier.weight(1f),
+                ) { Text("📥 بازخوانی ZIP", style = MaterialTheme.typography.labelSmall) }
+                OutlinedButton(
+                    onClick = viewModel::refreshScreenshotBackupStats,
+                    modifier = Modifier.weight(1f),
+                ) { Text("🔄 آمار", style = MaterialTheme.typography.labelSmall) }
+            }
+            if (screenshotBackup.lastZipName.isNotBlank()) {
+                Text(
+                    "آخرین بکاپ ساخته‌شده: ${screenshotBackup.lastZipName} · ${formatUpdateBytes(screenshotBackup.lastZipBytes)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            Text(
+                "تصاویر تازه فقط در آرشیو خصوصی اپ می‌مانند و وارد گالری نمی‌شوند. «ذخیره در دانلود» یک نسخهٔ ZIP می‌سازد؛ " +
+                    "«Drive / حافظه» پنجرهٔ امن Android را باز می‌کند تا خودتان Google Drive یا پوشهٔ دیگری را انتخاب کنید. " +
+                    "اصل تصاویر در اپ باقی می‌ماند؛ «ارسال» هم Share Sheet را باز می‌کند. بازخوانی ZIP فقط با انتخاب خودتان انجام می‌شود.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
 
         SectionCard("سازگاری و محدودیت Android", "برای بیشترین سازگاری، اپ چند مسیر بروزرسانی را امتحان می‌کند") {

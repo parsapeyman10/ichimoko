@@ -21,10 +21,12 @@ import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
 import com.aurum.edge.core.RiskCalculationResult
+import com.aurum.edge.core.SessionExitPlanner
 import com.aurum.edge.core.Smart15mSyncPlanner
 import com.aurum.edge.core.StrategyEvaluationReport
 import com.aurum.edge.core.StrategyReadinessState
 import com.aurum.edge.core.SymbolPollTier
+import com.aurum.edge.core.TradePlanGuard
 import com.aurum.edge.core.V1Universe
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.domain.SignalAction
@@ -38,6 +40,7 @@ import com.aurum.edge.data.LiveQuoteFetcher
 import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.PairScanStatus
+import com.aurum.edge.data.SessionExitLearningStore
 import com.aurum.edge.service.BackgroundTradingService
 import java.util.Locale
 import java.util.UUID
@@ -51,8 +54,29 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
+import com.aurum.edge.core.CrashReporter
+
+/**
+ * وضعیت کارت «بکاپ اسکرین‌شات‌ها» در تب آپدیت.
+ */
+data class ScreenshotBackupUiState(
+    val imageCount: Int = 0,
+    val imageBytes: Long = 0L,
+    val recordCount: Int = 0,
+    val lastZipName: String = "",
+    val lastZipBytes: Long = 0L,
+)
 
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
+
+    companion object {
+        /** در هر بار اجرا حداکثر چند تصویر آرشیو ساخته شود (بار پردازشی سبک بماند). */
+        private const val STARTUP_ARCHIVE_SNAPSHOTS_PER_PASS = 1
+
+        /** چند بار (با فاصله) تلاش شود تا تصاویر آرشیوِ جامانده تکمیل شوند. */
+        private const val STARTUP_ARCHIVE_SNAPSHOT_PASSES = 2
+    }
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
     val market: StateFlow<MarketState> = container.verifiedMarket
@@ -120,14 +144,34 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private var lastScanned5mBucket: Long = -1L
     private var lastMidBarCheckedBucket: Long = -1L
     private var lastAutoFiredBarTimeByKey: Map<String, Long> = emptyMap()
+    /** پلن‌های کهنه/نامعتبری که یک بار به کاربر گزارش شده‌اند تا پیام تکراری ساخته نشود. */
+    private val rejectedPlanKeys = mutableSetOf<String>()
+
+    /** زمان سربارِ آموخته‌شدهٔ خروج پیش از سشن برای هر دستهٔ دارایی (پنل فارسی). */
+    val sessionExitEstimates: StateFlow<List<com.aurum.edge.core.SessionExitLearning.Estimate>> =
+        SessionExitLearningStore.estimates
+
+    /** آخرین نتیجهٔ سنجش «خروج زودتر بهتر بود یا نگه‌داشتن» پس از بازگشایی بازار. */
+    val sessionExitLearningNote: StateFlow<String> = SessionExitLearningStore.lastResolvedFa
 
     init {
         container.settingsStore.ensureBalance100kMigrated()
+        runCatching { SessionExitLearningStore.init(container.appContext) }
         container.appScope.launch {
             container.journalStore.trades.collect { currentTrades ->
                 _stats.value = container.journalStore.stats()
                 _lastDisplayMarks.value = OpenPositionDisplay.onlyOpen(_lastDisplayMarks.value, currentTrades)
-                container.neuralEngine.syncWithClosedJournalTrades(currentTrades)
+                val reconciliation = container.neuralEngine.syncWithClosedJournalTrades(currentTrades)
+                // بعد از یادگیری معامله‌های تازه، شخصیت نمادها/استراتژی‌ها در پیکربندی موتور
+                // تازه‌سازی می‌شود تا ارزیابی‌های بعدی از آموخته‌های جدید استفاده کنند.
+                if (reconciliation.newlyLearnedThisRun > 0) {
+                    runCatching {
+                        val refreshed = container.neuralEngine
+                            .applyAutoTunedParametersToConfig(settings.value.baseStrategyConfig)
+                        container.settingsStore.update { cur -> cur.copy(baseStrategyConfig = refreshed) }
+                    }
+                }
+                runCatching { refreshNeoWaveNeuralTuning(currentTrades) }
                 syncBackgroundServiceState()
             }
         }
@@ -137,31 +181,65 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun startApp(@Suppress("UNUSED_PARAMETER") context: Context) {
         container.settingsStore.ensureBalance100kMigrated()
-        com.aurum.edge.data.PhoneStorageVaultManager.attachContext(container.appContext)
-        com.aurum.edge.data.TradeSnapshotArchiveManager.init(container.appContext)
-        com.aurum.edge.core.MasterIchimokuTradingAssistant.init(container.appContext)
+        CrashReporter.breadcrumb("app:start")
+        // ── سبک‌سازی راه‌اندازی ────────────────────────────────────────────────
+        // همهٔ کارهای دیسکی/سنگینِ شروع، مرحله‌به‌مرحله و روی IO اجرا می‌شوند. پیش‌تر همین کارها
+        // پشت‌سرهم روی رشتهٔ اصلی اجرا می‌شدند و فریم اول UI را قفل می‌کردند (لگ و «اپ پاسخ نمی‌دهد»).
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { com.aurum.edge.data.PhoneStorageVaultManager.attachContext(container.appContext) }
+            runCatching { com.aurum.edge.data.SessionExitLearningStore.init(container.appContext) }
+            yield()
+            runCatching { com.aurum.edge.data.TradeSnapshotArchiveManager.init(container.appContext) }
+            // بودجهٔ حافظهٔ آرشیو: قدیمی‌ترین تصاویر حذف می‌شوند تا حافظه بی‌پایان رشد نکند.
+            runCatching { com.aurum.edge.data.TradeSnapshotArchiveManager.pruneToBudget(container.appContext) }
+            yield()
+            runCatching { com.aurum.edge.core.MasterIchimokuTradingAssistant.init(container.appContext) }
+
+            // فرصت دادن به اولین فریم و اولین تیک قیمت تا کارهای سنگین با نمایش اولیه رقابت نکنند.
+            delay(1_500L)
             runCatching {
                 val shardTrades = com.aurum.edge.data.PhoneStorageVaultManager.loadAllTradesFromPhoneShards(container.appContext)
                 if (shardTrades.isNotEmpty()) {
                     container.journalStore.importTrades(shardTrades, replaceExisting = false)
                 }
+                yield()
                 com.aurum.edge.data.PhoneStorageVaultManager.syncTradesToShardsAndDailyBackup(
                     context = container.appContext,
                     trades = trades.value,
                     forceAllShards = true,
                 )
+                yield()
                 com.aurum.edge.data.TradeSnapshotArchiveManager.scanAndRestoreFromPhoneStorage(
                     context = container.appContext,
                     journalStore = container.journalStore,
                 )
+                yield()
                 container.neuralEngine.restoreBrainBackupFromPhoneStorage(container.appContext)
-                // ساخت تصویر آرشیو برای معاملاتی که از قبل باز یا بسته شده‌اند ولی هنوز تصویر ندارند
-                com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
-                    context = container.appContext,
-                    trades = trades.value,
-                )
             }
+
+            // ساخت تصویر آرشیو برای معاملاتی که تصویر ندارند — به‌صورت تدریجی (حداکثر ۲ تصویر در
+            // هر بار اجرا) تا پردازش تصویر، پردازنده و حافظهٔ گوشی را در لحظهٔ استفاده از UI نخورد.
+            delay(3_000L)
+            runCatching {
+                val pendingTrades = trades.value
+                repeat(STARTUP_ARCHIVE_SNAPSHOT_PASSES) { pass ->
+                    com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
+                        context = container.appContext,
+                        trades = pendingTrades,
+                        maxTrades = STARTUP_ARCHIVE_SNAPSHOTS_PER_PASS,
+                    )
+                    if (pass < STARTUP_ARCHIVE_SNAPSHOT_PASSES - 1) delay(2_500L)
+                }
+            }
+            // ── آموزش شبکهٔ عصبی روی همهٔ ۱۶ استراتژی در هر اجرا ──────────────────
+            // بعد از بارگذاری ژورنال/دفتر یادگیری و با فاصله از فریم اول اجرا می‌شود تا UI سبک بماند.
+            delay(1_200L)
+            runCatching {
+                container.neuralEngine.learnAllStrategiesNow(settings.value.baseStrategyConfig)
+                val refreshed = container.neuralEngine.applyAutoTunedParametersToConfig(settings.value.baseStrategyConfig)
+                container.settingsStore.update { cur -> cur.copy(baseStrategyConfig = refreshed) }
+            }
+            CrashReporter.breadcrumb("app:startup-work-done")
         }
         if (!updateCheckStarted) {
             updateCheckStarted = true
@@ -194,11 +272,178 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         )
     }
 
+    /**
+     * آخرین تیک **هر** نماد، مستقل از نرخ انتشار به UI.
+     *
+     * منطق معاملاتی (حد ضرر/حد سود، سشن، پلن) همیشه روی تازه‌ترین قیمت کار می‌کند؛ فقط نمایش
+     * با نرخ محدود به‌روز می‌شود تا بازسازی مکرر صفحه روی گوشی‌های ضعیف باعث لگ/ANR نشود.
+     */
+    private val latestTicks = java.util.concurrent.ConcurrentHashMap<String, PriceTick>()
+
+    /** هم‌گراسازی انتشار وضعیت به UI (حداکثر ۴ بار در ثانیه برای هر کلید). */
+    private val uiCoalescer = com.aurum.edge.core.UiUpdateCoalescer(minIntervalMs = 250L)
+
+    /** پوزیشن‌هایی که پلن‌شان یک‌بار اصلاح شده است. */
+    private val repairedPlanTradeIds = mutableSetOf<String>()
+
+    /** پوزیشن‌هایی که در بازار بسته باز مانده‌اند و باید در اولین تیک بازگشایی بسته شوند. */
+    private val carriedOverClosureIds = mutableSetOf<String>()
+
+    /** آخرین سشنی که برای هر نماد دیده‌ایم؛ برای تشخیص «بازگشایی» بدون نگاه به ساعت. */
+    private val lastClosedStateBySymbol = mutableMapOf<String, Boolean>()
+
+    /** زمان سربار آموخته‌شده برای هر نماد (کش تا از محاسبهٔ تکراری در هر تیک جلوگیری شود). */
+    private val leadMinutesCache = mutableMapOf<String, Int>()
+
+    private fun learnedLeadMinutes(symbol: String): Int = leadMinutesCache.getOrPut(symbol) {
+        runCatching { SessionExitLearningStore.leadMinutesFor(symbol) }
+            .getOrElse { 0 }
+    }
+
+    /**
+     * «بهداشت معاملات» — تصمیم‌های زمانی بازار، دقیقاً همان‌طور که کاربر خواست:
+     *
+     * ۱. **هیچ معامله‌ای به‌صرف بسته بودن بازار بسته نمی‌شود.** پوزیشن باز در بازار بسته فقط
+     *    علامت‌گذاری می‌شود و تا **بازگشایی** صبر می‌شود (نسخهٔ ۳.۹.۲۸ با قیمت کهنه می‌بست که غلط بود).
+     * ۲. **پیش از پایان سشن، در بازار زنده و با قیمت واقعی** بسته می‌شود: در فاصلهٔ
+     *    `بسته‌شدن − زمان سربار` که از `SessionExitLearning` می‌آید (پیش‌فرض سهام ۱۲ دقیقه).
+     * ۳. پوزیشنی که از سشن قبل باز مانده، در **اولین تیک معتبر پس از بازگشایی** بسته می‌شود؛
+     *    قیمت همان تیک در ژورنال ثبت و پاداش واقعی به موتور یادگیری داده می‌شود.
+     * ۴. پلن قدیمی و متورم (نمونهٔ BNB 5m با ۱R = ۵.۶۶٪) با `TradePlanGuard` اصلاح می‌شود.
+     */
+    private fun maintainTradingHygiene(now: Long) {
+        val openTrades = trades.value.filter { it.isOpen }
+        if (openTrades.isEmpty()) {
+            repairedPlanTradeIds.clear()
+            carriedOverClosureIds.clear()
+            lastClosedStateBySymbol.clear()
+            leadMinutesCache.clear()
+            return
+        }
+        for (trade in openTrades) {
+            val symbol = V1Universe.normalize(trade.symbol)
+            val lastTick = latestTicks[symbol] ?: _liveTicks.value[symbol]
+            val lastPrice = lastTick?.price?.takeIf { it.isFinite() && it > 0.0 }
+            val tickIsFresh = lastTick?.let { now - it.at < 15 * 60_000L } == true
+            val plan = SessionExitPlanner.plan(
+                symbol = symbol,
+                now = now,
+                learnedLeadMinutes = learnedLeadMinutes(symbol),
+                hasOpenPosition = true,
+                carriedOverClosure = trade.id in carriedOverClosureIds,
+            )
+
+            // قاعدهٔ ۱: بازار بسته = هرگز بستن با قیمت کهنه؛ فقط انتظار برای بازگشایی.
+            if (plan.closed) {
+                if (carriedOverClosureIds.add(trade.id)) {
+                    _toast.value = "🕒 بازار $symbol بسته است — پوزیشن #${trade.displayTradeNumber} " +
+                        "بدون دست‌کاری تا بازگشایی می‌ماند و در اولین قیمت معتبر بسته می‌شود"
+                }
+                lastClosedStateBySymbol[symbol] = true
+                continue
+            }
+
+            // قاعدهٔ ۳: بازار تازه باز شد و پوزیشن از سشن قبل باز مانده → خروج با قیمت واقعی.
+            val reopened = lastClosedStateBySymbol[symbol] == true
+            if (trade.id in carriedOverClosureIds) {
+                if (lastPrice == null || !tickIsFresh) {
+                    _toast.value = "⏳ بازار $symbol باز شد؛ منتظر اولین قیمت معتبر برای بستن پوزیشن #${trade.displayTradeNumber}"
+                    continue
+                }
+                val closed = container.journalStore.closeTradeAtPrice(
+                    tradeId = trade.id,
+                    exitPrice = lastPrice,
+                    reason = "🕒 خروج در اولین قیمت معتبر پس از بازگشایی سشن $symbol (پوزیشن از سشن قبل باز مانده بود)",
+                    now = now,
+                )
+                if (closed != null) {
+                    carriedOverClosureIds.remove(trade.id)
+                    _toast.value = String.format(
+                        Locale.US,
+                        "🕒 معاملهٔ #%d %s پس از بازگشایی بازار با قیمت واقعی %,.4f بسته شد (P/L %+.2f$)",
+                        closed.displayTradeNumber,
+                        symbol,
+                        lastPrice,
+                        closed.pnlUsd ?: 0.0,
+                    )
+                }
+                lastClosedStateBySymbol[symbol] = false
+                continue
+            }
+            if (reopened) {
+                // یادگیری: پاداش واقعی خروج پیش از سشن با قیمت بازگشایی سنجیده می‌شود.
+                SessionExitLearningStore.resolveReopen(symbol, lastPrice ?: 0.0, now)
+                    ?.let { _toast.value = it }
+                lastClosedStateBySymbol[symbol] = false
+            }
+
+            // قاعدهٔ ۲: خروج خودکار پیش از پایان سشن، در بازار زنده.
+            if (plan.shouldCloseNow && lastPrice != null && tickIsFresh) {
+                val reason = SessionExitPlanner.exitReasonFa(plan, lastPrice)
+                val closed = container.journalStore.closeTradeAtPrice(
+                    tradeId = trade.id,
+                    exitPrice = lastPrice,
+                    reason = reason,
+                    now = now,
+                )
+                if (closed != null) {
+                    SessionExitLearningStore.recordPreCloseExit(
+                        trade = closed,
+                        exitPrice = lastPrice,
+                        leadMinutes = plan.leadMinutes,
+                        now = now,
+                    )
+                    _toast.value = String.format(
+                        Locale.US,
+                        "⏱️ معاملهٔ #%d %s %d دقیقه پیش از پایان سشن بسته شد (P/L %+.2f$)",
+                        closed.displayTradeNumber,
+                        symbol,
+                        plan.leadMinutes,
+                        closed.pnlUsd ?: 0.0,
+                    )
+                }
+                continue
+            }
+
+            // قاعدهٔ ۴: اصلاح پلن قدیمی و متورم.
+            if (trade.id in repairedPlanTradeIds) continue
+            val report = _allSymbolStrategyReports.value[symbol]
+                ?.takeIf { it.triggerInterval == trade.interval }
+            val atr = report?.triggerSnapshot?.atr14 ?: 0.0
+            val review = TradePlanGuard.reviewStoredPlan(
+                symbol = symbol,
+                action = trade.action,
+                entryPrice = trade.entry,
+                stopLoss = trade.initialStopLoss ?: trade.stopLoss,
+                takeProfit = trade.takeProfit,
+                triggerInterval = trade.interval,
+                referenceAtr14 = atr,
+                strategyAtr = report?.strategySnapshot?.atr14 ?: atr,
+            )
+            if (!review.needsRepair) {
+                repairedPlanTradeIds.add(trade.id)
+                continue
+            }
+            val repaired = container.journalStore.repairOpenTradePlan(
+                tradeId = trade.id,
+                newStopLoss = review.guarded.stopLoss,
+                newTakeProfit = review.guarded.takeProfit,
+                reasonFa = "🛡️ ${review.reasonFa}",
+            )
+            if (repaired != null) {
+                repairedPlanTradeIds.add(trade.id)
+                _toast.value = "🛡️ پلن معاملهٔ #${repaired.displayTradeNumber} $symbol (${trade.interval.label}) اصلاح شد — ${review.reasonFa}"
+            }
+        }
+    }
+
     private fun startLiveMonitor() {
         if (liveMonitorJob?.isActive == true) return
         liveMonitorJob = container.appScope.launch {
             while (isActive) {
                 val now = System.currentTimeMillis()
+                // بهداشت پوزیشن‌ها: بستن پوزیشن بازارِ بسته + اصلاح پلن‌های متورم قدیمی
+                runCatching { maintainTradingHygiene(now) }
                 val openSymbolSet = trades.value
                     .filter { it.isOpen }
                     .map { V1Universe.normalize(it.symbol) }
@@ -301,7 +546,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     )
                 }
 
-                delay(4_000L)
+                // «سبک‌سازی»: وقتی پوزیشن بازی نیست و معاملهٔ خودکار هم خاموش است، حلقهٔ پایش
+                // با فاصلهٔ بیشتری اجرا می‌شود تا پردازنده/باتری و رشتهٔ اصلی آزاد بمانند.
+                val idleLight = openSymbolSet.isEmpty() && !settings.value.autoPaperTrading
+                delay(if (idleLight) 12_000L else 4_000L)
             }
         }
     }
@@ -314,7 +562,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         hoursOverride: Int? = null,
         notifyOnSuccess: Boolean = true,
     ) {
-        viewModelScope.launch {
+        // بازیابی کندل‌های جامانده، بازپخش ژورنال و نوشتن JSON است؛ اجرای آن روی رشتهٔ اصلی
+        // باعث توقف رابط کاربری (ANR) می‌شد.
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             _isBackfilling.value = true
             try {
                 val openSymbols = trades.value.filter { it.isOpen }.map { V1Universe.normalize(it.symbol) }
@@ -403,14 +653,20 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private fun applyIncomingTick(symbolInput: String, tick: PriceTick) {
         val symbol = V1Universe.normalize(symbolInput)
-        _liveTicks.value = _liveTicks.value + (symbol to tick)
+        latestTicks[symbol] = tick
+        val coalesceAt = if (tick.at > 0L) tick.at else System.currentTimeMillis()
+        if (uiCoalescer.shouldPublish("tick:$symbol", coalesceAt)) {
+            _liveTicks.value = _liveTicks.value + (symbol to tick)
+        }
 
         // Update display marks for open trades of this symbol
-        var marks = _lastDisplayMarks.value
-        trades.value.filter { it.isOpen && V1Universe.normalize(it.symbol) == symbol }.forEach { trade ->
-            marks = OpenPositionDisplay.record(marks, trade, tick, tick.at)
+        if (uiCoalescer.shouldPublish("marks:$symbol", coalesceAt)) {
+            var marks = _lastDisplayMarks.value
+            trades.value.filter { it.isOpen && V1Universe.normalize(it.symbol) == symbol }.forEach { trade ->
+                marks = OpenPositionDisplay.record(marks, trade, tick, tick.at)
+            }
+            _lastDisplayMarks.value = marks
         }
-        _lastDisplayMarks.value = marks
 
         // Automatically evaluate TP / SL hits and close triggered trades
         val autoClosed = container.journalStore.onLiveTick(symbol, tick)
@@ -431,7 +687,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val armedCandidates = dualReport?.sniperArmedReports
             ?.sortedByDescending { it.coreTrendScore }
             ?: listOfNotNull(_allSymbolStrategyReports.value[symbol]).filter { it.isActionable || it.isSniperArmedPendingRetest }
-        if (cfg.autoPaperTrading && !com.aurum.edge.core.MarketHours.closedFor(symbol, tick.at)) {
+        if (cfg.autoPaperTrading && !SessionExitPlanner.plan(symbol, tick.at, learnedLeadMinutes(symbol)).shouldBlockEntry) {
             for (armedReport in armedCandidates.filter { it.isPriceInSniperWindow(tick.price) }) {
                 val openAll = trades.value.filter { it.isOpen }
                 val hasOpenSameStrategyTf = openAll.any {
@@ -447,23 +703,35 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     val sl = armedReport.suggestedStopLoss
                     val rawTp = armedReport.primaryTakeProfit
                     if (sl != null && rawTp != null) {
-                        val enforcedTp = RiskAndCalendarEngine.enforceMinimumRiskReward(
-                            symbolInput = symbol,
-                            entryPrice = tick.price,
-                            stopLoss = sl,
-                            takeProfit = rawTp,
+                        // لنگر انداختن پلن گزارش روی قیمت لحظه‌ای + کهنگی‌سنجی + دالان نوسان تایم‌فریم
+                        val guarded = TradePlanGuard.rebaseToLive(
+                            symbol = symbol,
                             action = armedReport.action,
-                            minRiskReward = RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD,
+                            liveEntryPrice = tick.price,
+                            planAnchorEntry = armedReport.suggestedEntry ?: armedReport.livePrice,
+                            planStopLoss = sl,
+                            planTakeProfit = rawTp,
+                            referenceAtr = armedReport.triggerSnapshot?.atr14 ?: 0.0,
+                            triggerInterval = armedReport.triggerInterval,
+                            strategyAtr = armedReport.strategySnapshot?.atr14 ?: 0.0,
+                            desiredRiskReward = (armedReport.optimalRiskReward ?: RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
+                                .coerceAtLeast(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD),
                         )
+                        if (!guarded.isUsable) {
+                            lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
+                            continue
+                        }
                         val calc = RiskAndCalendarEngine.calculatePosition(
                             symbolInput = symbol,
                             accountBalance = cfg.accountBalance,
                             riskPercent = cfg.riskPercent,
                             entry = tick.price,
-                            stopLoss = sl,
-                            takeProfit = enforcedTp,
+                            stopLoss = guarded.stopLoss,
+                            takeProfit = guarded.takeProfit,
                             preferredAction = armedReport.action,
                             fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                            triggerInterval = armedReport.triggerInterval,
+                            referenceAtr14 = armedReport.triggerSnapshot?.atr14 ?: 0.0,
                         )
                         if (calc != null && calc.riskReward >= RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD) {
                             lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
@@ -490,7 +758,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _activeRiskSymbol.value = normalized
         refreshSymbolLivePrice(normalized)
         if (_backfillSummaries.value[normalized] == null) {
-            viewModelScope.launch {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
                 backfillSingleSymbolInternal(normalized, hoursOverride = 6)
             }
         }
@@ -498,7 +766,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshSymbolLivePrice(symbolInput: String = _activeRiskSymbol.value, onLoaded: ((PriceTick?) -> Unit)? = null) {
         val normalized = V1Universe.normalize(symbolInput)
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val tick = LiveQuoteFetcher.fetchLiveTick(normalized)
             if (tick != null) {
                 applyIncomingTick(normalized, tick)
@@ -746,13 +1014,32 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
+        // ورود روی نمادی که بازارش بسته است ممنوع می‌شود: قیمت‌ها کهنه‌اند و گپ بازگشایی سشن
+        // می‌تواند حد ضرر را بدون امکان خروج رد کند (گزارش کاربر: معاملهٔ DOW در بازار بسته).
+        // ورود در بازار بسته و همچنین در «پنجرهٔ خروج پیش از سشن» ممنوع است: معامله‌ای که تا پایان
+        // سشن فرصت کارکردن ندارد، فقط ریسک گپ شبانه می‌خرد. پنجره با زمان سربارِ آموخته‌شده تعیین می‌شود.
+        val sessionPlan = SessionExitPlanner.plan(
+            symbol = normSym,
+            now = now,
+            learnedLeadMinutes = learnedLeadMinutes(normSym),
+            hasOpenPosition = false,
+        )
+        if (sessionPlan.shouldBlockEntry) {
+            _toast.value = "⛔ ورود به ${calc.symbol} در این لحظه مجاز نیست — " + sessionPlan.badgeFa +
+                " · معامله باز نشد"
+            return
+        }
+        val sessionWarningFa = if ((sessionPlan.minutesToExit ?: Long.MAX_VALUE) <= 45L) {
+            "⏳ " + sessionPlan.badgeFa
+        } else ""
+        val effectiveNote = if (sessionWarningFa.isBlank()) note else "$note · $sessionWarningFa".trim(' ', '·')
         val matchedReport = _dualSymbolStrategyReports.value[normSym]
             ?.reportFor(entryInterval, strategyId)
         val matchedBreakdown = matchedReport?.rrBreakdown
         val entryCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
         val openedRaw = container.journalStore.openTrade(
             calc = calc,
-            note = note,
+            note = effectiveNote,
             now = now,
             entryInterval = entryInterval,
             strategyId = strategyId,
@@ -768,17 +1055,43 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 detail = c.detailFa,
             )
         }.orEmpty()
-        val trade = if (condRecords.isNotEmpty()) {
-            val enriched = openedRaw.copy(entryConditions = condRecords)
+        // شمارش نئوویو همان لحظهٔ ورود روی معامله ثبت می‌شود تا هوش عصبی بعداً با نتیجهٔ واقعی
+        // همین معامله، آستانه‌ها و وزن قواعد را یاد بگیرد (بدون دادهٔ ساختگی).
+        val neoWaveTag = matchedReport?.let { rep ->
+            NeoWaveTradeTag(
+                patternId = rep.neoWavePatternId,
+                rulesPassed = rep.neoWaveRulesPassed,
+                rulesTotal = rep.neoWaveRulesTotal,
+                confidencePct = rep.neoWaveConfidencePct,
+                failedRuleIds = rep.neoWaveFailedRuleIds,
+                entryPathTag = if (rep.cryptoNeoWaveEntry) "CRYPTO_NW" else "CLASSIC",
+            )
+        }
+        val taggedRaw = if (neoWaveTag != null && neoWaveTag.rulesTotal > 0) {
+            openedRaw.copy(
+                neoWavePatternId = neoWaveTag.patternId,
+                neoWaveRulesPassed = neoWaveTag.rulesPassed,
+                neoWaveRulesTotal = neoWaveTag.rulesTotal,
+                neoWaveConfidencePct = neoWaveTag.confidencePct,
+                neoWaveFailedRuleIds = neoWaveTag.failedRuleIds,
+                neoWaveEntryPathTag = neoWaveTag.entryPathTag,
+            )
+        } else {
+            openedRaw
+        }
+        val trade = if (condRecords.isNotEmpty() || taggedRaw != openedRaw) {
+            val enriched = taggedRaw.copy(
+                entryConditions = if (condRecords.isNotEmpty()) condRecords else taggedRaw.entryConditions,
+            )
             container.journalStore.addTrade(enriched)
             enriched
         } else {
-            openedRaw
+            taggedRaw
         }
         _liveTicks.value[trade.symbol]?.let { tick ->
             _lastDisplayMarks.value = OpenPositionDisplay.record(_lastDisplayMarks.value, trade, tick, now)
         }
-        // ثبت فوری اسکرین‌شات ایچیموکو (کندل + کومو + آینده ۲۶ کندلی + باکس SL/TP + شروط ۱۶گانه) در آرشیو اپ و حافظه گوشی
+        // رندر و ثبت تصویر در فضای خصوصی آرشیو اپ، روی Dispatchers.IO تا رشتهٔ اصلی آزاد بماند.
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val cachedCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
             com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
@@ -792,6 +1105,87 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         syncBackgroundServiceState()
         val msg = "⚡ معامله ${trade.symbol} [تایم ${trade.interval.label}] · [${trade.strategyTitleFa}] (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · ${trade.preEntry3CandleCategoryFa}"
         _toast.value = msg
+    }
+
+    /** شمارش نئوویوی لحظهٔ ورود، برای ثبت روی معامله و آموزش هوش عصبی. */
+    private data class NeoWaveTradeTag(
+        val patternId: String,
+        val rulesPassed: Int,
+        val rulesTotal: Int,
+        val confidencePct: Double,
+        val failedRuleIds: List<Int>,
+        val entryPathTag: String,
+    )
+
+    /**
+     * به‌روزرسانی تنظیمات نئوویو توسط «هوش عصبی».
+     *
+     * از معاملات بسته‌شده‌ای که در لحظهٔ ورودشان شمارش نئوویو داشته‌اند، آستانهٔ قواعد/اطمینان و
+     * وزن قواعد آموخته می‌شود. اگر نمونه کافی نباشد، هیچ تغییری اعمال نمی‌شود.
+     */
+    private fun refreshNeoWaveNeuralTuning(closedTrades: List<com.aurum.edge.core.PaperTrade>) {
+        val cfg = settings.value.baseStrategyConfig
+        if (!cfg.neoWaveAutoTuneEnabled) return
+        val samples = closedTrades.mapNotNull { t ->
+            if (t.closedAt == null || t.neoWaveRulesTotal <= 0) return@mapNotNull null
+            val pnl = t.pnlUsd ?: return@mapNotNull null
+            val riskUsd = t.fixedRiskUsd.takeIf { it > 0.0 }
+                ?: (kotlin.math.abs(t.entry - (t.initialStopLoss ?: t.stopLoss)) * t.positionOz)
+            val achievedR = if (riskUsd > 0.0) {
+                pnl / riskUsd
+            } else if (pnl > 0.0) {
+                1.0
+            } else {
+                -1.0
+            }
+            com.aurum.edge.core.NeoWaveNeuralAdvisor.Sample(
+                patternId = t.neoWavePatternId,
+                rulesPassed = t.neoWaveRulesPassed,
+                rulesTotal = t.neoWaveRulesTotal,
+                confidencePct = t.neoWaveConfidencePct,
+                failedRuleIndexes = t.neoWaveFailedRuleIds,
+                won = pnl > 0.0,
+                achievedR = achievedR,
+            )
+        }
+        // قفل ضد حلقهٔ بی‌پایان: اگر تعداد نمونه و مبنای تصمیم عوض نشده، دوباره نمی‌نویسیم.
+        if (samples.size == cfg.neoWaveAutoSamples && cfg.neoWaveAutoBasisFa.isNotBlank()) return
+        val tuning = com.aurum.edge.core.NeoWaveNeuralAdvisor.advise(
+            samples = samples,
+            fallbackRules = cfg.neoWaveMinRulesPassed,
+            fallbackConfidence = cfg.neoWaveMinConfidencePct,
+        )
+        val weights = (1..12).map { index -> tuning.ruleWeights[index] ?: 1.0 }
+        val next = cfg.copy(
+            neoWaveAutoRules = if (tuning.isActive) tuning.rulesThreshold else cfg.neoWaveAutoRules,
+            neoWaveAutoConfidencePct = if (tuning.isActive) {
+                tuning.confidenceThresholdPct
+            } else {
+                cfg.neoWaveAutoConfidencePct
+            },
+            neoWaveAutoSamples = tuning.samples,
+            neoWaveAutoBasisFa = tuning.basisFa,
+            neoWaveAutoUpdatedAt = if (tuning.isActive) System.currentTimeMillis() else cfg.neoWaveAutoUpdatedAt,
+            neoWaveAutoRuleWeights = if (tuning.isActive) weights else cfg.neoWaveAutoRuleWeights,
+        )
+        if (next != cfg) updateBaseStrategyConfig(next)
+    }
+
+    /** اجرای دستیِ «مشورت با هوش عصبی» از دکمهٔ پنل نئوویو. */
+    fun retrainNeoWaveNeuralTuningNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val closed = trades.value.filter { !it.isOpen }
+            // قفل موقت را باز می‌کنیم تا حتی با نمونهٔ ثابت هم محاسبهٔ دوباره انجام شود.
+            val cfg = settings.value.baseStrategyConfig
+            updateBaseStrategyConfig(cfg.copy(neoWaveAutoBasisFa = ""))
+            refreshNeoWaveNeuralTuning(closed)
+            val after = settings.value.baseStrategyConfig
+            _toast.value = if (after.neoWaveAutoBasisFa.isNotBlank()) {
+                "🤖 " + after.neoWaveAutoBasisFa
+            } else {
+                "🤖 داده‌ای برای آموزش تنظیمات نئوویو موجود نیست."
+            }
+        }
     }
 
     fun triggerManualDailyBackupNow() {
@@ -830,7 +1224,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             val activeRec = closeRec ?: openRec
             if (activeRec != null) {
                 val kb = (activeRec.imageSizeBytes / 1024L).coerceAtLeast(1L)
-                _toast.value = "📸 تصویر چارت معامله #${trade.displayTradeNumber} (${trade.symbol} · ${kb}KB WebP) در آرشیو و حافظه گوشی ذخیره شد"
+                _toast.value = "🔒 تصویر چارت معامله #${trade.displayTradeNumber} (${trade.symbol} · ${kb}KB WebP) در آرشیو خصوصی اپ ثبت شد و از داخل Aurum Edge باز می‌شود"
             }
         }
     }
@@ -911,6 +1305,208 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _toast.value = "معامله از ژورنال حذف شد"
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // بکاپ اسکرین‌شات‌های آرشیو (تب آپدیت)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private val _screenshotBackup = MutableStateFlow(ScreenshotBackupUiState())
+    val screenshotBackup: StateFlow<ScreenshotBackupUiState> = _screenshotBackup.asStateFlow()
+
+    /**
+     * تازه‌سازی تعداد/حجم تصاویر آرشیو برای نمایش در تب آپدیت.
+     *
+     * این کار فهرست فایل‌های آرشیو را از دیسک می‌خواند؛ اجرای آن روی رشتهٔ اصلی می‌توانست
+     * در گوشی‌های پر از تصویر باعث لگ یا بسته شدن اپ شود، پس همیشه روی IO اجرا می‌شود.
+     */
+    fun refreshScreenshotBackupStats() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val basket = runCatching {
+                com.aurum.edge.data.TradeSnapshotArchiveManager.archiveBasket(container.appContext)
+            }.getOrElse { err ->
+                com.aurum.edge.core.CrashReporter.recordNonFatal(container.appContext, "archiveBasket", err)
+                com.aurum.edge.data.ArchivedSnapshotBasket()
+            }
+            _screenshotBackup.value = _screenshotBackup.value.copy(
+                imageCount = basket.imageCount,
+                imageBytes = basket.imageBytes,
+                recordCount = basket.recordCount,
+            )
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // عیب‌یابی: گزارش کرش‌های ثبت‌شده داخل اپ
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private val _crashReports = MutableStateFlow<List<com.aurum.edge.core.CrashReporter.CrashEntry>>(emptyList())
+    val crashReports: StateFlow<List<com.aurum.edge.core.CrashReporter.CrashEntry>> = _crashReports.asStateFlow()
+
+    /** خواندن فهرست گزارش‌های کرش از حافظهٔ اپ (روی IO). */
+    fun refreshCrashReports() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val entries = runCatching {
+                com.aurum.edge.core.CrashReporter.list(container.appContext)
+            }.getOrDefault(emptyList())
+            _crashReports.value = entries
+        }
+    }
+
+    /** کپی متن کامل جدیدترین گزارش کرش در کلیپ‌بورد (با پیام فارسی). */
+    fun copyLatestCrashReport() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val latest = runCatching {
+                com.aurum.edge.core.CrashReporter.latest(container.appContext)
+            }.getOrNull()
+            if (latest == null) {
+                _toast.value = "⚠️ هیچ گزارش کرشی ثبت نشده است"
+                return@launch
+            }
+            val text = com.aurum.edge.core.CrashReporter.readFull(container.appContext, latest)
+            if (text.isBlank()) {
+                _toast.value = "⚠️ فایل گزارش خالی بود"
+                return@launch
+            }
+            copyTextToClipboard(
+                labelFa = "گزارش کرش",
+                text = text,
+                successToastFa = "📋 گزارش کرش کپی شد — برای بررسی بفرستید",
+            )
+        }
+    }
+
+    /** پاک کردن گزارش‌های کرش. */
+    fun clearCrashReports() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val removed = runCatching {
+                com.aurum.edge.core.CrashReporter.clear(container.appContext)
+            }.getOrDefault(0)
+            _crashReports.value = emptyList()
+            _toast.value = if (removed > 0) "🗑️ $removed گزارش کرش پاک شد" else "ℹ️ گزارشی برای پاک کردن نبود"
+        }
+    }
+
+    /** ساخت ZIP از تصاویر آرشیو و ذخیرهٔ آن در پوشهٔ دانلود گوشی. */
+    fun saveScreenshotBackupToDownloads() {
+        _toast.value = "⏳ در حال ساخت بکاپ تصاویر…"
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val bundle = com.aurum.edge.data.TradeSnapshotArchiveManager
+                .buildSnapshotZipBundle(container.appContext)
+            val zip = bundle.zipFile
+            if (zip == null) {
+                _toast.value = "⚠️ " + (bundle.errorFa ?: "ساخت بکاپ تصاویر ناموفق بود")
+                return@launch
+            }
+            val saved = com.aurum.edge.data.TradeSnapshotArchiveManager
+                .saveSnapshotZipToDownloads(container.appContext, zip)
+            _screenshotBackup.value = _screenshotBackup.value.copy(
+                lastZipName = bundle.fileName,
+                lastZipBytes = bundle.zipBytes,
+            )
+            refreshScreenshotBackupStats()
+            _toast.value = saved.fold(
+                onSuccess = { path ->
+                    "💾 بکاپ " + bundle.imageCount + " تصویر (" + humanKbFa(bundle.zipBytes) + ") در " + path + " ذخیره شد"
+                },
+                onFailure = { err ->
+                    "⚠️ ذخیره در پوشهٔ دانلود نشد: " + (err.message ?: "خطای نامشخص")
+                },
+            )
+        }
+    }
+
+    /** ذخیرهٔ نسخهٔ ZIP در مقصدی که کاربر با پنجرهٔ رسمی Android انتخاب می‌کند (از جمله Drive). */
+    fun saveScreenshotBackupToUri(uri: android.net.Uri?, stampMs: Long) {
+        if (uri == null) return
+        _toast.value = "⏳ در حال ساخت بکاپ برای مقصد انتخاب‌شده…"
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val actualStampMs = stampMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+            val bundle = com.aurum.edge.data.TradeSnapshotArchiveManager
+                .buildSnapshotZipBundle(container.appContext, actualStampMs)
+            val zip = bundle.zipFile
+            if (zip == null) {
+                runCatching { container.appContext.contentResolver.delete(uri, null, null) }
+                _toast.value = "⚠️ " + (bundle.errorFa ?: "ساخت بکاپ تصاویر ناموفق بود")
+                return@launch
+            }
+            var destinationWritten = false
+            try {
+                val output = container.appContext.contentResolver.openOutputStream(uri, "wt")
+                    ?: error("باز کردن مقصد انتخاب‌شده ممکن نشد")
+                output.use { stream ->
+                    zip.inputStream().buffered().use { input -> input.copyTo(stream) }
+                }
+                destinationWritten = true
+                _screenshotBackup.value = _screenshotBackup.value.copy(
+                    lastZipName = bundle.fileName,
+                    lastZipBytes = bundle.zipBytes,
+                )
+                refreshScreenshotBackupStats()
+                _toast.value = "✅ بکاپ " + bundle.imageCount + " تصویر ذخیره شد؛ اصل آرشیو خصوصی داخل اپ باقی ماند"
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                if (!destinationWritten) runCatching { container.appContext.contentResolver.delete(uri, null, null) }
+                throw cancelled
+            } catch (err: Exception) {
+                if (!destinationWritten) runCatching { container.appContext.contentResolver.delete(uri, null, null) }
+                _toast.value = "⚠️ ذخیره در مقصد انتخاب‌شده ناموفق بود: " + (err.message ?: "خطای نامشخص")
+            } finally {
+                runCatching { zip.delete() }
+            }
+        }
+    }
+
+    /** ارسال ZIP تصاویر آرشیو با Share Sheet اندروید (تلگرام/واتساپ/ایمیل/درایو). */
+    fun shareScreenshotBackup() {
+        _toast.value = "⏳ در حال ساخت بکاپ تصاویر…"
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val bundle = com.aurum.edge.data.TradeSnapshotArchiveManager
+                .buildSnapshotZipBundle(container.appContext)
+            val zip = bundle.zipFile
+            if (zip == null) {
+                _toast.value = "⚠️ " + (bundle.errorFa ?: "ساخت بکاپ تصاویر ناموفق بود")
+                return@launch
+            }
+            _screenshotBackup.value = _screenshotBackup.value.copy(
+                lastZipName = bundle.fileName,
+                lastZipBytes = bundle.zipBytes,
+            )
+            val shared = com.aurum.edge.data.TradeSnapshotArchiveManager
+                .shareSnapshotZip(container.appContext, zip)
+            _toast.value = shared.fold(
+                onSuccess = { "📤 پنجرهٔ ارسال باز شد — " + bundle.imageCount + " تصویر (" + humanKbFa(bundle.zipBytes) + ")" },
+                onFailure = { err -> "⚠️ ارسال ممکن نشد: " + (err.message ?: "خطای نامشخص") },
+            )
+            refreshScreenshotBackupStats()
+        }
+    }
+
+    /** بازگردانی تصاویر و فهرست از یک فایل ZIP انتخابی کاربر. */
+    fun restoreScreenshotBackupFromZip(uri: android.net.Uri?) {
+        if (uri == null) return
+        _toast.value = "⏳ در حال بازخوانی فایل بکاپ…"
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val count = runCatching {
+                com.aurum.edge.data.TradeSnapshotArchiveManager
+                    .importSnapshotZip(container.appContext, uri)
+            }.getOrElse { err ->
+                _toast.value = "⚠️ بازخوانی فایل ZIP ناموفق بود: " + (err.message ?: "خطای نامشخص")
+                return@launch
+            }
+            _toast.value = if (count > 0) {
+                "✅ " + count + " تصویر از فایل بکاپ بازگردانی شد"
+            } else {
+                "⚠️ در این فایل تصویری پیدا نشد"
+            }
+            refreshScreenshotBackupStats()
+        }
+    }
+
+    /** اندازهٔ خوانا برای گزارش‌های فارسی (کیلوبایت/مگابایت). */
+    private fun humanKbFa(bytes: Long): String = when {
+        bytes >= 1_048_576L -> String.format(Locale.US, "%.1f", bytes / 1_048_576.0) + " مگابایت"
+        bytes >= 1_024L -> String.format(Locale.US, "%.0f", bytes / 1_024.0) + " کیلوبایت"
+        else -> bytes.toString() + " بایت"
+    }
+
     fun clearAllJournalTrades() {
         container.journalStore.clear()
         _toast.value = "تمام سوابق ژورنال پاک شد"
@@ -982,6 +1578,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      * استراتژی قبلی بلافاصله غیرفعال می‌شود.
      */
     fun activateSingleBitcoinStrategy(strategyId: String, enableExecution: Boolean = true) {
+        if (strategyId in BitcoinStrategyModel.temporarilyDisabledIds) {
+            _toast.value = "⏸ استراتژی پیمان (الیوت–نئوویو) موقتاً غیرفعال است و فعلاً قابل فعال‌سازی نیست"
+            return
+        }
         container.settingsStore.update {
             val nextEnabled = it.enabledStrategyIds + strategyId
             it.copy(
@@ -1001,7 +1601,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setRunAllStrategiesSimultaneously(enabled: Boolean) {
         container.settingsStore.update { current ->
-            val allIds = (BitcoinStrategyModel.entries.map { it.id } + current.customStrategies.map { it.id }).toSet()
+            val allIds = (BitcoinStrategyModel.activeStrategyIds + current.customStrategies.map { it.id }).toSet()
             current.copy(
                 runAllStrategiesSimultaneously = enabled,
                 enabledStrategyIds = if (enabled && current.enabledStrategyIds.isEmpty()) allIds else current.enabledStrategyIds,
@@ -1016,6 +1616,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun toggleStrategyEnabledInMultiMode(strategyId: String, enabled: Boolean) {
+        if (strategyId in BitcoinStrategyModel.temporarilyDisabledIds) {
+            _toast.value = "⏸ استراتژی پیمان (الیوت–نئوویو) موقتاً غیرفعال است و فعلاً قابل فعال‌سازی نیست"
+            return
+        }
         container.settingsStore.update { current ->
             val updated = if (enabled) {
                 current.enabledStrategyIds + strategyId
@@ -1142,7 +1746,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun scanAndEvaluateBitcoinStrategyNow(userInitiated: Boolean = true) {
-        viewModelScope.launch {
+        // اسکن ۱۵ نماد، محاسبهٔ سنگین موتور است؛ روی رشتهٔ اصلی اجرا نمی‌شود (جلوگیری از ANR).
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             evaluateAll15SymbolsStrategyInternal(
                 userInitiated = userInitiated,
                 fullSweep = true,
@@ -1228,8 +1833,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val updatedMap = _allSymbolStrategyReports.value.toMutableMap()
         updatedMap[symbol] = dualReport.primaryReport
         _allSymbolStrategyReports.value = updatedMap
-        runCatching {
-            container.neuralEngine.updateLiveMarketCausalAttribution(dualReport.primaryReport)
+        // «درک زندهٔ بازار» فقط برای بیت‌کوین ساخته می‌شود.
+        if (V1Universe.normalize(symbol) == NeuralSelfLearningEngine.LIVE_ATTRIBUTION_SYMBOL) {
+            runCatching {
+                container.neuralEngine.updateLiveMarketCausalAttribution(dualReport.primaryReport)
+            }
         }
         return dualReport
     }
@@ -1366,43 +1974,45 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         val rawSl = report.suggestedStopLoss
                         val rawTp = report.primaryTakeProfit
                         if (rawEntry != null && rawSl != null && rawTp != null) {
-                            // لنگر انداختن نقطهٔ ورود، حد ضرر و حد سود به قیمت لحظه‌ای اجرا (جلوگیری از استاپ فوری در ارزهای کریپتو)
+                            // لنگر انداختن نقطهٔ ورود، حد ضرر و حد سود به قیمت لحظه‌ای اجرا + دالان نوسان تایم‌فریم
                             val liveTickPrice = _liveTicks.value[symbol]?.price?.takeIf { it.isFinite() && it > 0.0 }
                             val executionEntry = liveTickPrice
                                 ?: report.livePrice?.takeIf { it.isFinite() && it > 0.0 }
                                 ?: rawEntry
-                            val entryDelta = executionEntry - rawEntry
-                            val shiftedSl = rawSl + entryDelta
-                            val shiftedTp = rawTp + entryDelta
                             val desiredRr = (report.optimalRiskReward ?: RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
                                 .coerceAtLeast(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
-                            val (safeSl, safeTp) = RiskAndCalendarEngine.sanitizeEntryStopAndTarget(
-                                symbolInput = symbol,
+                            val guarded = TradePlanGuard.rebaseToLive(
+                                symbol = symbol,
                                 action = report.action,
                                 liveEntryPrice = executionEntry,
-                                candidateStopLoss = shiftedSl,
-                                candidateTakeProfit = shiftedTp,
-                                desiredRiskReward = desiredRr,
-                                trigAtr14 = report.triggerSnapshot?.atr14 ?: 0.0,
+                                planAnchorEntry = rawEntry,
+                                planStopLoss = rawSl,
+                                planTakeProfit = rawTp,
+                                referenceAtr = report.triggerSnapshot?.atr14 ?: 0.0,
                                 triggerInterval = report.triggerInterval,
+                                strategyAtr = report.strategySnapshot?.atr14 ?: 0.0,
+                                desiredRiskReward = desiredRr,
                             )
-                            val enforcedTp = RiskAndCalendarEngine.enforceMinimumRiskReward(
-                                symbolInput = symbol,
-                                entryPrice = executionEntry,
-                                stopLoss = safeSl,
-                                takeProfit = safeTp,
-                                action = report.action,
-                                minRiskReward = desiredRr,
-                            )
+                            if (!guarded.isUsable) {
+                                // پلن کهنه/غیرمعتبر است: با اعداد قدیمی معامله باز نمی‌شود و پیام تکراری هم ساخته نمی‌شود
+                                val rejectKey = "$fireKey|${report.triggerBarTime}"
+                                if (rejectedPlanKeys.add(rejectKey)) {
+                                    _toast.value = "🛡️ ورود ${report.symbol} (${report.triggerInterval.label}) انجام نشد: " +
+                                        (guarded.reasonsFa.firstOrNull() ?: "پلن نامعتبر")
+                                }
+                                continue
+                            }
                             val calc = RiskAndCalendarEngine.calculatePosition(
                                 symbolInput = symbol,
                                 accountBalance = cfg.accountBalance,
                                 riskPercent = cfg.riskPercent,
                                 entry = executionEntry,
-                                stopLoss = safeSl,
-                                takeProfit = enforcedTp,
+                                stopLoss = guarded.stopLoss,
+                                takeProfit = guarded.takeProfit,
                                 preferredAction = report.action,
                                 fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                                triggerInterval = report.triggerInterval,
+                                referenceAtr14 = report.triggerSnapshot?.atr14 ?: 0.0,
                             )
                             if (calc != null && calc.riskReward >= RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD) {
                                 lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
@@ -1552,17 +2162,61 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun evaluateReportWithNeuralEngine(report: StrategyEvaluationReport): NeuralSignalEvaluation =
         container.neuralEngine.evaluateReport(report)
 
-    fun setNeuralForceActiveBeforeWarmup(enabled: Boolean) {
-        container.neuralEngine.setForceActiveBeforeWarmup(enabled)
-        _toast.value = if (enabled) {
-            "🧠 فیلتر شبکه عصبی خودآموز پیش از ۱۰,۰۰۰ معامله نیز فعال شد"
-        } else {
-            "🧠 شبکه عصبی تا تکمیل ۱۰,۰۰۰ معامله در حالت یادگیری خالص (بدون بلاک) قرار گرفت"
+    /**
+     * شرط دوم فعال‌سازی گیت شبکهٔ عصبی: تصمیم صریح کاربر.
+     * شرط اول همیشه «۱۰,۰۰۰ معاملهٔ یادگیری‌شده» است و با این کلید دور زده نمی‌شود.
+     */
+    fun setNeuralGateUserActivation(enabled: Boolean) {
+        container.neuralEngine.setGateUserActivation(enabled)
+        val st = container.neuralEngine.state.value
+        _toast.value = when {
+            st.isGateActive ->
+                "🧠🟢 گیت شبکه عصبی فعال شد (هر دو شرط کامل): ورود در شرایط پرخطر مسدود می‌شود"
+            enabled ->
+                "🧠 شرط ۲ ثبت شد · گیت پس از رسیدن به ${st.warmupTargetTrades} معاملهٔ یادگیری‌شده " +
+                    "خودکار وارد مدار می‌شود (اکنون ${st.totalLearnedTrades}/${st.warmupTargetTrades})"
+            else ->
+                "🧠 گیت شبکه عصبی غیرفعال شد؛ شبکه فقط یاد می‌گیرد و هشدار می‌دهد"
+        }
+    }
+
+    fun setNeuralForceActiveBeforeWarmup(enabled: Boolean) = setNeuralGateUserActivation(enabled)
+
+    /** بازبینی دستی دفتر یادگیری و تطبیق عدد یادگیری با معامله‌های واقعی ژورنال. */
+    fun auditNeuralLearningLedgerNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val reconciliation = container.neuralEngine.auditLearningLedger(trades.value)
+            _toast.value = reconciliation.summaryFa
+        }
+    }
+
+    /** ذخیرهٔ بستهٔ دانش شبکه (JSON) + منیفست فارسی در Download/AurumEdge/Archive. */
+    fun exportNeuralKnowledgeBundleNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val files = container.neuralEngine.exportKnowledgeBundleToPhoneStorage(
+                context = container.appContext,
+                appVersionName = com.aurum.edge.BuildConfig.VERSION_NAME,
+                appVersionCode = com.aurum.edge.BuildConfig.VERSION_CODE,
+            )
+            _toast.value = if (files != null) {
+                "🧾 بستهٔ دانش ذخیره شد: $files (پوشهٔ Download/AurumEdge/Archive)"
+            } else {
+                "🧾 بستهٔ دانش در حافظهٔ داخلی اپ آماده شد؛ برای ذخیره در پوشهٔ دانلود دسترسی لازم است"
+            }
+        }
+    }
+
+    /** بازخوانی جدیدترین بستهٔ دانش از Download/AurumEdge/Archive با ادغام ایمن. */
+    fun restoreNeuralKnowledgeBundleFromPhoneNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val result = container.neuralEngine.restoreKnowledgeBundleFromPhoneStorage(container.appContext)
+            _toast.value = result?.summaryFa
+                ?: "📥 هیچ بستهٔ دانش (AurumNeuralKnowledge) در Download/AurumEdge/Archive پیدا نشد"
         }
     }
 
     fun runNeuralParameterAutoTuningNow() {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val baseCfg = settings.value.baseStrategyConfig
             val tuned = container.neuralEngine.runPostTrainingParameterAutoTuning(baseCfg)
             val updatedCfg = container.neuralEngine.applyAutoTunedParametersToConfig(baseCfg)
@@ -1574,8 +2228,42 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** متن وضعیت «آموزش روی همهٔ ۱۶ استراتژی» (یادگیری انتقالی). */
+    private val _allStrategyLearningFa = MutableStateFlow("")
+    val allStrategyLearningFa: StateFlow<String> = _allStrategyLearningFa.asStateFlow()
+
+    /**
+     * آموزش یک‌جای شبکهٔ عصبی روی **همهٔ ۱۶ استراتژی و همهٔ نمادها**.
+     *
+     * هر استراتژی پروفایل ۱۶ ویژگی و پارامترهای خودش را از دادهٔ اختصاصی‌اش می‌گیرد و در صورت
+     * کمبود داده، از تجربهٔ بقیهٔ استراتژی‌ها (یادگیری انتقالی) پر می‌شود. هم‌زمان «شخصیت» هر
+     * نماد (روندسواری، نویز شدوی، اعتبار شکست، بهترین استراتژی و حد ضرر مناسبش) ساخته می‌شود و
+     * در پیکربندی موتور اعمال می‌گردد.
+     */
+    fun trainNeuralOnAllStrategies() {
+        _toast.value = "🧠 آموزش روی همهٔ استراتژی‌ها و نمادها شروع شد…"
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val baseCfg = settings.value.baseStrategyConfig
+            val report = runCatching {
+                container.neuralEngine.learnAllStrategiesNow(baseCfg)
+            }.getOrNull()
+            // پیکربندی موتور با شخصیت آموخته‌شدهٔ نمادها به‌روز می‌شود تا تصمیم‌های بعدی
+            // از همین حالا بر پایهٔ آموخته‌های جدید گرفته شوند.
+            val updatedCfg = runCatching {
+                container.neuralEngine.applyAutoTunedParametersToConfig(baseCfg)
+            }.getOrNull()
+            if (updatedCfg != null) {
+                container.settingsStore.update { cur -> cur.copy(baseStrategyConfig = updatedCfg) }
+            }
+            val text = report?.summaryFa ?: "⚠️ آموزش روی همهٔ استراتژی‌ها و نمادها انجام نشد"
+            _allStrategyLearningFa.value = text
+            _toast.value = text
+            runCatching { scanAndEvaluateBitcoinStrategyNow(userInitiated = false) }
+        }
+    }
+
     fun runSingleStrategyAutoTuningNow(strategyId: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val baseCfg = settings.value.baseStrategyConfig
             val prof = container.neuralEngine.runAutoTuningForSingleStrategy(strategyId, baseCfg)
             val updatedCfg = container.neuralEngine.applyAutoTunedParametersToConfig(baseCfg)
@@ -1594,7 +2282,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         learnedWeight: Double? = null,
         minThresholdNorm: Double? = null,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val prof = container.neuralEngine.tuneStrategyFeature(
                 strategyId = strategyId,
                 featureIndex = featureIndex,
@@ -1624,7 +2312,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         minDriveBooksConsensus: Int? = null,
         neuralWinProbGatePct: Double? = null,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val prof = container.neuralEngine.tuneStrategyParameters(
                 strategyId = strategyId,
                 minRiskReward = minRiskReward,
@@ -1904,7 +2592,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         report: com.aurum.edge.data.InstitutionalTearSheetReport,
         format: com.aurum.edge.data.JournalExportFormat,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             com.aurum.edge.data.JournalExportEngine.writeExportToUri(
                 context = container.appContext,
                 uri = uri,
@@ -1925,7 +2613,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         uri: android.net.Uri,
         replaceExisting: Boolean,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             com.aurum.edge.data.JournalExportEngine.readAndParseBackupUri(
                 context = container.appContext,
                 uri = uri,
@@ -1948,7 +2636,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         saved: com.aurum.edge.data.SavedJournalExportFile,
         replaceExisting: Boolean,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 val raw = saved.file.readText(Charsets.UTF_8)
                 val parsed = com.aurum.edge.data.JournalExportEngine.parseBackupContent(raw).getOrThrow()
@@ -2035,6 +2723,525 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _toast.value = "📋 تمام نکات اصلاحی دستیار ایچیموکو کپی و در حافظه گوشی ذخیره شد"
     }
 
+    // ── کپی توضیحات هوش عصبی ──────────────────────────────────────────────────
+    /**
+     * کپی متن در کلیپ‌بورد با پیام فارسی.
+     * همهٔ دکمه‌های «کپی» هوش عصبی و دستیار ایچیموکو از همین مسیر می‌گذرند.
+     */
+    /**
+     * «هم‌ترازسازی» موجودی حساب با دفتر ژورنال:
+     * موجودی = سرمایهٔ پایه + مجموع سود/زیان معاملات بسته‌شده.
+     * فقط با زدن دکمه توسط کاربر اجرا می‌شود؛ هیچ عددی خودکار تغییر نمی‌کند.
+     */
+    fun alignAccountBalanceWithJournal() {
+        val realized = container.journalStore.stats().netPnl
+        val current = container.settingsStore.read()
+        val target = (current.initialCapital + realized).coerceAtLeast(10.0)
+        if (kotlin.math.abs(current.accountBalance - target) < 0.01) {
+            _toast.value = "✅ موجودی حساب از قبل با ژورنال هم‌تراز است"
+            return
+        }
+        container.settingsStore.update { it.copy(accountBalance = kotlin.math.round(target * 100.0) / 100.0) }
+        _toast.value = "🔄 موجودی حساب با ژورنال هم‌تراز شد: " +
+            com.aurum.edge.core.AccountLedgerSnapshot.money(current.initialCapital) + " + تحقق‌یافته " +
+            com.aurum.edge.core.AccountLedgerSnapshot.signed(realized) + " = " +
+            com.aurum.edge.core.AccountLedgerSnapshot.money(target)
+    }
+
+    fun copyTextToClipboard(
+        labelFa: String,
+        text: String,
+        successToastFa: String? = null,
+    ) {
+        val safeText = text.trim()
+        if (safeText.isBlank()) {
+            _toast.value = "⚠️ متنی برای کپی پیدا نشد"
+            return
+        }
+        val clipboard = container.appContext
+            .getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        if (clipboard == null) {
+            _toast.value = "⚠️ کلیپ‌بورد در این گوشی در دسترس نیست"
+            return
+        }
+        runCatching {
+            clipboard.setPrimaryClip(
+                android.content.ClipData.newPlainText(labelFa.ifBlank { "Aurum Edge" }, safeText),
+            )
+        }.onFailure { err ->
+            _toast.value = "⚠️ کپی نشد: ${err.message}"
+        }.onSuccess {
+            _toast.value = successToastFa
+                ?: "📋 «$labelFa» کپی شد (${safeText.length} کاراکتر)"
+        }
+    }
+
+    /** کپی کامل تمام توضیحات هوش عصبی (همهٔ بخش‌ها در یک متن). */
+    fun copyNeuralBrainFullReport() {
+        val sections = neuralCopySections().map {
+            com.aurum.edge.core.NeuralReportSection(titleFa = it.titleFa, lines = it.lines)
+        }
+        val text = com.aurum.edge.core.NeuralReportText.render(
+            headerFa = "🧠 گزارش کامل توضیحات هوش عصبی Aurum Edge",
+            generatedAtFa = com.aurum.edge.core.NeuralReportText.timestamp(),
+            sections = sections,
+            footerFa = neuralReportFooter(),
+        )
+        copyTextToClipboard("گزارش کامل هوش عصبی", text, "📋 تمام توضیحات هوش عصبی کپی شد (${text.length} کاراکتر)")
+    }
+
+    /** کپی خلاصهٔ کوتاه وضعیت (برای اشتراک سریع). */
+    fun copyNeuralBrainQuickSummary() {
+        val s = neuralState.value
+        val lines = ArrayList<String>()
+        lines += com.aurum.edge.core.NeuralReportText.label(
+            "معاملات یادگیری‌شده",
+            com.aurum.edge.core.NeuralReportText.number(s.totalLearnedTrades.toDouble(), 0) +
+                " از " + com.aurum.edge.core.NeuralReportText.number(s.warmupTargetTrades.toDouble(), 0),
+        )
+        lines += com.aurum.edge.core.NeuralReportText.label(
+            "پیشرفت گرم‌کردن",
+            com.aurum.edge.core.NeuralReportText.pct(s.warmupProgressPercent),
+        )
+        lines += com.aurum.edge.core.NeuralReportText.label("وضعیت گیت", if (s.isGateActive) "فعال" else "غیرفعال")
+        lines += com.aurum.edge.core.NeuralReportText.label(
+            "دقت جاری",
+            com.aurum.edge.core.NeuralReportText.pct(s.runningAccuracyPct),
+        )
+        lines += com.aurum.edge.core.NeuralReportText.label(
+            "خطای BCE",
+            com.aurum.edge.core.NeuralReportText.number(s.runningBceLoss, 4),
+        )
+        lines += com.aurum.edge.core.NeuralReportText.label(
+            "خوشه‌های طلایی / ممنوعه",
+            "${s.winningClusters.size} / ${s.noTradeClusters.size}",
+        )
+        if (s.gatePolicySummaryFa.isNotBlank()) lines += s.gatePolicySummaryFa
+        val text = com.aurum.edge.core.NeuralReportText.renderSummary(
+            headerFa = "🧠 خلاصهٔ وضعیت هوش عصبی Aurum Edge",
+            generatedAtFa = com.aurum.edge.core.NeuralReportText.timestamp(),
+            lines = lines,
+            footerFa = neuralReportFooter(),
+        )
+        copyTextToClipboard("خلاصهٔ هوش عصبی", text, "📋 خلاصهٔ وضعیت هوش عصبی کپی شد")
+    }
+
+    /** کپی توضیحات یک بخش مشخص (دکمهٔ کپی کنار عنوان همان کارت). */
+    fun copyNeuralBrainSection(sectionKey: String) {
+        val key = sectionKey.trim().lowercase(java.util.Locale.ROOT)
+        val section = neuralCopySections().firstOrNull { it.key == key }
+        if (section == null) {
+            _toast.value = "⚠️ بخش «$sectionKey» برای کپی پیدا نشد"
+            return
+        }
+        val text = com.aurum.edge.core.NeuralReportText.renderSection(
+            titleFa = section.titleFa,
+            lines = section.lines,
+            versionFa = com.aurum.edge.BuildConfig.VERSION_NAME,
+        )
+        copyTextToClipboard(section.titleFa, text, "📋 توضیحات «${section.titleFa}» کپی شد")
+    }
+
+    private fun neuralReportFooter(): String =
+        "Aurum Edge ${com.aurum.edge.BuildConfig.VERSION_NAME} · تولید‌شده توسط موتور هوش عصبی ایچیموکو"
+
+    private fun neuralCopySections(): List<NeuralCopySection> {
+        val s = neuralState.value
+        val R = com.aurum.edge.core.NeuralReportText
+        val sections = ArrayList<NeuralCopySection>()
+
+        sections += NeuralCopySection(
+            key = "sessionexit",
+            titleFa = "زمان‌بندی سشن و یادگیری زمان خروج",
+            lines = buildList {
+                val note = sessionExitLearningNote.value
+                if (note.isNotBlank()) add("آخرین یادگیری: $note")
+                val estimates = sessionExitEstimates.value
+                if (estimates.isEmpty()) {
+                    add("هنوز تخمینی برای خروج پیش از بسته‌شدن بازار ثبت نشده است.")
+                } else {
+                    estimates.forEach { e ->
+                        add(
+                            "• ${e.labelFa}: خروج ${e.leadMinutes} دقیقه پیش از بستهٔ بازار | نمونه ${e.samples} | " +
+                                "نرخ موفقیت ${R.pct(e.hitRatePct)} | دلار نجات/زیان ${R.number(e.savedUsd)} | " +
+                                "اطمینان ${e.confidencePct}% | ${e.noteFa}",
+                        )
+                    }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "regression",
+            titleFa = "پنل رگرسیون ماتریسی پارامترها",
+            lines = buildList {
+                val reg = s.autoTunedParameters.latestRegressionReport
+                add(R.label("استراتژی هدف", reg.strategyTitleFa))
+                add(R.label("متد", reg.regressionMethodFa))
+                add(R.label("تعداد نمونه", R.number(reg.samplesCount.toDouble(), 0)))
+                add(
+                    R.inline(
+                        "R²" to R.number(reg.rSquared, 3),
+                        "R² تعدیل‌شده" to R.number(reg.adjustedRSquared, 3),
+                        "RMSE" to R.number(reg.walkForwardRmse, 3),
+                        "MAE" to R.number(reg.walkForwardMae, 3),
+                    ),
+                )
+                add(
+                    R.inline(
+                        "لیفت نرخ برد" to R.pct(reg.expectedWinRateLiftPct),
+                        "لیفت R هر معامله" to R.rMultiple(reg.expectedRLiftPerTrade),
+                    ),
+                )
+                add(R.label("دالان حد ضرر", reg.optimalStopLossCorridorFa))
+                add(R.label("قفل R:R", reg.optimalRrCorridorFa))
+                add(
+                    "ℹ️ سه عدد R:R در این گزارش با هم فرق دارند و هر سه درست‌اند: کف مطلق قانون ۱.۵۰ (هرگز پایین‌تر نمی‌رود)، " +
+                        "کف پیشنهادی رگرسیون (ردیف ۲ پایین) و کف تیونینگ خودکار (بخش «تیونینگ خودکار پارامترها»). " +
+                        "عددی که موتور ورود واقعاً اعمال می‌کند همان کف تیونینگ است و همیشه داخل بازهٔ قفل‌شدهٔ ۱.۵ تا ۳.۰ می‌ماند.",
+                )
+                if (reg.parameterRows.isNotEmpty()) {
+                    add("")
+                    add("پارامترهای رگرسیون‌شده:")
+                    reg.parameterRows.forEach { row ->
+                        add(
+                            "• ${row.paramTitleFa}: ${R.number(row.priorValue, 3)} → ${R.number(row.regressedValue, 3)} ${row.unitLabel} | " +
+                                "β=${R.number(row.slopeBeta, 3)} | t=${R.number(row.tStat, 2)} | CI ${row.confidenceIntervalLabel} | ${row.impactVerdictFa}",
+                        )
+                    }
+                }
+                if (reg.featureSlopes.isNotEmpty()) {
+                    add("")
+                    add("شیب ۱۶ ویژگی (بر اساس اهمیت):")
+                    reg.featureSlopes.sortedByDescending { it.importancePct }.take(16).forEach { f ->
+                        add(
+                            "• ${f.featureTitleFa} — اهمیت ${R.pct(f.importancePct)} | β برد ${R.number(f.ridgeBetaWin, 3)} | " +
+                                "Huber β ${R.number(f.huberBetaR, 3)} | t=${R.number(f.tStat, 2)}",
+                        )
+                    }
+                }
+                if (reg.regressionDiagnosticNotesFa.isNotEmpty()) {
+                    add("")
+                    reg.regressionDiagnosticNotesFa.forEach { add("• $it") }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "brain",
+            titleFa = "مغز شبکه عصبی و وضعیت یادگیری",
+            lines = buildList {
+                add(R.label("معماری", s.architectureNameFa))
+                add(R.label("فاز جاری", s.currentTrainingPhaseBadgeFa))
+                add(R.label("معاملات یادگیری‌شده", R.number(s.totalLearnedTrades.toDouble(), 0)))
+                add(R.label("هدف گرم‌کردن", R.number(s.warmupTargetTrades.toDouble(), 0)))
+                add(R.label("پیشرفت گرم‌کردن", R.pct(s.warmupProgressPercent)))
+                add(R.label("باقی‌مانده تا هدف", R.number(s.remainingWarmupTrades.toDouble(), 0)))
+                add(R.label("گرم‌کردن کامل شده", if (s.isWarmupCompleted) "بله" else "نه"))
+                add(R.label("گیت فعال", if (s.isGateActive) "بله" else "نه"))
+                add(R.label("شرط حجم (۱۰٬۰۰۰ معامله)", if (s.volumeConditionMet) "برقرار" else "برقرار نشده"))
+                add(R.label("فعال‌سازی دستی کاربر", if (s.gateUserActivationEnabled) "روشن" else "خاموش"))
+                add(R.label("اجبار فعال‌سازی پیش از گرم‌کردن", if (s.forceActiveBeforeWarmup) "بله" else "نه"))
+                add(R.label("دقت جاری", R.pct(s.runningAccuracyPct)))
+                add(R.label("خطای BCE", R.number(s.runningBceLoss, 4)))
+                add(R.label("گام‌های AdamW", R.number(s.adamStepCount.toDouble(), 0)))
+                add(R.label("خوشه‌های طلایی کشف‌شده", R.number(s.winningClusters.size.toDouble(), 0)))
+                add(R.label("تله‌های ممنوعه کشف‌شده", R.number(s.noTradeClusters.size.toDouble(), 0)))
+                if (s.gatePolicySummaryFa.isNotBlank()) {
+                    add("")
+                    add(s.gatePolicySummaryFa)
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "ledger",
+            titleFa = "دفتر یادگیری و انتقال دانش بین نسخه‌ها",
+            lines = buildList {
+                add(R.label("ردیف‌های دفتر", R.number(s.learnedLedgerRows.toDouble(), 0)))
+                add(R.label("ردیف‌های حذف‌شده (پیرایش)", R.number(s.learnedLedgerPrunedCount.toDouble(), 0)))
+                add(R.label("نسخهٔ ساختار دفتر", R.number(s.learnedSchemaVersion.toDouble(), 0)))
+                add(R.label("معاملات بسته‌شدهٔ دیده‌شده در ژورنال", R.number(s.journalClosedTradesSeen.toDouble(), 0)))
+                add(R.label("اصلاح ردیف‌های تکراری", R.number(s.duplicatesRepairedCount.toDouble(), 0)))
+                add(R.label("نسخهٔ دانش", R.number(s.knowledgeRevision.toDouble(), 0)))
+                if (s.ledgerReconciliationSummaryFa.isNotBlank()) add(s.ledgerReconciliationSummaryFa)
+                if (s.knowledgeChangeLog.isNotEmpty()) {
+                    add("")
+                    add("تغییرهای ثبت‌شدهٔ دانش:")
+                    s.knowledgeChangeLog.takeLast(12).reversed().forEach { entry ->
+                        add("• ${entry.titleFa} — ${entry.detailFa}")
+                    }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "market",
+            titleFa = "درک زندهٔ وضعیت بیت‌کوین و علت حرکت",
+            lines = buildList {
+                add("این بخش فقط برای بیت‌کوین ساخته می‌شود و هنگام بررسی/معاملهٔ بیت‌کوین پر می‌شود.")
+                val bitcoinAttributions = s.liveMarketAttributions.filter {
+                    it.symbol == NeuralSelfLearningEngine.LIVE_ATTRIBUTION_SYMBOL
+                }
+                if (bitcoinAttributions.isEmpty()) {
+                    add("در حال حاضر بررسی معاملهٔ بیت‌کوین فعال نیست؛ به‌محض اسکن بیت‌کوین این بخش پر می‌شود.")
+                }
+                bitcoinAttributions.forEach { a ->
+                    add("• ${a.symbol} [${a.timeframeLabel}] — ${a.categoryTitleFa} | رژیم: ${a.marketRegimeStateFa} | علت اصلی: ${a.primaryCauseBadgeFa} (${a.causalConfidencePct}%)")
+                    add("   چه اتفاقی افتاده: ${a.whatIsHappeningFa}")
+                    add("   چرا: ${a.whyItIsHappeningFa}")
+                    if (a.newsImpactSummaryFa.isNotBlank()) add("   خبر: ${a.newsImpactSummaryFa}")
+                    if (a.unified9BookSummaryFa.isNotBlank()) add("   ۹ لایهٔ ساختاری: ${a.unified9BookSummaryFa}")
+                    if (a.recommendedTacticalActionFa.isNotBlank()) add("   تاکتیک پیشنهادی: ${a.recommendedTacticalActionFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "news",
+            titleFa = "هوش خبری کلان و تقویم اقتصادی",
+            lines = buildList {
+                val n = s.latestNewsSnapshot
+                add(R.label("سنتیمنت کلان", R.number(n.overallMacroSentiment, 2)))
+                add(R.label("شدت شوک", R.number(n.shockIntensity, 2)))
+                add(R.label("پنجرهٔ خبری پرتأثیر", if (n.isHighImpactNewsWindow) "بله" else "نه"))
+                add(R.label("کاتالیزور فعال", n.activeMacroCatalystFa))
+                n.categoryNewsSummaryFa.forEach { (code, summary) ->
+                    if (summary.isNotBlank()) add("• $code: $summary")
+                }
+                n.headlines.take(12).forEach { h ->
+                    add("• [${h.source}] ${h.title} — ${h.causeTagFa} | سنتیمنت ${R.number(h.sentimentScore, 2)} | اثر ${h.impactLevel}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "autotune",
+            titleFa = "تیونینگ خودکار پارامترها (CEM + Bayesian)",
+            lines = buildList {
+                val a = s.autoTunedParameters
+                add(R.label("نسل تیونینگ", R.number(a.tuningGeneration.toDouble(), 0)))
+                add(R.label("متد", a.methodBadgeFa))
+                add(R.label("نمونه‌های تحلیل‌شده", R.number(a.samplesAnalyzed.toDouble(), 0)))
+                add(R.label("حداقل R:R", R.number(a.minRiskReward, 2)))
+                add(R.label("سقف کشش کیجون (ATR)", R.number(a.maxKijunExtensionAtr, 2)))
+                add(R.label("بافر حد ضرر (ATR)", R.number(a.slBufferAtr, 2)))
+                add(R.label("بافر شکست (ATR)", R.number(a.breakoutBufferAtr, 2)))
+                add(R.label("حداقل کارایی روند", R.number(a.minEfficiencyRatio, 2)))
+                add(R.label("حداقل نسبت حجم ۲۰", R.number(a.minVolumeRatio20, 2)))
+                add(R.label("توافق حداقلی ۹ لایه", R.number(a.minDriveBooksConsensus.toDouble(), 0)))
+                add(R.label("گیت احتمال برد شبکه", R.pct(a.neuralWinProbGatePct)))
+                add(R.label("نرخ برد انتظاری", R.pct(a.expectedWinRatePct)))
+                add(R.label("پروفیت فاکتور انتظاری", R.number(a.expectedProfitFactor, 2)))
+                add(R.label("کاهش سیگنال کاذب", R.pct(a.falsePositiveReductionPct)))
+                if (a.tuningSummaryFa.isNotBlank()) add(a.tuningSummaryFa)
+                a.bestStrategyByCategory.forEach { (code, title) -> add("• بهترین استراتژی $code: $title") }
+                if (a.parameterChangeLogFa.isNotEmpty()) {
+                    add("")
+                    add("تغییرهای اعمال‌شده:")
+                    a.parameterChangeLogFa.takeLast(12).reversed().forEach { add("• $it") }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "perstrategy",
+            titleFa = "تیونینگ اختصاصی هر استراتژی",
+            lines = buildList {
+                val profiles = s.autoTunedParameters.perStrategyProfiles.values
+                if (profiles.isEmpty()) add("هنوز پروفایل اختصاصی استراتژی‌ها ساخته نشده است.")
+                profiles.sortedByDescending { it.samplesAnalyzed }.take(16).forEach { p ->
+                    add("• ${p.strategyTitleFa} (${p.strategyBadgeFa}) — نمونه ${p.samplesAnalyzed} | نرخ برد ${R.pct(p.winRatePct)} | PF ${R.number(p.expectedProfitFactor, 2)} | R:R≥${R.number(p.minRiskReward, 2)} | بافر SL ${R.number(p.slBufferAtr, 2)}ATR | گیت ${R.pct(p.neuralWinProbGatePct)}")
+                    if (p.tuningSummaryFa.isNotBlank()) add("   ${p.tuningSummaryFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "persymbol",
+            titleFa = "شخصیت آموخته‌شدهٔ هر نماد بازار",
+            lines = buildList {
+                val profiles = s.autoTunedParameters.perSymbolProfiles.values
+                if (profiles.isEmpty()) {
+                    add("هنوز شخصیت نمادها ساخته نشده است؛ با یک‌بار آموزش (یا اولین معاملهٔ بسته‌شده) ساخته می‌شود.")
+                }
+                profiles.sortedWith(compareByDescending<com.aurum.edge.core.PerSymbolNeuralTuningProfile> { it.ownSamples }
+                    .thenByDescending { it.samplesAnalyzed })
+                    .forEach { p ->
+                        add("• ${p.symbolTitleFa} (${p.symbol}) — سبک: ${p.decisionStyleFa} | معاملهٔ خودش ${p.ownSamples} | نمونهٔ آموزشی ${p.samplesAnalyzed}")
+                        add("   نرخ برد ${R.pct(p.winRatePct)} | PF ${R.number(p.expectedProfitFactor, 2)} | میانگین ${R.rMultiple(p.avgRMultiple)} | احتمال برد بیزین ${R.pct(p.posteriorWinProbPct)} | اعتبار شکست ${R.pct(p.breakoutReliabilityPct)}")
+                        add("   پارامترها: بافر SL ${R.number(p.slBufferAtr, 2)}ATR | سقف کیجون ${R.number(p.maxKijunExtensionAtr, 2)}ATR | بافر شکست ${R.number(p.breakoutBufferAtr, 2)}ATR | حداقل کارایی ${R.number(p.minEfficiencyRatio, 2)} | حجم ${R.number(p.minVolumeRatio20, 2)} | اجماع ${p.minDriveBooksConsensus}/9 | گیت ${R.pct(p.neuralWinProbGatePct)}")
+                        if (p.bestStrategyTitleFa.isNotBlank()) add("   سازگارترین استراتژی: ${p.bestStrategyTitleFa}")
+                        if (p.personalityFa.isNotBlank()) add("   ${p.personalityFa}")
+                    }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "forensics",
+            titleFa = "کالبدشکافی تریدهای تارگت و استاپ",
+            lines = buildList {
+                val f = s.tradeForensics
+                add(R.label("معاملات برندهٔ تحلیل‌شده", R.number(f.totalWinsAnalyzed.toDouble(), 0)))
+                add(R.label("معاملات بازندهٔ تحلیل‌شده", R.number(f.totalLossesAnalyzed.toDouble(), 0)))
+                add(R.label("میانگین برد", R.rMultiple(f.avgWinR)))
+                add(R.label("میانگین باخت", R.rMultiple(-kotlin.math.abs(f.avgLossR))))
+                add(R.label("پروفیت فاکتور", R.number(f.profitFactor, 2)))
+                add(R.label("امید ریاضی هر معامله", R.rMultiple(f.expectancyPerTradeR)))
+                add(R.label("بهترین تایم‌فریم", f.bestTimeframeSummaryFa))
+                if (f.topWinDriversFa.isNotEmpty()) {
+                    add("")
+                    add("محرک‌های اصلی برد:")
+                    f.topWinDriversFa.forEach { add("• $it") }
+                }
+                if (f.topLossCausesFa.isNotEmpty()) {
+                    add("")
+                    add("علت‌های اصلی استاپ:")
+                    f.topLossCausesFa.forEach { add("• $it") }
+                }
+                if (f.actionableTradingRulesFa.isNotEmpty()) {
+                    add("")
+                    add("قوانین طلایی استخراج‌شده:")
+                    f.actionableTradingRulesFa.forEach { add("• $it") }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "matrix",
+            titleFa = "ماتریس برتری استراتژی‌ها",
+            lines = buildList {
+                if (s.strategyEdgeMatrix.isEmpty()) add("هنوز معاملهٔ بسته‌شده‌ای برای رتبه‌بندی استراتژی‌ها ثبت نشده است.")
+                s.strategyEdgeMatrix.sortedByDescending { it.edgeScore }.forEach { e ->
+                    add("• ${e.strategyTitleFa} (${e.strategyBadgeFa}) — امتیاز لبه ${e.edgeScore} | معامله ${e.tradesCount} | نرخ برد ${R.pct(e.winRatePercent)} | PF ${R.number(e.profitFactor, 2)} | E[R] ${R.rMultiple(e.expectancyR)} | بهترین TF ${e.bestTimeframeLabel} | بهترین نماد ${e.bestSymbol} | ${e.tradingVerdictFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "sessions",
+            titleFa = "هوش سشن‌های معاملاتی",
+            lines = buildList {
+                if (s.sessionEdges.isEmpty()) add("هنوز داده‌ای برای سشن‌های معاملاتی جمع نشده است.")
+                s.sessionEdges.forEach { e ->
+                    add("• ${e.sessionTitleFa} (${e.utcHoursLabel}) — معامله ${e.tradesCount} | نرخ برد ${R.pct(e.winRatePercent)} | میانگین ${R.rMultiple(e.avgR)} | ${e.sessionAdviceFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "insights",
+            titleFa = "خلاصهٔ آموخته‌ها به زبان ساده",
+            lines = buildList {
+                if (s.learnedInsightsFeedFa.isEmpty()) add("هنوز درسی از معاملات بسته‌شده استخراج نشده است.")
+                s.learnedInsightsFeedFa.forEach { add("• $it") }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "categories",
+            titleFa = "دانش شبکه به تفکیک دستهٔ بازار",
+            lines = buildList {
+                if (s.categoryStats.isEmpty()) add("آمار دسته‌های بازار هنوز ساخته نشده است.")
+                s.categoryStats.forEach { c ->
+                    add("• ${c.categoryTitleFa} — یادگرفته ${c.learnedTrades} | نرخ برد ${R.pct(c.winRatePercent)} | تله‌های ثبت‌شده ${c.noTradeConditionCount}")
+                    if (c.bestConditionSummaryFa.isNotBlank()) add("   بهترین رژیم سودده: ${c.bestConditionSummaryFa}")
+                    if (c.worstNoTradeConditionSummaryFa.isNotBlank()) add("   بدترین تله: ${c.worstNoTradeConditionSummaryFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "clusters",
+            titleFa = "تله‌های ممنوعه و الگوهای طلایی",
+            lines = buildList {
+                add(
+                    "ℹ️ «مشاهده» یعنی هر باری که یک معاملهٔ بسته‌شده در این خوشه ثبت شده است (تجمعی). " +
+                        "این عدد با شمارندهٔ معاملات یکتا یکی نیست؛ شمارندهٔ یکتا و تطبیق‌شده با ژورنال در بخش «دفتر یادگیری» است " +
+                        "(${R.number(s.totalLearnedTrades.toDouble(), 0)} معاملهٔ یکتا).",
+                )
+                add("")
+                add("⛔ تله‌های ممنوعه (${s.noTradeClusters.size}):")
+                if (s.noTradeClusters.isEmpty()) add("• هنوز خوشهٔ ضرردهٔ پرتکراری ثبت نشده است.")
+                s.noTradeClusters.take(20).forEach { c ->
+                    add("• ${c.conditionDescriptionFa} — مشاهده ${c.totalCount} | برد ${c.winCount} | باخت ${c.lossCount} | احتمال برد ${R.pct(c.posteriorWinProb * 100.0)} | میانگین ${R.rMultiple(c.avgR)}")
+                }
+                add("")
+                add("🎯 الگوهای طلایی (${s.winningClusters.size}):")
+                if (s.winningClusters.isEmpty()) add("• هنوز الگوی پرتکرار سوددهی ثبت نشده است.")
+                s.winningClusters.take(20).forEach { c ->
+                    add("• ${c.conditionDescriptionFa} — مشاهده ${c.totalCount} | برد ${c.winCount} | احتمال برد ${R.pct(c.posteriorWinProb * 100.0)} | میانگین ${R.rMultiple(c.avgR)}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "features",
+            titleFa = "وزن ۱۶ ویژگی ایچیموکو در مغز شبکه",
+            lines = buildList {
+                if (s.featureInsights.isEmpty()) add("وزن ویژگی‌ها هنوز محاسبه نشده است.")
+                val attnSpread = (s.featureInsights.maxOfOrNull { it.attentionPercent } ?: 0.0) -
+                    (s.featureInsights.minOfOrNull { it.attentionPercent } ?: 0.0)
+                val uniformAttention = s.featureInsights.isNotEmpty() && attnSpread < 1.0
+                if (uniformAttention) {
+                    add(
+                        "ℹ️ سهم توجه (Self-Attention) در حال حاضر یکنواخت است: هر یک از ۱۶ ویژگی " +
+                            "${R.pct(s.featureInsights.first().attentionPercent)} — یعنی شبکه هنوز هیچ ویژگی را بر دیگری ترجیح نداده است. " +
+                            "برای دیدن تفکیک واقعی، ستون «اثر خالص وزن» را بخوانید؛ این فهرست بر اساس همان اثر مرتب شده است.",
+                    )
+                    add("")
+                }
+                s.featureInsights
+                    .sortedByDescending { if (uniformAttention) kotlin.math.abs(it.netWeightImpact) else it.attentionPercent }
+                    .forEach { f ->
+                        val attnPart = if (uniformAttention) "" else "سهم توجه ${R.pct(f.attentionPercent)} | "
+                        add("• #${f.index} ${f.titleFa} — ${attnPart}اثر خالص وزن ${R.number(f.netWeightImpact, 3)} | ${f.impactLabelFa}")
+                        if (f.explanationFa.isNotBlank()) add("   ${f.explanationFa}")
+                    }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "live15",
+            titleFa = "ارزیابی لحظه‌ای نمادها",
+            lines = buildList {
+                val dual = dualSymbolStrategyReports.value
+                if (dual.isEmpty()) add("گزارش زندهٔ نمادها هنوز آماده نیست.")
+                dual.keys.sorted().forEach { sym ->
+                    val d = dual[sym] ?: return@forEach
+                    listOfNotNull(d.report15m, d.report5m).forEach { rep ->
+                        val ev = runCatching { evaluateReportWithNeuralEngine(rep) }.getOrNull() ?: return@forEach
+                        val decisionFa = when {
+                            ev.isBlockingTradeNow -> "⛔ ممنوع (گیت عصبی فعال است)"
+                            ev.isNoTradeCondition -> "⚠️ شرایط پرخطر — گیت خاموش، تصمیم نهایی با موتور قواعد"
+                            else -> "✅ اجازهٔ ورود"
+                        }
+                        add("• ${ev.symbol} [${rep.triggerInterval.label}] — احتمال برد ${R.pct(ev.predictedWinProb * 100.0)} | امید ریاضی ${R.rMultiple(ev.expectedR)} | $decisionFa")
+                        if (ev.summaryFa.isNotBlank()) add("   ${ev.summaryFa}")
+                        if (!ev.noTradeWarningFa.isNullOrBlank()) add("   ⛔ ${ev.noTradeWarningFa}")
+                        if (ev.causalAttributionFa.isNotBlank()) add("   علت: ${ev.causalAttributionFa}")
+                        if (ev.newsCatalystFa.isNotBlank()) add("   خبر: ${ev.newsCatalystFa}")
+                    }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "lessons",
+            titleFa = "درس‌های استخراج‌شده از معاملات",
+            lines = buildList {
+                if (s.recentLessons.isEmpty()) add("هنوز معاملهٔ بسته‌شده‌ای در حافظهٔ تجربه ثبت نشده است.")
+                s.recentLessons.forEach { l ->
+                    add("• ${l.symbol} [${l.timeframeLabel}] ${if (l.won) "برد ✅" else "باخت ❌"} (${R.rMultiple(l.achievedR)}) — ${l.strategyId}")
+                    if (l.conditionDescriptionFa.isNotBlank()) add("   شرایط: ${l.conditionDescriptionFa}")
+                    if (l.lessonLearnedFa.isNotBlank()) add("   درس: ${l.lessonLearnedFa}")
+                }
+            },
+        )
+
+        return sections
+    }
+
     fun applyAssistantNoteConfigPatch(note: com.aurum.edge.core.IchimokuImprovementNote) {
         container.settingsStore.update { cur ->
             val oldCfg = cur.baseStrategyConfig
@@ -2059,3 +3266,11 @@ class AurumViewModelFactory(private val container: AppContainer) : ViewModelProv
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = AurumViewModel(container) as T
 }
+
+
+/** یک بخش از توضیحات هوش عصبی که دکمهٔ کپی دارد. */
+private data class NeuralCopySection(
+    val key: String,
+    val titleFa: String,
+    val lines: List<String>,
+)

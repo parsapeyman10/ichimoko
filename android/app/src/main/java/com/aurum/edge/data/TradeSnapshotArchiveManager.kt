@@ -24,6 +24,7 @@ import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.StrategyEvaluationReport
 import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.SignalAction
+import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
@@ -32,9 +33,13 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -121,13 +126,34 @@ data class ArchivedTradeSnapshotRecord(
 }
 
 /**
- * موتور آرشیو تصویری معاملات و ذخیره‌سازی دوگانه (حافظه داخلی اپ + گالری/دانلودهای گوشی)
- * همراه با تزریق متادیتای خودخوان (`Embedded Self-Readable JSON Payload`) در دل تصویر کم‌حجم WebP:
- * - از هر معامله بازشده یک اسکرین‌شات گرافیکی دقیق شامل کندل‌ها، ابر ایچیموکو، ابر آینده ۲۶ کندلی،
- *   تنکان/کیجون و باکس پوزیشن TradingView (`Entry`, `Stop-Loss`, `Take-Profit`, `R:R`) به همراه ۱۶ شرط ایچیموکو می‌سازد.
- * - با فرمت `WebP` باکیفیت و بسیار کم‌حجم (`~35KB..65KB`) هم در آرشیو اپ و هم در حافظه گوشی (`Pictures/AurumEdge` و `Download/AurumEdge/Archive`) ذخیره می‌کند.
- * - دیتای کامل معامله و شرایط ایچیموکو را هم در انتهای خود فایل تصویر و هم در فایل JSON آرشیو گوشی ذخیره می‌کند تا اپ بتواند بعداً از روی عکس‌ها یا فایل‌های گوشی کل دیتای خود را بازخوانی کند.
+ * موتور آرشیو خصوصیِ تصویری معاملات در فضای اپ (`filesDir/trade_snapshots_v1`) همراه با
+ * تزریق متادیتای خودخوان (`Embedded Self-Readable JSON Payload`) در دل تصویر کم‌حجم WebP.
+ * هر تصویر از داخل کارت آرشیو خود اپ باز می‌شود و به‌طور خودکار در گالری یا پوشهٔ عمومی گوشی
+ * کپی نمی‌شود؛ خروجی ZIP/PDF فقط با درخواست صریح کاربر ساخته و قابل انتقال است.
  */
+/**
+ * وضعیت فشردهٔ آرشیو تصاویر برای نمایش در رابط کاربری (تب آپدیت).
+ */
+data class ArchivedSnapshotBasket(
+    val imageCount: Int = 0,
+    val imageBytes: Long = 0L,
+    val recordCount: Int = 0,
+    val oldestMs: Long = 0L,
+    val newestMs: Long = 0L,
+)
+
+/**
+ * نتیجهٔ ساخت فایل ZIP بکاپ اسکرین‌شات‌ها.
+ */
+data class ArchivedSnapshotBundle(
+    val zipFile: File?,
+    val fileName: String,
+    val imageCount: Int,
+    val zipBytes: Long,
+    val sourceBytes: Long,
+    val errorFa: String?,
+)
+
 object TradeSnapshotArchiveManager {
 
     private const val ARCHIVE_DIR_NAME = "trade_snapshots_v1"
@@ -144,11 +170,56 @@ object TradeSnapshotArchiveManager {
     private val _records = MutableStateFlow<List<ArchivedTradeSnapshotRecord>>(emptyList())
     val records: StateFlow<List<ArchivedTradeSnapshotRecord>> = _records.asStateFlow()
 
+    // Rendering a 1200x820 chart and writing its WebP/JSON payload is deliberately serialized
+    // on a low-priority worker; it must never run on the UI thread or allocate several bitmaps at once.
+    private val pendingArchiveKeys = ConcurrentHashMap.newKeySet<String>()
+    private val archiveExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "aurum-snapshot-archive").apply {
+            isDaemon = true
+            priority = Thread.MIN_PRIORITY
+        }
+    }
+
+    fun enqueueTradeSnapshotClose(
+        context: Context,
+        trade: PaperTrade,
+        closeCandles: List<Candle> = emptyList(),
+    ) {
+        enqueueSnapshot("${trade.id}_CLOSE") {
+            captureAndArchiveTradeClose(context, trade, closeCandles)
+        }
+    }
+
+    private fun enqueueSnapshot(key: String, work: () -> Unit) {
+        if (!pendingArchiveKeys.add(key)) return
+        runCatching {
+            archiveExecutor.execute {
+                try {
+                    work()
+                } catch (_: Throwable) {
+                    // Archiving is best-effort and must not affect journal/trade processing.
+                } finally {
+                    pendingArchiveKeys.remove(key)
+                }
+            }
+        }.onFailure { pendingArchiveKeys.remove(key) }
+    }
+
     @Synchronized
     fun init(context: Context) {
         runCatching {
             val loaded = loadIndexFromDisk(context)
-            _records.value = loaded.sortedByDescending { it.effectiveTimestampMs }
+            // رکوردهای «شبح» (تصویری که فایلش پاک شده و نسخهٔ گالری هم ندارد) در گالری
+            // نمایش داده نمی‌شوند؛ این رکوردها همان چیزی بودند که آرشیو را خراب نشان می‌دادند.
+            val healthy = loaded.filter { rec ->
+                val local = rec.localImagePath
+                val hasLocalImage = local.isNotBlank() && File(local).exists()
+                hasLocalImage || rec.phoneGalleryUri.isNotBlank()
+            }
+            _records.value = healthy.sortedByDescending { it.effectiveTimestampMs }
+            if (healthy.size != loaded.size) {
+                saveIndexToDisk(context, _records.value)
+            }
         }
     }
 
@@ -163,11 +234,64 @@ object TradeSnapshotArchiveManager {
      * تضمین ثبت و ساخت اسکرین‌شات آرشیو تصویری (`OPEN` و در صورت بسته بودن `CLOSE`) برای معاملات موجود در ژورنال
      * بدون قفل طولانی‌مدت MediaStore و با ذخیره یکپارچه ایندکس در پایان حلقه.
      */
+    /**
+     * قفل رندر: ساخت تصویر برای هر معامله یک `Bitmap` چند مگابایتی می‌خواهد. اگر چند رندر
+     * هم‌زمان اجرا شود (گالری + ثبت خودکار + خروجی PDF)، heap روی گوشی‌های کم‌حافظه پر می‌شود و
+     * برنامه با `OutOfMemoryError` کرش می‌کند. این قفل، رندرها را پشت سر هم اجرا می‌کند.
+     */
+    private val renderLock = Any()
+
+    /** Renders and compresses under one lock so two callers cannot retain full-size bitmaps together. */
+    private fun renderSnapshotWebp(
+        record: ArchivedTradeSnapshotRecord,
+        candles: List<Candle> = emptyList(),
+        quality: Int = 80,
+    ): ByteArray = synchronized(renderLock) {
+        val bitmap = renderTradeIchimokuSnapshotBitmap(record, candles)
+        try {
+            compressBitmapToCompactWebp(bitmap, quality)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    /**
+     * پاک‌سازی بودجه‌ای آرشیو (Memory/Storage budget).
+     *
+     * بودجه از حافظهٔ واقعی دستگاه گرفته می‌شود (`AppResourceGovernor`) و قدیمی‌ترین رکوردها
+     * (هم فایل تصویر و هم ردیف ایندکس) حذف می‌شوند تا آرشیو بی‌پایان رشد نکند و برنامه سنگین نشود.
+     */
     @Synchronized
+    fun pruneToBudget(context: Context): Int {
+        if (_records.value.isEmpty()) init(context)
+        val budget = com.aurum.edge.core.AppResourceGovernor.current()
+        val ordered = _records.value.sortedByDescending { it.effectiveTimestampMs }
+        val keep = com.aurum.edge.core.AppResourceGovernor.recordsToKeep(
+            recordSizesBytes = ordered.map { it.imageSizeBytes.coerceAtLeast(1L) },
+            budget = budget,
+        )
+        if (keep >= ordered.size) return 0
+        val keepIds = ordered.take(keep).map { "${it.tradeId}_${it.snapshotPhase}" }.toSet()
+        val pruned = _records.value.filter { "${it.tradeId}_${it.snapshotPhase}" !in keepIds }
+        if (pruned.isEmpty()) return 0
+        pruned.forEach { rec ->
+            rec.localImagePath.takeIf { it.isNotBlank() }?.let { path ->
+                runCatching { File(path).delete() }
+            }
+        }
+        val kept = _records.value.filter { "${it.tradeId}_${it.snapshotPhase}" in keepIds }
+            .sortedByDescending { it.effectiveTimestampMs }
+        _records.value = kept
+        saveIndexToDisk(context, kept)
+        return pruned.size
+    }
+
+    @Synchronized
+    @Suppress("UNUSED_PARAMETER")
     fun ensureAllTradesHaveArchiveSnapshots(
         context: Context,
         trades: List<PaperTrade>,
-        maxTrades: Int = 120,
+        maxTrades: Int = com.aurum.edge.core.AppResourceGovernor.current().maxArchiveRecords,
         saveToPhoneGallery: Boolean = false,
     ): List<ArchivedTradeSnapshotRecord> {
         if (_records.value.isEmpty()) {
@@ -177,6 +301,20 @@ object TradeSnapshotArchiveManager {
         val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
         val currentMap = _records.value.associateBy { "${it.tradeId}_${it.snapshotPhase}" }.toMutableMap()
         var modified = false
+        // رکوردهای معاملاتی که دیگر در ژورنال نیستند (حذف‌شده) از آرشیو هم پاک می‌شوند تا
+        // گالری تصویری هرگز رکورد بی‌معامله (phantom) نشان ندهد.
+        val liveTradeIds = trades.map { it.id }.toSet()
+        val phantomKeys = currentMap.keys.filter { key -> key.substringBeforeLast('_') !in liveTradeIds }
+        if (phantomKeys.isNotEmpty()) {
+            phantomKeys.forEach { key ->
+                currentMap.remove(key)?.let { rec ->
+                    rec.localImagePath.takeIf { it.isNotBlank() }?.let { path ->
+                        runCatching { File(path).delete() }
+                    }
+                }
+            }
+            modified = true
+        }
 
         val targetTrades = trades.sortedByDescending { it.openedAt }.take(maxTrades).reversed()
         for (trade in targetTrades) {
@@ -185,20 +323,16 @@ object TradeSnapshotArchiveManager {
             if (existingOpen == null || existingOpen.localImagePath.isBlank() || !File(existingOpen.localImagePath).exists()) {
                 runCatching {
                     val rec = buildSyntheticSnapshotRecordForTrade(trade, isClosePhase = false)
-                    val bmp = renderTradeIchimokuSnapshotBitmap(rec)
-                    val webpBytes = compressBitmapToCompactWebp(bmp, quality = 78)
-                    bmp.recycle()
+                    val webpBytes = renderSnapshotWebp(rec, quality = 78)
                     val embedded = attachEmbeddedJsonToImageBytes(webpBytes, rec)
                     val safeSym = trade.symbol.replace("/", "_").replace(" ", "_")
                     val fileName = "AurumTrade_No${rec.displayTradeNumber}_OPEN_${safeSym}_${trade.interval.label}_${trade.openedAt}.webp"
                     val localFile = File(dir, fileName)
                     localFile.writeBytes(embedded)
-                    val galleryUri = if (saveToPhoneGallery) {
-                        saveImageAndSelfReadableDataToPhoneStorage(context, fileName, embedded, rec)
-                    } else ""
+                    // عکس‌ها فقط در filesDir خصوصی اپ می‌مانند؛ هرگز خودکار وارد گالری یا Downloads نمی‌شوند.
                     currentMap[openKey] = rec.copy(
                         localImagePath = localFile.absolutePath,
-                        phoneGalleryUri = galleryUri,
+                        phoneGalleryUri = "",
                         imageSizeBytes = embedded.size.toLong(),
                     )
                     modified = true
@@ -210,21 +344,17 @@ object TradeSnapshotArchiveManager {
                 if (existingClose == null || existingClose.localImagePath.isBlank() || !File(existingClose.localImagePath).exists()) {
                     runCatching {
                         val rec = buildSyntheticSnapshotRecordForTrade(trade, isClosePhase = true)
-                        val bmp = renderTradeIchimokuSnapshotBitmap(rec)
-                        val webpBytes = compressBitmapToCompactWebp(bmp, quality = 78)
-                        bmp.recycle()
+                        val webpBytes = renderSnapshotWebp(rec, quality = 78)
                         val embedded = attachEmbeddedJsonToImageBytes(webpBytes, rec)
                         val safeSym = trade.symbol.replace("/", "_").replace(" ", "_")
                         val closeAt = trade.closedAt ?: (trade.openedAt + 900_000L)
                         val fileName = "AurumTrade_No${rec.displayTradeNumber}_CLOSE_${safeSym}_${trade.interval.label}_$closeAt.webp"
                         val localFile = File(dir, fileName)
                         localFile.writeBytes(embedded)
-                        val galleryUri = if (saveToPhoneGallery) {
-                            saveImageAndSelfReadableDataToPhoneStorage(context, fileName, embedded, rec)
-                        } else ""
+                        // عکس‌ها فقط داخل فضای خصوصی اپ ذخیره می‌شوند، نه در گالری عمومی گوشی.
                         currentMap[closeKey] = rec.copy(
                             localImagePath = localFile.absolutePath,
-                            phoneGalleryUri = galleryUri,
+                            phoneGalleryUri = "",
                             imageSizeBytes = embedded.size.toLong(),
                         )
                         modified = true
@@ -244,6 +374,22 @@ object TradeSnapshotArchiveManager {
         trade: PaperTrade,
         isClosePhase: Boolean = !trade.isOpen,
     ): ArchivedTradeSnapshotRecord {
+        // ── کندل واقعی، نه ساختگی ──────────────────────────────────────────────
+        // تصویر آرشیو فقط وقتی «درست» است که با کندل واقعی همان نماد/تایم‌فریم در همان لحظه
+        // رسم شود. منبع: کش زندهٔ اپ و سپس خزانهٔ ۱ ماههٔ گوشی (`LiveQuoteFetcher` خودش
+        // fallback می‌زند). اگر هیچ کندلی موجود نباشد، تصویر بازسازی‌شده با برچسب صریح
+        // «تخمینی» ثبت می‌شود تا با تصویر واقعی اشتباه گرفته نشود.
+        val cutOffMs = if (isClosePhase) (trade.closedAt ?: trade.openedAt) else trade.openedAt
+        val recordedCandles = runCatching {
+            LiveQuoteFetcher.peekCachedCandles(trade.symbol, trade.interval)
+                .filter { it.time <= cutOffMs }
+                .takeLast(90)
+        }.getOrDefault(emptyList())
+        val recordedSnapshot = if (recordedCandles.size >= 26) {
+            runCatching { IchimokuStrategyEngine.computeSnapshot(recordedCandles) }.getOrNull()
+        } else {
+            null
+        }
         val fixedSl = trade.initialStopLoss ?: trade.stopLoss
         val fixedRisk = trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0
         val expectedWin = round2(fixedRisk * trade.riskReward)
@@ -281,17 +427,24 @@ object TradeSnapshotArchiveManager {
             rrFormulaFa = trade.buildRrFormulaSummaryFa(),
             slBasisFa = "سنگر ساختاری ثابت (غیرپله‌ای)",
             tpBasisFa = "موج هوسودا (R:R اولیه ثابت)",
-            tenkan = trade.entry,
-            kijun = fixedSl,
-            currentSpanA = trade.entry,
-            currentSpanB = fixedSl,
-            futureSpanA = trade.takeProfit,
-            futureSpanB = trade.entry,
-            atr14 = abs(trade.entry - fixedSl) * 0.5,
+            tenkan = recordedSnapshot?.tenkan ?: trade.entry,
+            kijun = recordedSnapshot?.kijun ?: fixedSl,
+            currentSpanA = recordedSnapshot?.currentSpanA ?: trade.entry,
+            currentSpanB = recordedSnapshot?.currentSpanB ?: fixedSl,
+            futureSpanA = recordedSnapshot?.futureSpanA ?: trade.takeProfit,
+            futureSpanB = recordedSnapshot?.futureSpanB ?: trade.entry,
+            atr14 = recordedSnapshot?.atr14 ?: (abs(trade.entry - fixedSl) * 0.5),
             conditionsSummary = trade.entryConditions,
             fullPaperTrade = trade,
-            candleSourceNote = "تصویر بازسازی‌شده؛ کندل و اندیکاتور ثبت نشده",
-            indicatorsAvailable = false,
+            recentCandles = recordedCandles.map { c ->
+                ArchivedCandlePoint(t = c.time, o = c.open, h = c.high, l = c.low, c = c.close)
+            },
+            candleSourceNote = if (recordedCandles.isNotEmpty()) {
+                "کندل واقعی ثبت‌شده (${recordedCandles.size} کندل تا لحظهٔ ${if (isClosePhase) "بسته شدن" else "ورود"})"
+            } else {
+                "تصویر بازسازی‌شده؛ کندل و اندیکاتور ثبت نشده"
+            },
+            indicatorsAvailable = recordedSnapshot != null,
         )
     }
 
@@ -412,9 +565,7 @@ object TradeSnapshotArchiveManager {
             )
 
             // ۱. رندر تصویر گرافیکی باکیفیت از چارت ایچیموکو + شماره معامله + باکس پوزیشن SL/TP + شروط معامله
-            val bitmap = renderTradeIchimokuSnapshotBitmap(baseRecord, closedCandles)
-            val webpBytes = compressBitmapToCompactWebp(bitmap, quality = 80)
-            bitmap.recycle()
+            val webpBytes = renderSnapshotWebp(baseRecord, closedCandles, quality = 80)
 
             // ۲. تزریق متادیتای خودخوان JSON در انتهای بایت‌های تصویر (Self-Readable Image)
             val embeddedBytes = attachEmbeddedJsonToImageBytes(webpBytes, baseRecord)
@@ -426,17 +577,10 @@ object TradeSnapshotArchiveManager {
             val localFile = File(dir, fileName)
             localFile.writeBytes(embeddedBytes)
 
-            // ۴. ذخیره خودکار در حافظه گوشی (گالری Pictures/AurumEdge و پوشه Download/AurumEdge/Archive)
-            val galleryUri = saveImageAndSelfReadableDataToPhoneStorage(
-                context = context,
-                fileName = fileName,
-                imageBytesWithEmbeddedMeta = embeddedBytes,
-                record = baseRecord,
-            )
-
+            // فقط فایل خصوصی اپ؛ با کارت آرشیو، داخل خود Aurum Edge باز می‌شود.
             val finalRecord = baseRecord.copy(
                 localImagePath = localFile.absolutePath,
-                phoneGalleryUri = galleryUri,
+                phoneGalleryUri = "",
                 imageSizeBytes = embeddedBytes.size.toLong(),
             )
 
@@ -552,9 +696,7 @@ object TradeSnapshotArchiveManager {
                 fullPaperTrade = closedTrade,
             )
 
-            val bitmap = renderTradeIchimokuSnapshotBitmap(closeRecord, compactCandles)
-            val webpBytes = compressBitmapToCompactWebp(bitmap, quality = 80)
-            bitmap.recycle()
+            val webpBytes = renderSnapshotWebp(closeRecord, compactCandles, quality = 80)
 
             val embeddedBytes = attachEmbeddedJsonToImageBytes(webpBytes, closeRecord)
 
@@ -564,16 +706,9 @@ object TradeSnapshotArchiveManager {
             val localFile = File(dir, fileName)
             localFile.writeBytes(embeddedBytes)
 
-            val galleryUri = saveImageAndSelfReadableDataToPhoneStorage(
-                context = context,
-                fileName = fileName,
-                imageBytesWithEmbeddedMeta = embeddedBytes,
-                record = closeRecord,
-            )
-
             val finalCloseRecord = closeRecord.copy(
                 localImagePath = localFile.absolutePath,
-                phoneGalleryUri = galleryUri,
+                phoneGalleryUri = "",
                 imageSizeBytes = embeddedBytes.size.toLong(),
             )
 
@@ -1116,62 +1251,9 @@ object TradeSnapshotArchiveManager {
     }
 
     /**
-     * ذخیره خودکار تصویر کم‌حجم WebP در گالری گوشی (`Pictures/AurumEdge/TradeArchive`)
-     * و ذخیره نسخه خودخوان در `Download/AurumEdge/Archive` تا بعداً اپ بتواند دیتای خود را از حافظه گوشی بخواند.
+     * تصاویر تازه به‌صورت خصوصی در `filesDir/trade_snapshots_v1` می‌مانند و فقط از گالری داخل اپ باز می‌شوند.
+     * متادیتای قدیمی `phoneGalleryUri` برای سازگاری با آرشیوهای نسخه‌های قبلی حفظ شده است.
      */
-    private fun saveImageAndSelfReadableDataToPhoneStorage(
-        context: Context,
-        fileName: String,
-        imageBytesWithEmbeddedMeta: ByteArray,
-        record: ArchivedTradeSnapshotRecord,
-    ): String {
-        var savedGalleryUri = ""
-        runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val resolver = context.contentResolver
-                val imgValues = ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/webp")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/AurumEdge/TradeArchive")
-                    put(MediaStore.Images.Media.IS_PENDING, 1)
-                }
-                val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, imgValues)
-                if (uri != null) {
-                    resolver.openOutputStream(uri)?.use { it.write(imageBytesWithEmbeddedMeta) }
-                    imgValues.clear()
-                    imgValues.put(MediaStore.Images.Media.IS_PENDING, 0)
-                    resolver.update(uri, imgValues, null, null)
-                    savedGalleryUri = uri.toString()
-                }
-
-                // همچنین ذخیره فایل در Download/AurumEdge/Archive برای بازخوانی خودکار بعدی
-                val dlValues = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                    put(MediaStore.Downloads.MIME_TYPE, "image/webp")
-                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AurumEdge/Archive")
-                    put(MediaStore.Downloads.IS_PENDING, 1)
-                }
-                val dlUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, dlValues)
-                if (dlUri != null) {
-                    resolver.openOutputStream(dlUri)?.use { it.write(imageBytesWithEmbeddedMeta) }
-                    dlValues.clear()
-                    dlValues.put(MediaStore.Downloads.IS_PENDING, 0)
-                    resolver.update(dlUri, dlValues, null, null)
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                val picDir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                    "AurumEdge/TradeArchive",
-                ).apply { mkdirs() }
-                val outFile = File(picDir, fileName)
-                outFile.writeBytes(imageBytesWithEmbeddedMeta)
-                savedGalleryUri = Uri.fromFile(outFile).toString()
-            }
-        }
-        return savedGalleryUri
-    }
-
     /**
      * بازخوانی خودکار تمام عکس‌ها و فایل‌های آرشیو ذخیره‌شده در حافظه گوشی (`Pictures/AurumEdge/TradeArchive` و `Download/AurumEdge/Archive`)
      * یا از یک URI انتخابی کاربر، و بازگردانی کامل رکوردهای آرشیو و معاملات به داخل اپ!
@@ -1297,6 +1379,209 @@ object TradeSnapshotArchiveManager {
             file.writeText(json.encodeToString(list), Charsets.UTF_8)
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // بکاپ آرشیو تصاویر (اسکرین‌شات‌های معاملات) در یک فایل ZIP
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /** تعداد و حجم تصاویر آرشیو داخل حافظهٔ اپ (بدون نیاز به بازسازی ZIP). */
+    @Synchronized
+    fun archiveBasket(context: Context): ArchivedSnapshotBasket {
+        val dir = File(context.filesDir, ARCHIVE_DIR_NAME)
+        val files = dir.listFiles()?.filter { it.isFile && it.length() > 0L }.orEmpty()
+        val imageFiles = files.filter { it.extension.lowercase(Locale.ROOT) in setOf("webp", "png", "jpg", "jpeg") }
+        return ArchivedSnapshotBasket(
+            imageCount = imageFiles.size,
+            imageBytes = imageFiles.sumOf { it.length() },
+            recordCount = if (_records.value.isEmpty()) loadIndexFromDisk(context).size else _records.value.size,
+            oldestMs = imageFiles.minOfOrNull { it.lastModified() } ?: 0L,
+            newestMs = imageFiles.maxOfOrNull { it.lastModified() } ?: 0L,
+        )
+    }
+
+    /**
+     * ساخت یک فایل ZIP از **همهٔ** تصاویر آرشیو + فهرست JSON + راهنمای متنی.
+     *
+     * خروجی در `cacheDir/exports` نوشته می‌شود تا هم FileProvider آن را برای اشتراک‌گذاری
+     * ببیند و هم بدون اجازهٔ حافظه به پوشهٔ دانلود منتقل شود.
+     */
+    @Synchronized
+    fun buildSnapshotZipBundle(context: Context, stampMs: Long = System.currentTimeMillis()): ArchivedSnapshotBundle {
+        return runCatching {
+            val sourceDir = File(context.filesDir, ARCHIVE_DIR_NAME)
+            val sourceFiles = sourceDir.listFiles()
+                ?.filter { it.isFile && it.length() > 0L }
+                ?.sortedBy { it.name }
+                .orEmpty()
+            val indexFile = File(context.filesDir, INDEX_FILE_NAME)
+            if (sourceFiles.isEmpty() && !indexFile.exists()) {
+                return ArchivedSnapshotBundle(
+                    zipFile = null,
+                    fileName = "",
+                    imageCount = 0,
+                    zipBytes = 0L,
+                    sourceBytes = 0L,
+                    errorFa = "هنوز هیچ تصویری در آرشیو ساخته نشده است",
+                )
+            }
+            val outDir = File(context.cacheDir, "exports").apply { mkdirs() }
+            // فایل‌های قدیمی همین بسته پاک می‌شوند تا حافظهٔ کش بی‌دلیل بزرگ نشود.
+            outDir.listFiles()?.filter { it.name.startsWith("AurumScreenshots_") }?.forEach { it.delete() }
+            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(stampMs))
+            val fileName = "AurumScreenshots_$stamp.zip"
+            val zipFile = File(outDir, fileName)
+            var written = 0
+            ZipOutputStream(BufferedOutputStream(zipFile.outputStream())).use { zip ->
+                zip.setLevel(6)
+                sourceFiles.forEach { file ->
+                    runCatching {
+                        zip.putNextEntry(ZipEntry("screenshots/${file.name}"))
+                        file.inputStream().use { input -> input.copyTo(zip) }
+                        zip.closeEntry()
+                        written++
+                    }
+                }
+                if (indexFile.exists()) {
+                    runCatching {
+                        zip.putNextEntry(ZipEntry(INDEX_FILE_NAME))
+                        zip.write(indexFile.readBytes())
+                        zip.closeEntry()
+                    }
+                }
+                runCatching {
+                    val basket = archiveBasket(context)
+                    val readme = buildString {
+                        appendLine("Aurum Edge — بکاپ آرشیو اسکرین‌شات معاملات")
+                        appendLine("تاریخ ساخت: " + formatStampFa(stampMs))
+                        appendLine("تعداد تصویر: " + basket.imageCount)
+                        appendLine("تعداد رکورد فهرست: " + basket.recordCount)
+                        appendLine("نسخهٔ اپ: " + com.aurum.edge.BuildConfig.VERSION_NAME + " (کد " + com.aurum.edge.BuildConfig.VERSION_CODE + ")")
+                        appendLine()
+                        appendLine("پوشهٔ screenshots/ تصاویر WebP هر معامله را دارد (باز شدن و بسته شدن).")
+                        appendLine("فایل " + INDEX_FILE_NAME + " فهرست کامل رکوردها با قیمت ورود، حد ضرر، حد سود و نتیجه است.")
+                        appendLine("برای بازگردانی: در تب آپدیت → «بکاپ اسکرین‌شات‌ها» → بازخوانی از فایل ZIP یا بازخوانی از حافظهٔ گوشی.")
+                    }
+                    zip.putNextEntry(ZipEntry("README_FA.txt"))
+                    zip.write(readme.toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                }
+            }
+            ArchivedSnapshotBundle(
+                zipFile = zipFile,
+                fileName = fileName,
+                imageCount = written,
+                zipBytes = zipFile.length(),
+                sourceBytes = sourceFiles.sumOf { it.length() },
+                errorFa = null,
+            )
+        }.getOrElse { err ->
+            ArchivedSnapshotBundle(
+                zipFile = null,
+                fileName = "",
+                imageCount = 0,
+                zipBytes = 0L,
+                sourceBytes = 0L,
+                errorFa = err.message ?: "ساخت فایل ZIP ناموفق بود",
+            )
+        }
+    }
+
+    /** ارسال فایل ZIP از طریق Share Sheet اندروید (تلگرام، واتساپ، ایمیل، درایو و ...). */
+    fun shareSnapshotZip(context: Context, zipFile: File): Result<Unit> = runCatching {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            context.packageName + ".updateprovider",
+            zipFile,
+        )
+        val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "application/zip"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "Aurum Edge — بکاپ اسکرین‌شات‌ها")
+            putExtra(android.content.Intent.EXTRA_TEXT, "آرشیو اسکرین‌شات معاملات Aurum Edge (" + zipFile.name + ")")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = android.content.Intent.createChooser(shareIntent, "ارسال بکاپ اسکرین‌شات‌ها").apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    }
+
+    /**
+     * ذخیرهٔ فایل ZIP در پوشهٔ دانلود گوشی («Download/AurumEdge/Screenshots»)
+     * تا کاربر بتواند با فایل‌منیجر هم آن را بردارد.
+     */
+    fun saveSnapshotZipToDownloads(context: Context, zipFile: File): Result<String> = runCatching {
+        val relativeFolder = Environment.DIRECTORY_DOWNLOADS + "/AurumEdge/Screenshots"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = context.contentResolver
+            runCatching {
+                resolver.delete(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    MediaStore.MediaColumns.DISPLAY_NAME + " = ?",
+                    arrayOf(zipFile.name),
+                )
+            }
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, zipFile.name)
+                put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+                put(MediaStore.Downloads.RELATIVE_PATH, relativeFolder)
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: error("ساخت فایل در پوشهٔ دانلود ممکن نشد")
+            resolver.openOutputStream(uri)?.use { out -> zipFile.inputStream().use { it.copyTo(out) } }
+                ?: error("نوشتن فایل در پوشهٔ دانلود ممکن نشد")
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            "Download/AurumEdge/Screenshots/" + zipFile.name
+        } else {
+            @Suppress("DEPRECATION")
+            val dlRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val folder = File(dlRoot, "AurumEdge/Screenshots").apply { mkdirs() }
+            val target = File(folder, zipFile.name)
+            zipFile.inputStream().use { input -> target.outputStream().use { out -> input.copyTo(out) } }
+            "Download/AurumEdge/Screenshots/" + zipFile.name
+        }
+    }
+
+    /** بازگردانی رکوردها از یک فایل ZIP بکاپ که کاربر انتخاب کرده است. */
+    @Synchronized
+    fun importSnapshotZip(context: Context, uri: Uri): Int {
+        val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
+        var imported = 0
+        context.contentResolver.openInputStream(uri)?.use { raw ->
+            java.util.zip.ZipInputStream(raw.buffered()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    val name = entry.name
+                    if (!entry.isDirectory) {
+                        if (name.endsWith(".webp", true) || name.endsWith(".png", true) || name.endsWith(".jpg", true)) {
+                            val target = File(dir, name.substringAfterLast('/'))
+                            target.outputStream().use { out -> zip.copyTo(out) }
+                            imported++
+                        } else if (name.endsWith(INDEX_FILE_NAME, true)) {
+                            runCatching {
+                                val text = zip.readBytes().toString(Charsets.UTF_8)
+                                val parsed = json.decodeFromString<List<ArchivedTradeSnapshotRecord>>(text)
+                                if (parsed.isNotEmpty()) {
+                                    val merged = (parsed + loadIndexFromDisk(context)).distinctBy { it.tradeId + "_" + it.snapshotPhase }
+                                    saveIndexToDisk(context, merged)
+                                    _records.value = merged
+                                }
+                            }
+                        }
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+        }
+        return imported
+    }
+
+    private fun formatStampFa(ms: Long): String =
+        SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(ms))
 
     private fun fmtPrice(v: Double): String {
         val a = abs(v)

@@ -29,7 +29,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +62,7 @@ fun NeuralBrainScreen(
     viewModel: AurumViewModel,
 ) {
     val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
+    val allStrategyLearningFa by viewModel.allStrategyLearningFa.collectAsStateWithLifecycle()
     val dualReports by viewModel.dualSymbolStrategyReports.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -65,23 +70,47 @@ fun NeuralBrainScreen(
 
     var assistantSymbol by rememberSaveable { mutableStateOf(V1Universe.allSymbols.first()) }
     var assistantTfLabel by rememberSaveable { mutableStateOf(Interval.M15.label) }
-    var matrixFilter by rememberSaveable { mutableIntStateOf(0) } // 0 = همه ۲۴ استراتژی, 1 = ۹ کتاب درایو, 2 = ۱۵ ترکیب پایه
+    var matrixFilter by rememberSaveable { mutableIntStateOf(0) } // 0 = همه ۲۴ استراتژی, 1 = ۹ لایهٔ ساختاری, 2 = ۱۵ ترکیب پایه
 
     val assistantInterval = if (assistantTfLabel == Interval.M5.label) Interval.M5 else Interval.M15
-    val coaching = remember(assistantSymbol, assistantInterval, dualReports) {
-        MasterIchimokuTradingAssistant.analyzeSymbolWithMasterMethod(
-            symbol = assistantSymbol,
-            dualReport = dualReports[assistantSymbol],
-            focusedInterval = assistantInterval,
-        )
+
+    // This tab derives live coaching and post-trade lessons from large candle/trade histories.
+    // In particular, generating improvement notes reads the on-device CandleVault. Never run
+    // either calculation from composition: on mid-range devices this used to freeze the UI.
+    val coaching by produceState<com.aurum.edge.core.MasterIchimokuSymbolCoaching?>(
+        initialValue = null,
+        assistantSymbol,
+        assistantInterval,
+        dualReports,
+    ) {
+        delay(120L) // coalesce bursts of live report updates before starting CPU work
+        value = withContext(Dispatchers.Default) {
+            MasterIchimokuTradingAssistant.analyzeSymbolWithMasterMethod(
+                symbol = assistantSymbol,
+                dualReport = dualReports[assistantSymbol],
+                focusedInterval = assistantInterval,
+            )
+        }
     }
-    val improvementNotes = remember(trades, dualReports, settings.baseStrategyConfig, pinnedNotes) {
-        MasterIchimokuTradingAssistant.generateActionableImprovementNotes(
-            trades = trades,
-            dualReports = dualReports,
-            currentConfig = settings.baseStrategyConfig,
-        )
+    val improvementNotes by produceState<List<com.aurum.edge.core.IchimokuImprovementNote>?>(
+        initialValue = null,
+        trades,
+        dualReports,
+        settings.baseStrategyConfig,
+        pinnedNotes,
+    ) {
+        delay(250L) // debounce frequent journal/live-state emissions
+        value = withContext(Dispatchers.IO) {
+            MasterIchimokuTradingAssistant.generateActionableImprovementNotes(
+                trades = trades,
+                dualReports = dualReports,
+                currentConfig = settings.baseStrategyConfig,
+            )
+        }
     }
+
+    val visibleImprovementNotes = improvementNotes.orEmpty()
+    val coachingResult = coaching
 
     Column(
         modifier = Modifier
@@ -107,6 +136,7 @@ fun NeuralBrainScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
+                    modifier = Modifier.weight(1f).padding(end = 6.dp),
                     text = "📄 مرکز خروجی PDF کامل هوش مصنوعی و آرشیو اسکرین‌شات",
                     style = MaterialTheme.typography.labelMedium,
                     color = AurumColors.Gold,
@@ -150,11 +180,65 @@ fun NeuralBrainScreen(
                     )
                 }
             }
+            // ── کپی تمام توضیحات هوش عصبی در کلیپ‌بورد ──
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = { viewModel.copyNeuralBrainFullReport() },
+                    modifier = Modifier.weight(1f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AurumColors.Gold.copy(alpha = 0.6f)),
+                ) {
+                    Text(
+                        text = "📋 کپی کل توضیحات",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AurumColors.Gold,
+                        maxLines = 1,
+                    )
+                }
+                OutlinedButton(
+                    onClick = { viewModel.copyNeuralBrainQuickSummary() },
+                    modifier = Modifier.weight(1f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AurumColors.Cyan.copy(alpha = 0.6f)),
+                ) {
+                    Text(
+                        text = "📋 کپی خلاصهٔ وضعیت",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AurumColors.Cyan,
+                        maxLines = 1,
+                    )
+                }
+            }
+            Text(
+                text = "هر کارت دکمهٔ «📋 کپی» دارد؛ با آن، متن توضیح همان بخش در کلیپ‌بورد ذخیره می‌شود و می‌توانید در پیام‌رسان یا یادداشت بچسبانید.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextSecondary,
+                lineHeight = 16.sp,
+            )
+        }
+
+        // ── پنل «زمان‌بندی سشن و خروج هوشمند» — یادگیری چقدر زودتر بستن ──────────────
+        SectionCard(
+            title = "🕒 زمان‌بندی سشن و یادگیری زمان خروج (چقدر زودتر ببندیم؟)",
+            onCopy = { viewModel.copyNeuralBrainSection("sessionexit") },
+            subtitle = "باندیت چندبازویی ε-greedy روی گزینه‌های ۰ تا ۴۵ دقیقه؛ پاداش = دلار نجات‌یافته نسبت به نگه‌داشتن پوزیشن تا بازگشایی بازار",
+            initiallyExpanded = false,
+        ) {
+            val sessionEstimates by viewModel.sessionExitEstimates.collectAsStateWithLifecycle()
+            val sessionNote by viewModel.sessionExitLearningNote.collectAsStateWithLifecycle()
+            com.aurum.edge.ui.components.SessionExitPanel(
+                estimates = sessionEstimates,
+                lastLearningNote = sessionNote,
+            )
         }
 
         // ── پنل رگرسیون ماتریسی پارامترها با بهترین متود روز دنیا (Ridge L2 + Huber Robust IRLS + Walk-Forward CV) ──
         SectionCard(
             title = "📐 پنل رگرسیون ماتریسی پارامترها (بهترین متود روز دنیا: Ridge L2 + Huber IRLS)",
+            onCopy = { viewModel.copyNeuralBrainSection("regression") },
             subtitle = "رگرسیون هم‌زمان ۱۰ پارامتر ساختاری، دالان طلایی حد ضرر [0.80..2.10 ATR]، شیب ۱۶ ویژگی و قفل R:R در [1.5..3.0]",
             initiallyExpanded = false,
         ) {
@@ -195,7 +279,7 @@ fun NeuralBrainScreen(
                             color = if (isAllSel) Color.Black else AurumColors.TextPrimary,
                         )
                     }
-                    BitcoinStrategyModel.entries.forEach { model ->
+                    BitcoinStrategyModel.neuralLearningModels.forEach { model ->
                         val isSel = regStrategyId == model.id
                         Box(
                             modifier = Modifier
@@ -341,6 +425,7 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             text = "📊 جدول ۱۰ پارامتر رگرسیون‌شده ساختاری، حد ضرر و R:R (${regReport.parameterRows.size} پارامتر)",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Gold,
@@ -413,6 +498,7 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             text = "🧬 شیب رگرسیونی ۱۶ ویژگی ورودی (Huber β_R & Ridge β_Win)",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,
@@ -470,6 +556,7 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             text = "🛡️ کالبدشکافی مهندسی حد ضرر (چرا قبلی‌ها بی‌فایده بودند + متود ۵ سنگری روز دنیا)",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Green,
@@ -494,10 +581,11 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۰. دستیار ترید با بهترین متود ایچیموکو جهان (گوایچی هوسودا + ۹ کتاب درایو) ──────
+        // ── ۰. دستیار ترید با بهترین متود ایچیموکو جهان (گوایچی هوسودا + ۹ لایهٔ ساختاری) ──────
         SectionCard(
-            title = "🧭 دستیار ترید با بهترین متود ایچیموکو جهان (هوسودا + پاتل + ۹ کتاب درایو)",
-            subtitle = "تحلیل ۴ ستون اصیل گوایچی هوسودا (تعادل، امواج I/V/N/P/S، چرخه زمان 9/17/26/33 و اهداف V/N/E/NT) + تله‌متری زنده ۹ کتاب درایو",
+            title = "🧭 دستیار ترید با بهترین متود ایچیموکو جهان (هوسودا + پاتل + ۹ لایهٔ ساختاری)",
+            onCopy = { viewModel.copyTextToClipboard("دستیار ایچیموکو", buildAssistantCopyText(coachingResult), "📋 توضیحات دستیار ایچیموکو کپی شد") },
+            subtitle = "تحلیل ۴ ستون اصیل گوایچی هوسودا (تعادل، امواج I/V/N/P/S، چرخه زمان 9/17/26/33 و اهداف V/N/E/NT) + تله‌متری زنده ۹ لایهٔ ساختاری",
             initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -533,7 +621,7 @@ fun NeuralBrainScreen(
                     )
                 }
 
-                if (coaching == null) {
+                if (coachingResult == null) {
                     Text(
                         text = "در حال دریافت کندل‌های $assistantSymbol برای تحلیل دستیار استاد ایچیموکو...",
                         style = MaterialTheme.typography.bodySmall,
@@ -541,8 +629,8 @@ fun NeuralBrainScreen(
                     )
                 } else {
                     val gradeColor = when {
-                        coaching.worldClassIchimokuScore >= 76 -> AurumColors.Green
-                        coaching.worldClassIchimokuScore >= 60 -> AurumColors.Gold
+                        coachingResult.worldClassIchimokuScore >= 76 -> AurumColors.Green
+                        coachingResult.worldClassIchimokuScore >= 60 -> AurumColors.Gold
                         else -> AurumColors.Red
                     }
                     Column(
@@ -560,42 +648,42 @@ fun NeuralBrainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Pill(
-                                text = "${coaching.symbol} [${coaching.timeframeLabel}] · ${if (coaching.direction == SignalAction.BUY) "سوگیری خرید (LONG)" else "سوگیری فروش (SHORT)"}",
-                                color = if (coaching.direction == SignalAction.BUY) AurumColors.Green else AurumColors.Red,
+                                text = "${coachingResult.symbol} [${coachingResult.timeframeLabel}] · ${if (coachingResult.direction == SignalAction.BUY) "سوگیری خرید (LONG)" else "سوگیری فروش (SHORT)"}",
+                                color = if (coachingResult.direction == SignalAction.BUY) AurumColors.Green else AurumColors.Red,
                             )
                             Pill(
-                                text = "امتیاز متود جهانی: ${coaching.worldClassIchimokuScore}/100",
+                                text = "امتیاز متود جهانی: ${coachingResult.worldClassIchimokuScore}/100",
                                 color = gradeColor,
                             )
                         }
                         Text(
-                            text = coaching.masterGradeFa,
+                            text = coachingResult.masterGradeFa,
                             style = MaterialTheme.typography.bodySmall,
                             color = gradeColor,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = coaching.masterVerdictFa,
+                            text = coachingResult.masterVerdictFa,
                             style = MaterialTheme.typography.bodySmall,
                             color = AurumColors.TextPrimary,
                         )
                         Text(
-                            text = "🌊 نظریه امواج هوسودا (Hado Ron): ${coaching.hosodaWaveTypeFa}",
+                            text = "🌊 نظریه امواج هوسودا (Hado Ron): ${coachingResult.hosodaWaveTypeFa}",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Cyan,
                         )
                         Text(
-                            text = "⏳ نظریه زمان هوسودا (Kihon Suchi): ${coaching.hosodaTimeCycleStatusFa}",
+                            text = "⏳ نظریه زمان هوسودا (Kihon Suchi): ${coachingResult.hosodaTimeCycleStatusFa}",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Gold,
                         )
                         Text(
-                            text = "🎯 نظریه اهداف قیمتی (Keisanchi): ${coaching.keisanchiTargetsSummaryFa}",
+                            text = "🎯 نظریه اهداف قیمتی (Keisanchi): ${coachingResult.keisanchiTargetsSummaryFa}",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Green,
                         )
                         Text(
-                            text = "🤝 ${coaching.multiStrategyAgreementSummaryFa}",
+                            text = "🤝 ${coachingResult.multiStrategyAgreementSummaryFa}",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextSecondary,
                         )
@@ -607,7 +695,7 @@ fun NeuralBrainScreen(
                             color = AurumColors.Gold,
                             fontWeight = FontWeight.Bold,
                         )
-                        coaching.executionPlanStepsFa.forEach { step ->
+                        coachingResult.executionPlanStepsFa.forEach { step ->
                             Text(
                                 text = "• $step",
                                 style = MaterialTheme.typography.labelSmall,
@@ -622,7 +710,7 @@ fun NeuralBrainScreen(
                             color = AurumColors.Red,
                             fontWeight = FontWeight.Bold,
                         )
-                        coaching.activePitfallsFa.forEach { p ->
+                        coachingResult.activePitfallsFa.forEach { p ->
                             Text(
                                 text = "• $p",
                                 style = MaterialTheme.typography.labelSmall,
@@ -632,12 +720,12 @@ fun NeuralBrainScreen(
 
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "📚 خلاصه تله‌متری زنده استراتژی‌های درایو روی ${coaching.symbol}:",
+                            text = "📚 خلاصه تله‌متری زندهٔ لایه‌های ساختاری روی ${coachingResult.symbol}:",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,
                             fontWeight = FontWeight.Bold,
                         )
-                        coaching.driveBooksTelemetryFa.forEach { line ->
+                        coachingResult.driveBooksTelemetryFa.forEach { line ->
                             Text(
                                 text = line,
                                 style = MaterialTheme.typography.labelSmall,
@@ -651,7 +739,8 @@ fun NeuralBrainScreen(
 
         // ── ۰-ب. لیست نکات قابل اصلاح و ارتقاء بعدی دستیار ایچیموکو ("بتونه نکاتی بگه که بشه بعدا درستش کرد") ──
         SectionCard(
-            title = "🛠️ نکات قابل اصلاح و ارتقاء بعدی از نگاه دستیار ایچیموکو (${improvementNotes.size} نکته)",
+            title = "🛠️ نکات قابل اصلاح و ارتقاء بعدی از نگاه دستیار ایچیموکو (${visibleImprovementNotes.size} نکته)",
+            onCopy = { viewModel.copyAssistantImprovementNotes(visibleImprovementNotes) },
             subtitle = "عیب‌یابی خودکار معاملات، استاپ‌ها و گلوگاه‌های ۲۴ استراتژی به همراه دستور دقیق اصلاح برای آپدیت‌های بعدی یا اعمال فوری",
             initiallyExpanded = false,
         ) {
@@ -661,7 +750,7 @@ fun NeuralBrainScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Button(
-                        onClick = { viewModel.copyAssistantImprovementNotes(improvementNotes) },
+                        onClick = { viewModel.copyAssistantImprovementNotes(visibleImprovementNotes) },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AurumColors.Gold,
                             contentColor = Color.Black,
@@ -672,7 +761,20 @@ fun NeuralBrainScreen(
                     }
                 }
 
-                improvementNotes.forEach { note ->
+                if (improvementNotes == null) {
+                    Text(
+                        text = "⏳ در حال کالبدشکافی معاملات و خواندن خزانهٔ کندل‌ها در پس‌زمینه…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AurumColors.TextMuted,
+                    )
+                } else if (visibleImprovementNotes.isEmpty()) {
+                    Text(
+                        text = "✅ در داده‌های فعلی نکتهٔ اصلاحی تازه‌ای پیدا نشد.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+                visibleImprovementNotes.forEach { note ->
                     val prColor = when (note.priority) {
                         ImprovementNotePriority.CRITICAL -> AurumColors.Red
                         ImprovementNotePriority.HIGH -> AurumColors.Gold
@@ -762,6 +864,7 @@ fun NeuralBrainScreen(
         // ── ۱. کارت وضعیت کلی و بلوغ ۱۰,۰۰۰ معامله + ذخیره/بازخوانی از گوشی ──────
         SectionCard(
             title = "🧠 مغز شبکه عصبی ترید (FT-Attention + SwiGLU + AdamW)",
+            onCopy = { viewModel.copyNeuralBrainSection("brain") },
             subtitle = "سیستم هوش عصبی اختصاصی ترید ایچیموکو: یادگیری الگوهای سودده، تله‌های استاپ‌هانت، بهترین استراتژی هر نماد و سشن‌های طلایی",
             initiallyExpanded = false,
         ) {
@@ -804,13 +907,17 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = if (neuralState.isWarmupCompleted) {
-                                "✅ بلوغ ۱۰,۰۰۰ معامله تکمیل شده — فیلتر هوشمند ترید فعال است"
-                            } else {
-                                "⏳ فاز یادگیری عمیق تا ۱۰,۰۰۰ معامله (${String.format(Locale.US, "%.2f%%", neuralState.warmupProgressPercent)})"
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
+                            text = when {
+                                neuralState.isGateActive ->
+                                    "✅ گیت اجرایی فعال است — هر دو شرط کامل (۱۰,۰۰۰ معامله + اجازهٔ شما)"
+                                neuralState.volumeConditionMet ->
+                                    "🟡 شرط ۱ کامل شد (۱۰,۰۰۰ معامله) — منتظر فعال‌سازی شما (شرط ۲)"
+                                else ->
+                                    "⏳ فاز یادگیری عمیق تا ۱۰,۰۰۰ معامله (${String.format(Locale.US, "%.2f%%", neuralState.warmupProgressPercent)})"
                             },
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (neuralState.isWarmupCompleted) AurumColors.Green else AurumColors.Gold,
+                            color = if (neuralState.isGateActive) AurumColors.Green else AurumColors.Gold,
                             fontWeight = FontWeight.Bold,
                         )
                         Pill(
@@ -824,7 +931,7 @@ fun NeuralBrainScreen(
                             .fillMaxWidth()
                             .height(8.dp)
                             .clip(RoundedCornerShape(4.dp)),
-                        color = if (neuralState.isWarmupCompleted) AurumColors.Green else AurumColors.Gold,
+                        color = if (neuralState.isGateActive) AurumColors.Green else AurumColors.Gold,
                         trackColor = AurumColors.Bg,
                     )
                     Row(
@@ -833,20 +940,25 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "فعال‌سازی زودهنگام فیلتر مسدودسازی تله‌های ضررده (قبل از ۱۰,۰۰۰ معامله)",
+                            text = "شرط ۲ — فعال‌سازی گیت مسدودسازی تله‌های ضررده توسط من (هر زمان قابل خاموش‌کردن)",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextSecondary,
                             modifier = Modifier.weight(1f),
                         )
                         Switch(
-                            checked = neuralState.forceActiveBeforeWarmup,
-                            onCheckedChange = { viewModel.setNeuralForceActiveBeforeWarmup(it) },
+                            checked = neuralState.gateUserActivationEnabled,
+                            onCheckedChange = { viewModel.setNeuralGateUserActivation(it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = AurumColors.Green,
                                 checkedTrackColor = AurumColors.Green.copy(alpha = 0.35f),
                             ),
                         )
                     }
+                    Text(
+                        text = neuralState.gatePolicySummaryFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (neuralState.isGateActive) AurumColors.Green else AurumColors.TextSecondary,
+                    )
                 }
 
                 Row(
@@ -873,10 +985,126 @@ fun NeuralBrainScreen(
             }
         }
 
+        // ── ۱-ب. دفتر یادگیری، دو شرط فعال‌سازی گیت و انتقال دانش بین نسخه‌ها ──────
+        SectionCard(
+            title = "🧾 دفتر یادگیری و انتقال دانش بین نسخه‌ها",
+            onCopy = { viewModel.copyNeuralBrainSection("ledger") },
+            subtitle = "عدد یادگیری از دفتر معامله‌های یکتا محاسبه می‌شود (نه شمارندهٔ افزایشی)؛ هر اصلاح شبکه با متن فارسی ثبت و همراه «بستهٔ دانش» برای نسخه‌های بعدی ذخیره می‌شود",
+            initiallyExpanded = false,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    StatTile(
+                        label = "معامله‌های ژورنال",
+                        value = String.format(Locale.US, "%,d", neuralState.journalClosedTradesSeen),
+                        valueColor = AurumColors.Cyan,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatTile(
+                        label = "ردیف دفتر یادگیری",
+                        value = String.format(Locale.US, "%,d", neuralState.learnedLedgerRows),
+                        valueColor = AurumColors.Gold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatTile(
+                        label = "یادگیری تکراری حذف‌شده",
+                        value = String.format(Locale.US, "%,d", neuralState.duplicatesRepairedCount),
+                        valueColor = if (neuralState.duplicatesRepairedCount > 0) AurumColors.Red else AurumColors.Green,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Text(
+                    text = neuralState.ledgerReconciliationSummaryFa.ifBlank {
+                        "برای تطبیق دفتر با ژورنال، دکمهٔ «بازبینی دفتر یادگیری» را بزنید."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+                Text(
+                    text = "نسخهٔ طرح داده: ${neuralState.learnedSchemaVersion} · " +
+                        "ردیف هرس‌شده: ${String.format(Locale.US, "%,d", neuralState.learnedLedgerPrunedCount)} · " +
+                        "بازبینی دانش: #${neuralState.knowledgeRevision}",
+                    fontSize = 10.sp,
+                    color = AurumColors.TextSecondary,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { viewModel.auditNeuralLearningLedgerNow() },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("🔍 بازبینی دفتر یادگیری", fontSize = 10.sp, color = AurumColors.Cyan)
+                    }
+                    Button(
+                        onClick = { viewModel.exportNeuralKnowledgeBundleNow() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AurumColors.Gold,
+                            contentColor = Color.Black,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("🧾 ذخیرهٔ بستهٔ دانش", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                OutlinedButton(
+                    onClick = { viewModel.restoreNeuralKnowledgeBundleFromPhoneNow() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        "📥 بازخوانی بستهٔ دانش از گوشی (انتقال آموخته‌ها به این نسخه)",
+                        fontSize = 10.sp,
+                        color = AurumColors.Gold,
+                    )
+                }
+                if (neuralState.knowledgeChangeLog.isEmpty()) {
+                    Text(
+                        text = "هنوز اصلاحی ثبت نشده است؛ پس از چند معامله، تیونینگ‌ها و شرایط ممنوعهٔ کشف‌شده اینجا فهرست می‌شوند.",
+                        fontSize = 10.sp,
+                        color = AurumColors.TextSecondary,
+                    )
+                } else {
+                    Text(
+                        text = "🗂️ آخرین اصلاحات ثبت‌شدهٔ شبکه (قابل فهم در نسخهٔ بعدی):",
+                        fontSize = 11.sp,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    neuralState.knowledgeChangeLog.take(8).forEach { entry ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(AurumColors.SurfaceAlt)
+                                .padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = "${entry.titleFa} · ${entry.kindCode} · در ${String.format(Locale.US, "%,d", entry.learnedCountAtChange)} معاملهٔ آموخته‌شده",
+                                fontSize = 10.sp,
+                                color = AurumColors.Cyan,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = entry.detailFa,
+                                fontSize = 10.sp,
+                                color = AurumColors.TextSecondary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // ── ۱-الف. درک زنده وضعیت هر بازار و تشخیص علت وقوع حرکت فعلی (Causal Market Attribution) ──
         SectionCard(
-            title = "🌍 درک زنده وضعیت هر بازار و علت حرکت فعلی (Causal Market Attribution)",
-            subtitle = "تشخیص لحظه‌ای این‌که در طلا، نقره، کریپتو، فارکس و داوجونز چه اتفاقی در جریان است و علت آن مربوط به چیست",
+            title = "🌍 درک زندهٔ وضعیت بیت‌کوین و علت حرکت فعلی (Causal Market Attribution)",
+            onCopy = { viewModel.copyNeuralBrainSection("market") },
+            subtitle = "این بخش طبق درخواست کاربر فقط برای بیت‌کوین ساخته می‌شود و زمانی پر می‌شود که موتور در حال بررسی/معاملهٔ بیت‌کوین است",
             initiallyExpanded = false,
         ) {
             val focusedReport = dualReports[assistantSymbol]?.primaryReport
@@ -885,29 +1113,24 @@ fun NeuralBrainScreen(
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    V1Universe.allSymbols.forEach { sym ->
-                        Pill(
-                            text = sym,
-                            color = if (sym == assistantSymbol) AurumColors.Gold else AurumColors.TextMuted,
-                            modifier = Modifier.clickable { assistantSymbol = sym },
-                        )
-                    }
+                    Pill(text = "🟠 BTC/USDT", color = AurumColors.Gold)
+                    Text(
+                        text = "فقط بیت‌کوین — علیت هر نماد دیگر داخل کارت همان نماد نمایش داده می‌شود.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                    )
                 }
 
-                val attributionsToShow = if (neuralState.liveMarketAttributions.isNotEmpty()) {
-                    neuralState.liveMarketAttributions
-                } else {
-                    emptyList()
-                }
+                val attributionsToShow = neuralState.liveMarketAttributions
+                    .filter { it.symbol == "BTC/USDT" }
 
                 if (attributionsToShow.isEmpty()) {
                     Text(
-                        text = "در حال دریافت کندل‌ها برای استخراج علیت بازار؛ دکمه اسکن یا به‌روزرسانی اخبار را بزنید.",
+                        text = "در حال حاضر بررسی معاملهٔ بیت‌کوین فعال نیست؛ به‌محض اسکن بیت‌کوین این بخش پر می‌شود.",
                         style = MaterialTheme.typography.bodySmall,
                         color = AurumColors.TextMuted,
                     )
@@ -966,7 +1189,7 @@ fun NeuralBrainScreen(
                                 color = AurumColors.TextSecondary,
                             )
                             Text(
-                                text = "📚 متود جامع ۹ کتاب درایو: ${attr.unified9BookSummaryFa}",
+                                text = "📚 متود جامع ۹ لایهٔ ساختاری: ${attr.unified9BookSummaryFa}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Green,
                             )
@@ -985,6 +1208,7 @@ fun NeuralBrainScreen(
         // ── ۱-ب. هوش خبری کلان و تقویم اقتصادی متصل به شبکه عصبی (Live Macro & News Intelligence) ──
         SectionCard(
             title = "📰 هوش خبری کلان و تقویم اقتصادی متصل به شبکه عصبی",
+            onCopy = { viewModel.copyNeuralBrainSection("news") },
             subtitle = "پایش شوک‌های خبری نرخ بهره، تورم (CPI)، اشتغال (NFP)، تقاضای پناهگاه امن طلا و جریان ETF کریپتو",
             initiallyExpanded = false,
         ) {
@@ -1062,6 +1286,7 @@ fun NeuralBrainScreen(
         // ── ۱-پ. فاز تیونینگ خودکار پارامترها پس از آموزش (Post-Training Parameter Auto-Tuning Phase) ──
         SectionCard(
             title = "🎛️ مرحله تیونینگ خودکار پارامترها پس از آموزش (CEM + Bayesian Auto-Tuner)",
+            onCopy = { viewModel.copyNeuralBrainSection("autotune") },
             subtitle = "کالیبراسیون خودکار پارامترهای استراتژی و گیت شبکه عصبی در پایان هر سیکل آموزشی برای شکار دقیق‌ترین معاملات سودده",
             initiallyExpanded = false,
         ) {
@@ -1094,8 +1319,8 @@ fun NeuralBrainScreen(
                         modifier = Modifier.weight(1f),
                     )
                     StatTile(
-                        label = "اجماع ۹ کتاب درایو",
-                        value = "${tuned.minDriveBooksConsensus}/9 کتاب",
+                        label = "اجماع ۹ لایهٔ ساختاری",
+                        value = "${tuned.minDriveBooksConsensus}/9 لایه",
                         valueColor = AurumColors.Cyan,
                         modifier = Modifier.weight(1f),
                     )
@@ -1155,8 +1380,38 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🎛️ اجرای تیونینگ خودکار پارامترها و ۱۶ ویژگی برای تمام ۱۶ استراتژی",
+                        text = "🎛️ تیونینگ ۱۶ مدلِ مشمول یادگیری عصبی (روش‌های BTC و پارسا مستثنا هستند)",
                         fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Button(
+                    onClick = { viewModel.trainNeuralOnAllStrategies() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Purple,
+                        contentColor = Color.White,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = "🧠 آموزش روی ۱۶ مدلِ مشمول یادگیری و ۱۵ نماد · BTC/پارسا مستثنا هستند",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Text(
+                    text = "هر روشِ مشمول یادگیری عصبی و هر نماد از معاملات خودش یاد می‌گیرد؛ اگر دادهٔ خودش کم باشد، تجربهٔ " +
+                        "بقیهٔ استراتژی‌ها و نمادهای هم‌دسته هم به آموزشش اضافه می‌شود. شخصیت هر نماد " +
+                        "(روندسواری، نویز شدوی، اعتبار شکست و حد ضرر مناسبش) جداگانه آموخته و در تصمیم‌گیری اعمال می‌شود. " +
+                        "با هر معاملهٔ بسته‌شده، این آموزش خودکار تکرار می‌شود. روش مستقل BTC و استراتژی پارسا عمداً از شمارش، یادگیری، پیش‌بینی و تیونینگ عصبی بیرون هستند.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                )
+                if (allStrategyLearningFa.isNotBlank()) {
+                    Text(
+                        text = allStrategyLearningFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Green,
                         fontWeight = FontWeight.Bold,
                     )
                 }
@@ -1165,7 +1420,118 @@ fun NeuralBrainScreen(
 
         // ── ۱-پ-۲. تیونینگ اختصاصی تمام ۱۶ ویژگی یادگرفته‌شده شبکه عصبی به تفکیک هر استراتژی ──
         SectionCard(
+            title = "🧬 شخصیت آموخته‌شدهٔ هر نماد بازار (۱۵ نماد)",
+            onCopy = { viewModel.copyNeuralBrainSection("persymbol") },
+            subtitle = "شبکه عصبی برای هر نماد جداگانه یاد می‌گیرد: پیوستگی روند، نویز شدوی، اعتبار شکست، سازگارترین استراتژی و پارامترهای حد ضرر/کیجونِ مخصوص همان نماد",
+            initiallyExpanded = false,
+        ) {
+            val symbolProfiles = neuralState.autoTunedParameters.perSymbolProfiles.values
+                .sortedWith(
+                    compareByDescending<com.aurum.edge.core.PerSymbolNeuralTuningProfile> { it.ownSamples }
+                        .thenByDescending { it.samplesAnalyzed },
+                )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "نمادهایی که دادهٔ اختصاصی دارند: ${symbolProfiles.count { it.ownSamples > 0 }} از ${symbolProfiles.size} — " +
+                        "نمادهای کم‌داده با تجربهٔ نمادهای هم‌دسته و سپس کل بازار آموزش می‌بینند (یادگیری انتقالی).",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (symbolProfiles.isEmpty()) {
+                    Text(
+                        text = "هنوز پروفایل نمادی ساخته نشده است؛ با یک‌بار آموزش روی همهٔ استراتژی‌ها (دکمهٔ بالا) ساخته می‌شود.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                    )
+                }
+                symbolProfiles.forEach { p ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .border(
+                                0.8.dp,
+                                if (p.ownSamples > 0) AurumColors.Green else AurumColors.Gold,
+                                RoundedCornerShape(10.dp),
+                            )
+                            .padding(9.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "🪙 ${p.symbolTitleFa} (${p.symbol})",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AurumColors.Gold,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                text = "${p.ownSamples} معاملهٔ خودش",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (p.ownSamples > 0) AurumColors.Green else AurumColors.TextMuted,
+                            )
+                        }
+                        Text(
+                            text = "سبک: ${p.decisionStyleFa} · نمونهٔ آموزشی: ${p.samplesAnalyzed}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                        )
+                        if (p.samplesAnalyzed > 0) {
+                            Text(
+                                text = String.format(
+                                    Locale.US,
+                                    "نرخ برد %.1f%% · PF %.2f · میانگین %+.2fR · روند %.0f%% · نویز شدوی %.0f%% · اعتبار شکست %.0f%%",
+                                    p.winRatePct,
+                                    p.expectedProfitFactor,
+                                    p.avgRMultiple,
+                                    p.trendPersistencePct,
+                                    p.wickNoisePct,
+                                    p.breakoutReliabilityPct,
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextPrimary,
+                            )
+                        }
+                        Text(
+                            text = String.format(
+                                Locale.US,
+                                "بافر SL %.2fATR · سقف کیجون %.2fATR · بافر شکست %.2fATR · حداقل کارایی %.2f · اجماع %d/9",
+                                p.slBufferAtr,
+                                p.maxKijunExtensionAtr,
+                                p.breakoutBufferAtr,
+                                p.minEfficiencyRatio,
+                                p.minDriveBooksConsensus,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextMuted,
+                        )
+                        if (p.bestStrategyTitleFa.isNotBlank()) {
+                            Text(
+                                text = "سازگارترین استراتژی: ${p.bestStrategyTitleFa}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Green,
+                            )
+                        }
+                        if (p.personalityFa.isNotBlank()) {
+                            Text(
+                                text = p.personalityFa,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextMuted,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        SectionCard(
             title = "🧬 تیونینگ اختصاصی تمام ۱۶ ویژگی شبکه عصبی برای هر استراتژی",
+            onCopy = { viewModel.copyNeuralBrainSection("perstrategy") },
             subtitle = "تنظیم مستقل وزن، ضریب اهمیت و آستانه هر ۱۶ ویژگی یادگرفته‌شده شبکه عصبی + پارامترهای ساختاری مختص هر یک از ۱۶ استراتژی",
             initiallyExpanded = false,
         ) {
@@ -1175,7 +1541,7 @@ fun NeuralBrainScreen(
             var showParamsDrawer by rememberSaveable { mutableStateOf(false) }
             var showFeaturesDrawer by rememberSaveable { mutableStateOf(false) }
 
-            val allStrategies = BitcoinStrategyModel.entries
+            val allStrategies = BitcoinStrategyModel.neuralLearningModels
             val selectedModel = BitcoinStrategyModel.fromId(selectedStratId)
             val stratProfile = neuralState.autoTunedParameters.perStrategyProfiles[selectedModel.id]
 
@@ -1305,6 +1671,7 @@ fun NeuralBrainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
+                                modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 text = "🛠️ تیونینگ پارامترهای ساختاری اختصاصی «${selectedModel.badgeFa}»",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = AurumColors.Gold,
@@ -1434,6 +1801,7 @@ fun NeuralBrainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
+                                modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 text = "🧠 تیونینگ تک‌تک ۱۶ ویژگی یادگرفته‌شده در «${selectedModel.badgeFa}»",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = AurumColors.Green,
@@ -1536,6 +1904,7 @@ fun NeuralBrainScreen(
         // ── ۱-ت. کالبدشکافی تریدی علل تارگت و استاپ (Trade Outcome Forensics) ──
         SectionCard(
             title = "🔬 کالبدشکافی تریدی علل تارگت (TP) و استاپ (SL) توسط هوش عصبی",
+            onCopy = { viewModel.copyNeuralBrainSection("forensics") },
             subtitle = "تحلیل آماری عوامل اصلی موفقیت معاملات، دلایل اصلی استاپ خوردن و قوانین طلایی استخراج‌شده برای ترید",
             initiallyExpanded = false,
         ) {
@@ -1607,10 +1976,11 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۱-ج. ماتریس برتری ترید به تفکیک ۱۶ استراتژی (درایو جامع + ۱۵ ترکیب پایه) ──
+        // ── ۱-ج. ماتریس برتری ترید به تفکیک ۱۶ استراتژی (متود جامع + ۱۵ ترکیب پایه) ──
         SectionCard(
             title = "🏆 ماتریس برتری ترید ۱۶ استراتژی (نرخ برد، Profit Factor و امید ریاضی E[R])",
-            subtitle = "رتبه‌بندی تریدی تمام ۱۵ ترکیب ایچیموکو و استراتژی درایو جامع بر اساس بازدهی واقعی و امتیاز لبه ترید",
+            onCopy = { viewModel.copyNeuralBrainSection("matrix") },
+            subtitle = "رتبه‌بندی تریدی تمام ۱۵ ترکیب ایچیموکو و استراتژی پیمان بر اساس بازدهی واقعی و امتیاز لبه ترید",
             initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1624,7 +1994,7 @@ fun NeuralBrainScreen(
                         modifier = Modifier.clickable { matrixFilter = 0 },
                     )
                     Pill(
-                        text = "📚 درایو جامع",
+                        text = "📚 متود جامع",
                         color = if (matrixFilter == 1) AurumColors.Cyan else AurumColors.TextMuted,
                         modifier = Modifier.clickable { matrixFilter = 1 },
                     )
@@ -1664,6 +2034,7 @@ fun NeuralBrainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
+                                modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 text = item.strategyBadgeFa,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (item.isDriveBookStrategy) AurumColors.Cyan else AurumColors.Gold,
@@ -1705,6 +2076,7 @@ fun NeuralBrainScreen(
         // ── ۱-د. هوش سشن‌های معاملاتی (آسیا، لندن، هم‌پوشانی لندن-نیویورک، نیویورک) ──
         SectionCard(
             title = "🌍 هوش سشن‌های معاملاتی (Session Trading Edge)",
+            onCopy = { viewModel.copyNeuralBrainSection("sessions") },
             subtitle = "عملکرد و استراتژی پیشنهادی شبکه عصبی در هر یک از ۴ سشن اصلی بازار جهانی",
             initiallyExpanded = false,
         ) {
@@ -1725,6 +2097,7 @@ fun NeuralBrainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
+                                modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 text = ses.sessionTitleFa,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = AurumColors.Gold,
@@ -1753,6 +2126,7 @@ fun NeuralBrainScreen(
         // ── ۲. گزارش زنده «آنچه شبکه عصبی یاد گرفته و فهمیده است» ──────────────
         SectionCard(
             title = "💡 خلاصه آموخته‌ها و برداشت‌های شبکه عصبی به زبان ساده",
+            onCopy = { viewModel.copyNeuralBrainSection("insights") },
             subtitle = "توضیح کامل قواعدی که هوش عصبی از رفتار کندل‌ها، ایچیموکو و نتایج معاملات استخراج کرده است",
             initiallyExpanded = false,
         ) {
@@ -1780,6 +2154,7 @@ fun NeuralBrainScreen(
         // ── ۳. وضعیت یادگیری به تفکیک ۴ دسته بازار (رمزارز، طلا/نقره، فارکس، شاخص) ──
         SectionCard(
             title = "📊 دانش شبکه به تفکیک ۴ دسته بازار (Crypto / Gold-Silver / Forex / Dow)",
+            onCopy = { viewModel.copyNeuralBrainSection("categories") },
             subtitle = "بهترین رژیم سودده و بدترین تله ممنوعه کشف‌شده در هر دسته دارایی",
             initiallyExpanded = false,
         ) {
@@ -1800,6 +2175,7 @@ fun NeuralBrainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
+                                modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 text = cat.categoryTitleFa,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = AurumColors.Gold,
@@ -1828,6 +2204,7 @@ fun NeuralBrainScreen(
         // ── ۴. رژیم‌های ممنوعه ورود (No-Trade Regimes) و الگوهای طلایی سودده ──────
         SectionCard(
             title = "🛑 تله‌های ممنوعه (No-Trade) و 🎯 الگوهای طلایی کشف‌شده",
+            onCopy = { viewModel.copyNeuralBrainSection("clusters") },
             subtitle = "خوشه‌های شرایطی که شبکه با آمار بیزین (Thompson Beta Posterior) دسته‌بندی کرده است",
             initiallyExpanded = false,
         ) {
@@ -1928,6 +2305,7 @@ fun NeuralBrainScreen(
         // ── ۵. وزن و اهمیت ۱۶ ویژگی ورودی شبکه (FT-Transformer Self-Attention) ──
         SectionCard(
             title = "⚖️ کالبدشکافی ۱۶ ویژگی ایچیموکو در مغز شبکه (FT-Attention Weights)",
+            onCopy = { viewModel.copyNeuralBrainSection("features") },
             subtitle = "کدام شروط ایچیموکو و پرایس‌اکشن بیشترین وزن را در تصمیم‌گیری شبکه عصبی دارند؟",
             initiallyExpanded = false,
         ) {
@@ -1976,6 +2354,7 @@ fun NeuralBrainScreen(
         // ── ۶. ارزیابی زنده ۱۵ نماد توسط شبکه عصبی در همین لحظه ──────────────────
         SectionCard(
             title = "📡 ارزیابی لحظه‌ای ۱۵ نماد از نگاه شبکه عصبی (15m + 5m)",
+            onCopy = { viewModel.copyNeuralBrainSection("live15") },
             subtitle = "پیش‌بینی احتمال برد، امید ریاضی R و تشخیص تله ممنوعه برای شرایط فعلی هر نماد",
             initiallyExpanded = false,
         ) {
@@ -2000,6 +2379,7 @@ fun NeuralBrainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
+                                modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 text = sym,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = AurumColors.Gold,
@@ -2033,6 +2413,7 @@ fun NeuralBrainScreen(
         // ── ۷. دفترچه درس‌های اخیر که شبکه از تک‌تک معاملات یاد گرفته است ─────────
         SectionCard(
             title = "📖 تاریخچه درس‌های استخراج‌شده از معاملات (${neuralState.recentLessons.size} درس اخیر)",
+            onCopy = { viewModel.copyNeuralBrainSection("lessons") },
             subtitle = "هر معامله بسته‌شده چه درسی به شبکه عصبی داده و کدام وزن‌ها را تغییر داده است",
             initiallyExpanded = false,
         ) {
@@ -2064,6 +2445,7 @@ fun NeuralBrainScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
+                                    modifier = Modifier.weight(1f).padding(end = 6.dp),
                                     text = "${lesson.symbol} [${lesson.timeframeLabel}] · ${if (lesson.won) "برد ✅" else "باخت ❌"} (${String.format(Locale.US, "%+.2fR", lesson.achievedR)})",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (lesson.won) AurumColors.Green else AurumColors.Red,
@@ -2092,6 +2474,43 @@ fun NeuralBrainScreen(
             initiallyExpanded = false,
         )
     }
+}
+
+/** متن قابل‌کپی توضیحات دستیار ایچیموکو برای نماد انتخاب‌شده. */
+private fun buildAssistantCopyText(coaching: com.aurum.edge.core.MasterIchimokuSymbolCoaching?): String {
+    if (coaching == null) {
+        return "توضیحات دستیار ایچیموکو برای این نماد هنوز آماده نیست؛ ابتدا گزارش دو تایم‌فریم ساخته شود."
+    }
+    val r = com.aurum.edge.core.NeuralReportText
+    return r.renderSection(
+        titleFa = "دستیار ترید ایچیموکو — ${coaching.symbol} (${coaching.timeframeLabel})",
+        lines = buildList {
+            add(r.label("جهت", if (coaching.direction == SignalAction.BUY) "خرید" else "فروش"))
+            add(r.label("امتیاز ایچیموکوی جهانی", coaching.worldClassIchimokuScore.toString()))
+            add(r.label("درجهٔ استاد", coaching.masterGradeFa))
+            add(r.label("نوع موج هوسودا", coaching.hosodaWaveTypeFa))
+            add(r.label("چرخهٔ زمان هوسودا", coaching.hosodaTimeCycleStatusFa))
+            add(r.label("اهداف کیسانچی", coaching.keisanchiTargetsSummaryFa))
+            add(r.label("توافق چند استراتژی", coaching.multiStrategyAgreementSummaryFa))
+            add("")
+            add(coaching.masterVerdictFa)
+            if (coaching.executionPlanStepsFa.isNotEmpty()) {
+                add("")
+                add("مراحل اجرا:")
+                coaching.executionPlanStepsFa.forEach { add("• $it") }
+            }
+            if (coaching.activePitfallsFa.isNotEmpty()) {
+                add("")
+                add("تله‌های فعال:")
+                coaching.activePitfallsFa.forEach { add("• $it") }
+            }
+            if (coaching.driveBooksTelemetryFa.isNotEmpty()) {
+                add("")
+                add("تله‌متری ۹ لایهٔ ساختاری:")
+                coaching.driveBooksTelemetryFa.forEach { add("• $it") }
+            }
+        },
+    )
 }
 
 @Composable

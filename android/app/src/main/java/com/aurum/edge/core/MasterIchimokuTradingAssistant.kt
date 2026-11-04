@@ -27,7 +27,7 @@ import kotlinx.serialization.json.Json
  *    - Hado Ron (نظریه امواج I, V, N, P, Y و نقطه طلایی S-Wave)
  *    - Kihon Suchi & Taito Suchi (اعداد زمانی 9, 17, 26, 33, 42, 65, 76 و روزهای تغییر Henka-bi)
  *    - Keisanchi (چهار هدف قیمتی V, N, E, NT)
- * ۲. سنتز استادان مدرن (Sasaki, Manesh Patel, Mark Tuttle, Karen Péloille) و ۹ کتاب PDF گوگل درایو:
+ * ۲. سنتز استادان مدرن (Sasaki, Manesh Patel, Mark Tuttle, Karen Péloille) و ۹ لایهٔ تحلیلی:
  *    - همگرایی آبشاری ۴ تایم‌فریم (`4H -> 1H -> 15m -> 5m`)
  *    - پلاتوهای فلت SSB/Kijun، تعادل کاتانا و فیلتر ضد C-Clamp
  *    - تنظیمات نهادی `(10, 30, 60)`، تنظیمات سریع `(7, 22, 44)`، بولینگر اسکوئیز، فرکتال/RSI(7) و معیار کلی (Kelly).
@@ -182,7 +182,7 @@ object MasterIchimokuTradingAssistant {
     }
 
     /**
-     * تحلیل و کوچینگ لحظه‌ای نماد با «بهترین متود ایچیموکوی جهان» (۴ ستون هوسودا + پاتل + پلویل + ۹ کتاب درایو).
+     * تحلیل و کوچینگ لحظه‌ای نماد با «بهترین متود ایچیموکوی جهان» (۴ ستون هوسودا + پاتل + پلویل + ۹ لایهٔ ساختاری).
      */
     fun analyzeSymbolWithMasterMethod(
         symbol: String,
@@ -245,7 +245,7 @@ object MasterIchimokuTradingAssistant {
             "در حال تکمیل نقاط A-B-C برای ترسیم اهداف چهارگانه V/N/E/NT هوسودا"
         }
 
-        // ۴. اجماع ۱۶ استراتژی (۱۵ ترکیب + درایو جامع) در 15m و 5m
+        // ۴. اجماع ۱۶ استراتژی (۱۵ ترکیب + متود جامع) در 15m و 5m
         val reports15 = dualReport?.reports15mByStrategy?.values ?: emptyList()
         val reports5 = dualReport?.reports5mByStrategy?.values ?: emptyList()
         val actionable15 = reports15.count { it.isActionable }
@@ -254,7 +254,7 @@ object MasterIchimokuTradingAssistant {
         val driveReady5 = reports5.count { BitcoinStrategyModel.fromId(it.strategyId).isDrivePdfStrategy && (it.isActionable || it.conditions.count { c -> c.passed } >= 13) }
 
         val multiStrategyAgreementSummaryFa =
-            "اجماع ۱۶ استراتژی: در 15m (${actionable15} سیگنال فعال، درایو جامع: ${if (driveReady15 > 0) "آماده ✅" else "در انتظار"}) · در 5m (${actionable5} سیگنال فعال، درایو جامع: ${if (driveReady5 > 0) "آماده ✅" else "در انتظار"})"
+            "اجماع ۱۶ استراتژی: در 15m (${actionable15} سیگنال فعال، متود جامع: ${if (driveReady15 > 0) "آماده ✅" else "در انتظار"}) · در 5m (${actionable5} سیگنال فعال، متود جامع: ${if (driveReady5 > 0) "آماده ✅" else "در انتظار"})"
 
         // ۵. محاسبه امتیاز جامع بهترین متود ایچیموکو جهان (0..100)
         val passedRatio = if (rep.conditions.isNotEmpty()) {
@@ -314,12 +314,12 @@ object MasterIchimokuTradingAssistant {
 
         val unifiedConsensus = IchimokuStrategyEngine.evaluateUnified9BookConsensus(isLong, trigSnap, stratSnap, macroSnap)
         val driveBooksTelemetryFa = listOf(
-            "🏆 درایو جامع (Unified 9-Book Consensus): " + BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.formatLiveBookTelemetryFa(trigSnap, stratSnap, isLong),
-            "📘 کتاب ۱ (TuAnh BB+EMA89): ${if (unifiedConsensus.book1TuAnhPassed) "✅ تایید" else "⏳"} · BB Squeeze=${if (trigSnap.isBollingerSqueeze) "بله" else "خیر"} · RSI14=${String.format(Locale.US, "%.1f", trigSnap.rsi14)}",
-            "📗 کتاب ۲ (15m EMA21+RSI7+Fractal): ${if (unifiedConsensus.book2FokaPassed) "✅ تایید" else "⏳"} · EMA21=${IchimokuStrategyEngine.round2(trigSnap.ema21)} · RSI7=${String.format(Locale.US, "%.1f", trigSnap.rsi7)}",
-            "📙 کتاب ۳ (Keenbase 10,30,60): ${if (unifiedConsensus.book3KeenbasePassed) "✅ تایید" else "⏳"} · TK(10/30)=${IchimokuStrategyEngine.round2(trigSnap.tenkan10)}/${IchimokuStrategyEngine.round2(trigSnap.kijun30)}",
-            "📕 کتاب ۴ تا ۷ (Mukherjee Kelly ${trigSnap.kellyWinProbabilityPercent}% + TSG): ${if (unifiedConsensus.book4MukherjeeKellyPassed && unifiedConsensus.book7Tsg4StepPassed) "✅ تایید" else "⏳"}",
-            "📓 کتاب ۸ و ۹ (Koonitz DMI/MACD & Fast 7,22,44): ${if (unifiedConsensus.book8Koonitz5RulesPassed && unifiedConsensus.book9KoonitzTripleScreenPassed) "✅ تایید" else "⏳"} · ADX=${String.format(Locale.US, "%.1f", trigSnap.adx14)}",
+            "🏆 متود جامع ۹ لایه: " + BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.formatLiveBookTelemetryFa(trigSnap, stratSnap, isLong),
+            "📘 لایهٔ ۱ (فشردگی BB + EMA89): ${if (unifiedConsensus.book1TuAnhPassed) "✅ تایید" else "⏳"} · BB Squeeze=${if (trigSnap.isBollingerSqueeze) "بله" else "خیر"} · RSI14=${String.format(Locale.US, "%.1f", trigSnap.rsi14)}",
+            "📗 لایهٔ ۲ (EMA21 + RSI7 + فرکتال): ${if (unifiedConsensus.book2FokaPassed) "✅ تایید" else "⏳"} · EMA21=${IchimokuStrategyEngine.round2(trigSnap.ema21)} · RSI7=${String.format(Locale.US, "%.1f", trigSnap.rsi7)}",
+            "📙 لایهٔ ۳ (ایچیموکو ۱۰/۳۰/۶۰): ${if (unifiedConsensus.book3KeenbasePassed) "✅ تایید" else "⏳"} · TK(10/30)=${IchimokuStrategyEngine.round2(trigSnap.tenkan10)}/${IchimokuStrategyEngine.round2(trigSnap.kijun30)}",
+            "📕 لایهٔ ۴ تا ۷ (Mukherjee Kelly ${trigSnap.kellyWinProbabilityPercent}% + TSG): ${if (unifiedConsensus.book4MukherjeeKellyPassed && unifiedConsensus.book7Tsg4StepPassed) "✅ تایید" else "⏳"}",
+            "📓 لایهٔ ۸ و ۹ (Koonitz DMI/MACD & Fast 7,22,44): ${if (unifiedConsensus.book8Koonitz5RulesPassed && unifiedConsensus.book9KoonitzTripleScreenPassed) "✅ تایید" else "⏳"} · ADX=${String.format(Locale.US, "%.1f", trigSnap.adx14)}",
         )
 
         val masterVerdictFa = buildString {
@@ -447,7 +447,7 @@ object MasterIchimokuTradingAssistant {
             }
         }
 
-        // ۲. بررسی گلوگاه‌های زنده در ۹ استراتژی درایو و ۱۵ ترکیب پایه روی ۱۵ نماد
+        // ۲. بررسی گلوگاه‌های زنده در ۹ لایهٔ ساختاری و ۱۵ ترکیب پایه روی ۱۵ نماد
         val allLiveReports = dualReports.values.flatMap {
             it.reports15mByStrategy.values + it.reports5mByStrategy.values
         }
@@ -480,7 +480,7 @@ object MasterIchimokuTradingAssistant {
                             targetStrategyTitleFa = "کلیه استراتژی‌ها (به‌ویژه شکست کومو و بولینگر)",
                             targetScopeFa = "${topBottleneck.value} ستاپ آماده در رادار 15m/5m",
                             problemDetectedFa = "در ${topBottleneck.value} ستاپ که ۱۴ تا ۱۵ شرط ایچیموکو برقرار بوده، فقط «$condTitle» مانع شلیک معامله شده است.",
-                            ichimokuMasterReasonFa = "در امواج انفجاری (موج I و شکست Squeeze کتاب درایو ۱ و ۷)، کندل شکست اولیه به طور طبیعی حدود 1.8 تا 2.0 ATR از کیجون فاصله می‌گیرد.",
+                            ichimokuMasterReasonFa = "در امواج انفجاری (موج I و شکست Squeeze لایهٔ ساختاری ۱ و ۷)، کندل شکست اولیه به طور طبیعی حدود 1.8 تا 2.0 ATR از کیجون فاصله می‌گیرد.",
                             exactFixInstructionFa = "برای استراتژی‌های شکست (Breakout)، سقف `maxKijunExtensionAtr` را روی $recExt ATR تنظیم کنید یا ورود پله‌ای روی پولبک ۵۰٪ بدنه کندل شکست فعال شود.",
                             suggestedMaxKijunExtAtr = recExt,
                         )
@@ -530,17 +530,17 @@ object MasterIchimokuTradingAssistant {
             }
         }
 
-        // ۳. نکات تخصصی ارتقای استراتژی درایو جامع بر اساس وضعیت فعلی بازار
+        // ۳. نکات تخصصی ارتقای استراتژی پیمان بر اساس وضعیت فعلی بازار
         notes += IchimokuImprovementNote(
             id = "drive_books_mtf_Adaptive_sizing",
             priority = ImprovementNotePriority.HIGH,
-            categoryFa = "ارتقای استراتژی درایو جامع (همگرایی کومو + معیار کلی موکرجی)",
+            categoryFa = "ارتقای استراتژی پیمان (همگرایی کومو + معیار کلی موکرجی)",
             targetStrategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
             targetStrategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
             targetScopeFa = "تمام ۱۵ نماد در تایم‌فریم‌های 15m و 5m",
-            problemDetectedFa = "تفاوت رفتار مؤلفه‌های سریع (7,22,44) و نهادی (10,30,60) درون استراتژی درایو جامع در ساعات کم‌حجم آسیا نسبت به هم‌پوشانی لندن-نیویورک.",
-            ichimokuMasterReasonFa = "طبق کتاب چارلز کونیتز و موکرجی، تنظیمات سریع (7,22,44) در سشن لندن/نیویورک ۱۰٪ سریع‌تر روند را شکار می‌کند اما در ساعات کم‌نوسان تنظیمات نهادی (10,30,60) و استاپ فرکتال فکا خطای بسیار کمتری دارند.",
-            exactFixInstructionFa = "برای بهینه‌سازی بعدی: در سشن آسیا اولویت وزن‌دهی در درایو جامع به Fractal/RSI7 و (10,30,60) داده شود و در سشن لندن/نیویورک وزن BB Squeeze و (7,22,44) افزایش یابد.",
+            problemDetectedFa = "تفاوت رفتار مؤلفه‌های سریع (7,22,44) و نهادی (10,30,60) درون استراتژی پیمان در ساعات کم‌حجم آسیا نسبت به هم‌پوشانی لندن-نیویورک.",
+            ichimokuMasterReasonFa = "طبق روش چارلز کونیتز و موکرجی، تنظیمات سریع (7,22,44) در سشن لندن/نیویورک ۱۰٪ سریع‌تر روند را شکار می‌کند اما در ساعات کم‌نوسان تنظیمات نهادی (10,30,60) و استاپ فرکتال فکا خطای بسیار کمتری دارند.",
+            exactFixInstructionFa = "برای بهینه‌سازی بعدی: در سشن آسیا اولویت وزن‌دهی در متود جامع به Fractal/RSI7 و (10,30,60) داده شود و در سشن لندن/نیویورک وزن BB Squeeze و (7,22,44) افزایش یابد.",
         )
 
         // ۴. بررسی معاملات باز فعلی و ارائه نکته محافظت از سود

@@ -135,17 +135,22 @@ class SettingsStore(context: Context) {
             storedBtcStrategyId
         }
         val validStrategyId = if (
-            BitcoinStrategyModel.entries.any { it.id == normalizedStoredBtcId } ||
+            (
+                BitcoinStrategyModel.entries.any { it.id == normalizedStoredBtcId } &&
+                    normalizedStoredBtcId !in BitcoinStrategyModel.temporarilyDisabledIds
+                ) ||
             storedCustomStrategies.any { it.id == normalizedStoredBtcId }
         ) {
             normalizedStoredBtcId
         } else {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
+            // استراتژی پیش‌فرض انتخاب‌شده وقتی شناسهٔ ذخیره‌شده معتبر نیست؛ ۱۶ موقتاً خاموش است.
+            BitcoinStrategyModel.BASE_ICHIMOKU.id
         }
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
         }
-        val defaultAllIds = (BitcoinStrategyModel.entries.map { it.id } + storedCustomStrategies.map { it.id }).toSet()
+        val allKnownIds = (BitcoinStrategyModel.entries.map { it.id } + storedCustomStrategies.map { it.id }).toSet()
+        val defaultAllIds = (BitcoinStrategyModel.activeStrategyIds + storedCustomStrategies.map { it.id }).toSet()
         val storedEnabledIdsRaw = prefs.getString(KEY_ENABLED_STRATEGY_IDS, null)?.trim().orEmpty()
         val runAllSim = prefs.getBoolean(KEY_RUN_ALL_STRATEGIES, true)
         val rawParsedEnabledIds = if (storedEnabledIdsRaw.isBlank()) {
@@ -162,15 +167,18 @@ class SettingsStore(context: Context) {
                         id
                     }
                 }
-                .filter { id -> id in defaultAllIds }
+                .filter { id -> id in allKnownIds }
                 .toSet()
             cleaned.ifEmpty { defaultAllIds }
         }
-        val storedEnabledIds = if (runAllSim && rawParsedEnabledIds.size >= 15) {
+        val storedEnabledIds = (if (runAllSim && rawParsedEnabledIds.size >= 15) {
             rawParsedEnabledIds + BitcoinStrategyModel.drivePdfStrategyIds
         } else {
             rawParsedEnabledIds
-        }
+        })
+            // استراتژی‌های موقتاً خاموش (فعلاً جایگاه ۱۶) هرگز به‌صورت خودکار روشن نمی‌شوند؛
+            // کاربر می‌تواند بعداً از تنظیمات دوباره فعالشان کند.
+            .minus(BitcoinStrategyModel.temporarilyDisabledIds)
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
@@ -435,7 +443,7 @@ class SettingsStore(context: Context) {
         val cur = read()
         val needsBalanceUpgrade = !prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false) && cur.accountBalance < 50_000.0
         val needsKeyPreload = cur.newsAiApiKey.isBlank()
-        val all24StrategyIds = (BitcoinStrategyModel.entries.map { it.id } + cur.customStrategies.map { it.id }).toSet()
+        val allDefaultStrategyIds = (BitcoinStrategyModel.activeStrategyIds + cur.customStrategies.map { it.id }).toSet()
         val needsAll15StrategiesMigration = !prefs.getBoolean(KEY_ALL_15_COMBOS_MIGRATED_V3908, false)
         val needsCleanAlarmMigration = !prefs.getBoolean(KEY_CLEAN_ALARM_V3915, false)
         if (!prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false)) {
@@ -461,7 +469,8 @@ class SettingsStore(context: Context) {
                     tpAlarmSoundName = it.tpAlarmSoundName.ifBlank { "Red Dwarf" },
                     slAlarmSoundName = it.slAlarmSoundName.ifBlank { "Latch" },
                     newsAiApiKey = if (it.newsAiApiKey.isBlank()) com.aurum.edge.data.AvalAiAdvisor.PRECONFIGURED_USER_KEY else it.newsAiApiKey,
-                    enabledStrategyIds = if (it.runAllStrategiesSimultaneously) (it.enabledStrategyIds + all24StrategyIds) else it.enabledStrategyIds,
+                    enabledStrategyIds = (if (it.runAllStrategiesSimultaneously) (it.enabledStrategyIds + allDefaultStrategyIds) else it.enabledStrategyIds)
+                        .minus(BitcoinStrategyModel.temporarilyDisabledIds),
                 )
             }
         }

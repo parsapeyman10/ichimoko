@@ -49,6 +49,50 @@ object MarketHours {
         }
     }
 
+    /**
+     * دقیقه‌های باقی‌مانده تا بسته شدن سشن همان نماد (null = بازار ۲۴ساعته یا بسته).
+     *
+     * برای شاخص/سهام: تا ۱۶:۰۰ نیویورک · برای کالا: تا ۱۷:۰۰ نیویورک · برای فارکس: تا جمعه ۱۷:۰۰.
+     */
+    fun minutesToClose(symbol: String, now: Long = System.currentTimeMillis()): Long? {
+        if (closedFor(symbol, now)) return null
+        val local = Instant.ofEpochMilli(now).atZone(newYork)
+        val closeAt = when (AssetClass.of(symbol)) {
+            AssetClass.STOCK -> local.toLocalDate().atTime(LocalTime.of(16, 0))
+            AssetClass.COMMODITY -> local.toLocalDate().atTime(LocalTime.of(17, 0))
+            AssetClass.FOREX -> {
+                // جمعه ۱۷:۰۰ نیویورک؛ سایر روزها فقط وقفهٔ شبانه نیست، پس تا جمعه شمرده می‌شود.
+                var day = local.toLocalDate()
+                while (day.dayOfWeek != DayOfWeek.FRIDAY) day = day.plusDays(1)
+                day.atTime(LocalTime.of(17, 0))
+            }
+            AssetClass.CRYPTO -> return null
+        }
+        val minutes = java.time.Duration.between(local, closeAt.atZone(newYork)).toMinutes()
+        return minutes.coerceAtLeast(0L)
+    }
+
+    /**
+     * برچسب فارسی وضعیت سشن برای نمایش کنار هر پوزیشن/نماد.
+     * @param warnMinutes آستانهٔ هشدار «نزدیک بسته شدن» (پیش‌فرض ۳۰ دقیقه)
+     */
+    fun sessionBadgeFa(symbol: String, now: Long = System.currentTimeMillis(), warnMinutes: Long = 30L): String {
+        val session = sessionWindowFor(symbol, now)
+        if (session.closed) {
+            return "🔴 بازار بسته · ${session.nextChangeLabel} ${session.newYorkTimeLabel}"
+        }
+        val remaining = minutesToClose(symbol, now)
+        return when {
+            remaining == null -> "🟢 بازار ۲۴ ساعته"
+            remaining <= warnMinutes -> "🟠 فقط $remaining دقیقه تا بسته شدن سشن — ریسک نگه‌داشتن پوزیشن بالاست"
+            else -> "🟢 بازار باز · $remaining دقیقه تا بسته شدن"
+        }
+    }
+
+    /** آیا بازار در آستانهٔ بسته شدن است (پیش‌فرض ۳۰ دقیقه)؟ */
+    fun isNearClose(symbol: String, now: Long = System.currentTimeMillis(), warnMinutes: Long = 30L): Boolean =
+        minutesToClose(symbol, now)?.let { it <= warnMinutes } ?: false
+
     fun forexWeekendClosed(now: Long = System.currentTimeMillis()): Boolean =
         scheduledWeekendClosed(now, openTime) // Legacy gold/commodity-conservative window.
 

@@ -27,6 +27,10 @@ enum class BitcoinStrategyModel(
     val hasHosoda: Boolean = true,
     val hasPeloille: Boolean = true,
     val baseOptimalRr: Double = 2.15,
+    /** این روش فقط با انتخاب صریح کاربر به فهرست ارزیابی اضافه می‌شود. */
+    val requiresExplicitOptIn: Boolean = false,
+    /** روش‌های تازهٔ BTC و پارسا از یادگیری، گیت و تیونینگ عصبی مستثنا هستند. */
+    val neuralLearningEnabled: Boolean = true,
 ) {
     // ── ۱. ترکیب کامل ۴گانه (Quad Master: C(4,4) = 1) ────────────────────────
     BASE_ICHIMOKU(
@@ -216,29 +220,82 @@ enum class BitcoinStrategyModel(
         baseOptimalRr = 2.40,
     ),
 
-    // ── ۵. متود جامع یکپارچه کتاب‌های درایو (Unified Drive Master Method — تنها استراتژی جامع درایو) ──
+    // ── ۵. استراتژی پیمان — نسخهٔ الیوت–نئوویو (موقتاً غیرفعال) ─────────────────
+    // بنا به درخواست کاربر، از متود جامع قبلی فقط «لایهٔ الیوت–نئوویو» باقی مانده است؛ بقیهٔ
+    // لایه‌ها (اجماع لایه‌های ساختاری، گیت کیجون و …) حذف شده و خود استراتژی هم تا اطلاع بعدی
+    // خاموش است تا معامله‌ای با آن باز نشود. شناسهٔ داخلی برای حفظ آموخته‌های شبکه تغییر نکرده.
     DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER(
         id = "DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER",
-        titleFa = "متود جامع یکپارچه درایو (معماری روز ۴ ستون نهادی + بیس جامع ایچیموکو)",
-        badgeFa = "متود جامع درایو · نسل جدید",
-        authorRefFa = "World-Class Regime-Gated Ichimoku & 9-Book Quantitative Synthesis (Hosoda + Patel + Tuttle + Péloille + 9 Drive Books)",
-        summaryFa = "نسخه ارتقایافته و سودده بر پایه متود روز جهان: ادغام کامل ۱۶ گارد ساختاری «جامع بیس» (فیلتر ضد C-Clamp، عبور از سقف چیکو، جاذبه فلت SSB و کارایی کافمن ER14) با ۴ ستون آلفای کتاب‌های درایو (هم‌فازی ۳ ابر 7-22-44 / 9-26-52 / 10-30-60، ریبون نهادی EMA 13/21/34/89، ماشه تطبیقی رژیم بازار شامل فوران بولینگر در فاز Genesis یا پولبک EMA21/RSI7 در فاز Core، و تایید DMI/ADX + MACD + Kelly) همراه با متود R:R و حد ضرر دقیقاً منطبق بر «جامع بیس» روی امواج V/N/E/NT هوسودا.",
-        hasPatel = true,
-        hasTuttle = true,
+        titleFa = "استراتژی ۱۶ · استراتژی پیمان (الیوت–نئوویو) · موقتاً غیرفعال",
+        badgeFa = "استراتژی پیمان · الیوت · غیرفعال",
+        authorRefFa = "Elliott Wave + NeoWave (Glenn Neely) — هندسهٔ موجی",
+        summaryFa = "استراتژی پیمان — نسخهٔ الیوت‌محور و موقتاً غیرفعال. " +
+            "۱) تنها لایهٔ باقی‌مانده، هندسهٔ امواج الیوت و قواعد نئوویو است: جهت موج جاری، " +
+            "معتبر بودن نقطهٔ چرخش (S)، تکمیل‌نشدن موج مخالف و فضای اهداف موجی V/N/E. " +
+            "۲) ورود فقط وقتی مجاز است که موج جهت‌دار تأییدشده باشد، نقطهٔ S نشکسته باشد و " +
+            "چرخهٔ زمانی در نقطهٔ تغییر نباشد. " +
+            "۳) خروج بر پایهٔ اتمام موج/ابطال شمارش انجام می‌شود. " +
+            "۴) لایه‌های ساختاری، اجماع چندلایه و گیت کیجونِ نسخهٔ قبلی از این استراتژی حذف شده‌اند. " +
+            "۵) این استراتژی فعلاً در هیچ ارزیابی و معامله‌ای شرکت نمی‌کند؛ با روشن‌کردن دوباره از " +
+            "تنظیمات، فقط همان لایهٔ الیوت فعال می‌شود.",
+        hasPatel = false,
+        hasTuttle = false,
         hasHosoda = true,
-        hasPeloille = true,
+        hasPeloille = false,
         baseOptimalRr = 2.25,
+    ),
+    BTC_52_CANDLE_REGIME(
+        id = "BTC_52_CANDLE_REGIME",
+        titleFa = "بیت‌کوین · ساختار ۵۲ کندلی و شکست/بازآزمایی",
+        badgeFa = "BTC · پنجرهٔ ۵۲ کندل",
+        authorRefFa = "روش مستقل بیت‌کوین · ساختار روند/فشردگی/شکست ۵۲ کندلی",
+        summaryFa = "فقط برای BTC/USDT: سه کندل آخر الگوی تصمیم نیستند. روش، پنجرهٔ ۵۲ کندل بسته را برای جهت و جایگاه قیمت می‌سنجد؛ پس از فشردگی یا همگرایی، شکست معتبر سقف/کف ۵۲ کندلی یا بازآزمایی همان مرز را با شیب‌های ایچیموکو، ابر، آزادی چیکو، حجم و گسترش نوسان تأیید می‌کند. ورودِ تعقیبیِ بیش‌ازحد دور از کیجون رد می‌شود.",
+        hasPatel = false,
+        hasTuttle = false,
+        hasHosoda = false,
+        hasPeloille = false,
+        baseOptimalRr = 2.20,
+        requiresExplicitOptIn = true,
+        neuralLearningEnabled = false,
+    ),
+    PARSA_52_LINE_TURN(
+        id = "PARSA_52_LINE_TURN",
+        titleFa = "استراتژی پارسا · چرخش ابر پس از فلت ۵۲",
+        badgeFa = "پارسا · فلت >۱۷ + چرخش + کراس",
+        authorRefFa = "روش مستقل پارسا · ایچیموکو ۹/۲۶/۵۲",
+        summaryFa = "«خط ۵۲» در این روش صریحاً Senkou Span B (SSB، خط دورهٔ ۵۲) است. فقط پس از تخت‌ماندن SSB دست‌کم ۱۸ کندل بسته، چرخش Senkou Span A و کراس هم‌جهت تنکان/کیجون بررسی می‌شوند؛ سپس شیب و فاصلهٔ خطوط، آزادی Chikou، کیفیت شکست و نشانه‌های حرکت شارپ فیلتر می‌شوند. روش به یادگیری و تیونینگ عصبی وصل نیست.",
+        hasPatel = false,
+        hasTuttle = false,
+        hasHosoda = false,
+        hasPeloille = false,
+        baseOptimalRr = 2.15,
+        requiresExplicitOptIn = true,
+        neuralLearningEnabled = false,
     );
 
     val isDrivePdfStrategy: Boolean
         get() = this == DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER
+
+    /**
+     * تنها استراتژی‌ای که لایهٔ **نئوویو–الیوت** در آن ادغام می‌شود: استراتژی جایگاه ۱۶.
+     * تمام روش‌های دیگر، ازجمله دو روش مستقل BTC و پارسا، هیچ محاسبهٔ نئوویو ندارند.
+     */
+    val isNeoWaveElliottStrategy: Boolean
+        get() = this == DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER
+
+    /**
+     * استراتژی‌هایی که کاربر موقتاً خاموش کرده است. شناسه و آموخته‌های شبکه‌شان حفظ می‌شود،
+     * اما در هیچ ارزیابی/معامله‌ای شرکت نمی‌کنند تا با روشن‌شدن دوباره از صفر شروع نشوند.
+     */
+    val isTemporarilyDisabled: Boolean
+        get() = id in temporarilyDisabledIds
 
     val combinationCount: Int
         get() = listOf(hasPatel, hasTuttle, hasHosoda, hasPeloille).count { it }
 
     val combinationCategoryFa: String
         get() = if (this == DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
-            "متود جامع یکپارچه درایو"
+            "الیوت–نئوویو (موقتاً غیرفعال)"
         } else {
             when (combinationCount) {
                 1 -> "تک‌استراتژی (۱گانه)"
@@ -260,6 +317,17 @@ enum class BitcoinStrategyModel(
             "KOONITZ_5RULES_DMI_MACD_EMA34",
             "KOONITZ_TRIPLE_SCREEN_FAST_7_22_44",
         )
+
+        /** استراتژی‌های موقتاً خاموش (فعلاً فقط استراتژی پیمان / جایگاه ۱۶). */
+        val temporarilyDisabledIds: Set<String> = setOf(DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+
+        /** مدل‌هایی که یادگیری آنلاین و تیونینگ عصبی برایشان مجاز است. */
+        val neuralLearningModels: List<BitcoinStrategyModel>
+            get() = entries.filter { it.neuralLearningEnabled }
+
+        /** شناسهٔ مدل‌های پیش‌فرض ارزیابی؛ روش‌های opt-in فقط پس از انتخاب صریح کاربر فعال می‌شوند. */
+        val activeStrategyIds: Set<String>
+            get() = entries.filterNot { it.isTemporarilyDisabled || it.requiresExplicitOptIn }.map { it.id }.toSet()
 
         val drivePdfStrategies: List<BitcoinStrategyModel>
             get() = listOf(DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER)
@@ -284,7 +352,7 @@ enum class BitcoinStrategyModel(
 }
 
 /**
- * شناسنامه فنی و دفترچه قوانین متود جامع یکپارچه درایو و ۱۵ ترکیب پایه.
+ * شناسنامه فنی و دفترچه قوانین متود جامع یکپارچهٔ ۹ لایه و ۱۵ ترکیب پایه.
  */
 data class DriveBookPlaybookSpec(
     val strategyId: String,
@@ -299,21 +367,61 @@ data class DriveBookPlaybookSpec(
 )
 
 fun BitcoinStrategyModel.driveBookPlaybook(): DriveBookPlaybookSpec = when (this) {
+    BitcoinStrategyModel.BTC_52_CANDLE_REGIME -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "روش مستقل بیت‌کوین بر پایهٔ زمینهٔ ۵۲ کندلی",
+        authorAndEdition = "قواعد اختصاصی این اپ · Ichimoku 9/26/52",
+        ichimokuSettingsFa = "پنجرهٔ ۵۲ کندل بسته در تایم‌فریم راهبرد و ماشه؛ کندل جاری فقط برای عبورِ بسته‌شده از مرز به‌کار می‌رود. سه کندل آخر هیچ الگوی مستقلی برای رأی‌دادن ندارند.",
+        auxiliaryIndicatorsFa = "رگرسیون و تغییر قیمت ۵۲ کندلی، دامنه/فشردگی نیمهٔ اخیر نسبت به نیمهٔ قبل، شیب TK و Senkou A، فاصله از Kijun، آزادی Chikou، ATR(14)/میانگین دامنهٔ ۵۲ کندلی و حجم نسبی.",
+        entryChecklistStepsFa = listOf(
+            "۱. نماد باید BTC/USDT باشد و دادهٔ بسته‌شدهٔ کافی برای پنجرهٔ ۵۲ کندلی موجود باشد.",
+            "۲. جهت باید با شیب رگرسیون ۵۲ کندلی و جایگاه قیمت نسبت به میانهٔ دامنهٔ قبلی همسو باشد؛ سه کندل اخیر به‌تنهایی جهت نمی‌سازند.",
+            "۳. ورود فقط روی شکست بسته‌شدهٔ سقف/کف ۵۲ کندل قبل یا بازآزمایی معتبر همان مرز است؛ عبورِ شدویی کافی نیست.",
+            "۴. شیب Tenkan/Kijun و Senkou A نباید با جهت مخالف باشند؛ فاصلهٔ قیمت از Kijun باید در محدودهٔ قابل‌تعقیب بماند.",
+            "۵. Chikou باید از کندل، خطوط TK و ابر در مسیر معامله آزاد باشد؛ حجم/بدنه و گسترش ATR حرکت را تأیید کنند.",
+            "۶. در فشردگی بدون شکست، حجم ضعیف، شدوی مخالف بزرگ، ورود بیش‌ازحد کشیده یا فضای ناکافی تا مانع، فقط انتظار؛ بدون ورود.",
+        ),
+        stopLossFormulaFa = "پشت مرز شکست/کف یا سقف ساختاری ۵۲ کندلی با بافر ATR؛ سپس اعتبارسنجی اجباری TradePlanGuard.",
+        takeProfitAndExitRulesFa = "هدف بر پایهٔ نوسان و مانع ساختاری نزدیک، با R:R هرگز کمتر از ۱:۱.۵؛ خروج هوشمند فقط پس از عبور سود باز از ۲R.",
+        specialEdgeAdvantageFa = "روش مستقل و BTC-only؛ با زمینهٔ ۵۲ کندلی تصمیم می‌گیرد، از الگوی سه کندل آخر استفاده نمی‌کند و از یادگیری/تیونینگ عصبی مستثناست.",
+    )
+
+    BitcoinStrategyModel.PARSA_52_LINE_TURN -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "استراتژی پارسا · فلت SSB و چرخش ابر",
+        authorAndEdition = "قواعد اختصاصی پارسا · Ichimoku 9/26/52",
+        ichimokuSettingsFa = "خط ۵۲ در این روش دقیقاً Senkou Span B (SSB) است؛ تخت‌ماندن یعنی دامنهٔ SSB در دست‌کم ۱۸ کندل بسته از بزرگ‌ترِ ۰٫۰۴ ATR یا ۰٫۰۳٪ قیمت بیشتر نشود.",
+        auxiliaryIndicatorsFa = "چرخش شیب Senkou Span A محاسبه‌شده برای ابر آینده، سن کراس Tenkan/Kijun، شیب TK/ابر، فاصلهٔ TK و قیمت از Kijun، آزادی Chikou، ATR و حجم نسبی.",
+        entryChecklistStepsFa = listOf(
+            "۱. پیش‌شرط قطعی: SSB/خط دورهٔ ۵۲ حداقل ۱۸ کندل بسته تخت مانده باشد؛ ۱۷ کندل کافی نیست.",
+            "۲. Senkou Span A محاسبه‌شده برای ابر آینده باید از شیب مخالف به چرخش هم‌جهت برسد؛ صرفاً صاف‌شدن خط، چرخش محسوب نمی‌شود.",
+            "۳. کراس Tenkan/Kijun هم‌جهت باید در پنجرهٔ حداکثر ۸ کندل بسته رخ داده باشد؛ الگوی سه کندلی شرط نیست.",
+            "۴. شیب Tenkan و Senkou A باید همسو، شیب Kijun نباید به‌شدت مخالف و فاصلهٔ TK باید در حال بازشدن اما نه بیش‌ازحد باشد.",
+            "۵. Chikou باید از قیمت/کندل‌های متناظر، TK و ابر آزاد باشد؛ بدنه، حجم و گسترش ATR باید شکست/حرکت شارپ را تأیید کنند.",
+            "۶. ورود تعقیبی دور از Kijun، کراس کهنه، ابر/چیکوی مسدود، یا پلن فاقد R:R≥۱٫۵ ممنوع است.",
+        ),
+        stopLossFormulaFa = "پشت SSB تخت یا ساختار اخیرِ همسو با ATR؛ عبور از TradePlanGuard الزامی است.",
+        takeProfitAndExitRulesFa = "هدف در محدودهٔ ۱٫۵R تا ۳R و پیش از مانع ساختاری؛ خروج هوشمند فقط پس از عبور سود باز از ۲R.",
+        specialEdgeAdvantageFa = "شرط ۱۸+ کندلی SSB، چرخش Senkou A و کراس TK همگی لازم‌اند؛ روش از یادگیری، گیت و تیونینگ عصبی مستثناست.",
+    )
+
     BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> DriveBookPlaybookSpec(
         strategyId = id,
-        bookFileTitle = "Unified Drive Books 1–9 Master Method (تلفیق جامع هر ۹ کتاب PDF گوگل درایو)",
-        authorAndEdition = "Adaptive Bayesian Log-Odds 9-Book Consensus — TuAnh + Foka + Keenbase + Mukherjee ×2 + HowToTrade + TSG + Koonitz ×2",
-        ichimokuSettingsFa = "ابرچنگال سه‌گانه ایچیموکو: استاندارد (9,26,52) + نهادی Keenbase (10,30,60) + سریع کونیتز (7,22,44)",
-        auxiliaryIndicatorsFa = "EMA Ribbon (13, 21, 34, 48, 89, SMA200) + BB(20,2) Squeeze + RSI(7)/RSI(14) 50-Bounce + DMI/ADX(14) + MACD + 5-Bar Fractals + Kelly Win%",
+        bookFileTitle = "Elliott Wave + NeoWave Geometry — استراتژی پیمان (نسخهٔ الیوت)",
+        authorAndEdition = "Elliott Wave Theory + NeoWave (Glenn Neely) — فقط لایهٔ موجی",
+        ichimokuSettingsFa = "ایچیموکوی استاندارد (9, 26, 52) فقط به‌عنوان مرجع ساختار موج و تعیین نقطهٔ پایان اصلاح",
+        auxiliaryIndicatorsFa = "شمارش امواج الیوت (Impulse/Corrective) + قواعد نئوویو + نقطهٔ چرخش S + اهداف موجی V/N/E + چرخهٔ زمانی هوسودا",
         entryChecklistStepsFa = listOf(
-            "۱. فیلتر صفحه سه‌گانه کونیتز و هم‌جهتی هر ۳ ابر ایچیموکو (9-26-52 ، 10-30-60 و 7-22-44) همراه با ریبون EMA(13/21/34/89)",
-            "۲. اجماع بیزین تطبیقی حداقل ۶ از ۹ کتاب درایو با احتمال برد ترکیبی ≥ ۷۸٪ و امتیاز معیار کلی (Kelly ≥ 69%)",
-            "۳. تایید هم‌زمان ماشه‌های شکار سود: فشردگی بولینگر (TuAnh)، پرش RSI(7) از خط ۵۰ (Foka)، کراس 10/30 و 7/22 و تایید DMI/MACD",
-            "۴. آزادی سه‌بعدی Chikou Span بالای/زیر کومو در ۲۶ دوره قبل (کتاب‌های ۵، ۷ و ۸) و عدم وجود کیجون فلت رِنج",
+            "۱. شمارش موج جهت‌دار کامل و تأییدشده باشد (Impulse معتبر یا پایان اصلاح مشخص)",
+            "۲. جهت موج جاری هم‌سو با جهت معامله باشد و نقطهٔ چرخش S نشکسته باشد",
+            "۳. هدف موجی بعدی (V/N/E) فضای کافی برای حداقل ۱:۱.۵ فراهم کند",
+            "۴. چرخهٔ زمانی در نقطهٔ تغییر نباشد و ناحیهٔ ورود هم‌تراز با مرز موج باشد",
         ),
-        stopLossFormulaFa = "سنگر ترکیبی ضد استاپ‌هانت: قوی‌ترین سطح بین فرکتال ۵ کندلی بیل ویلیامز (Foka) + Kijun(30)±0.40ATR (Keenbase) + EMA(34) کونیتز + BB Middle(20)",
-        takeProfitAndExitRulesFa = "تارگت پویا تا سقف ۳R (تلفیق هدف 3R سیستم Keenbase/Foka با امواج N/E هوسودا و هدف MA200 کتاب TuAnh) و بستن کامل معامله در رسیدن به 3R",
-        specialEdgeAdvantageFa = "با ادغام ریاضی هر ۹ کتاب در یک متود جامع بیزین، خطاهای تک‌استراتژی حذف شده و فقط معاملات اسنایپر با بالاترین امید ریاضی شکار می‌شوند.",
+        stopLossFormulaFa = "حد ضرر ساختاری پشت نقطهٔ ابطال شمارش موج (S-Point / انتهای موج قبلی) با بافر ATR",
+        takeProfitAndExitRulesFa = "خروج روی هدف موجی بعدی؛ اگر شمارش موج باطل شود یا خروج هوشمند مجاز باشد " +
+            "(فقط بالای +۲R) معامله بسته می‌شود",
+        specialEdgeAdvantageFa = "تمرکز کامل روی هندسهٔ موج: بدون اجماع چندلایه، بدون گیت کیجون و بدون " +
+            "تأییدهای شاخصی اضافه. این استراتژی فعلاً غیرفعال است و فقط با روشن‌کردن دوباره از تنظیمات کار می‌کند.",
     )
 
     else -> DriveBookPlaybookSpec(
@@ -344,29 +452,31 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
     stratSnap: IchimokuBarSnapshot? = trigSnap,
     isLong: Boolean = true,
 ): String {
-    if (trigSnap == null) return "در حال دریافت کندل‌ها برای محاسبه اندیکاتورهای اختصاصی کتاب..."
+    if (trigSnap == null) return "در حال دریافت کندل‌ها برای محاسبه اندیکاتورهای اختصاصی روش..."
     return when (this) {
-        BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
-            val consensus = IchimokuStrategyEngine.evaluateUnified9BookConsensus(
-                isLong = isLong,
-                trigSnap = trigSnap,
-                stratSnap = stratSnap ?: trigSnap,
-                macroSnap = null,
-            )
-            String.format(
-                Locale.US,
-                "اجماع ۹ کتاب درایو: %d/9 کتاب تایید · احتمال برد بیزین=%.1f%% · Kelly=%d%% · Fast(7/22)=%s/%s · Keenbase(10/30)=%s/%s · ADX=%.1f · RSI7=%.1f",
-                consensus.confirmedBooksCount,
-                consensus.bayesianWinProbabilityPct,
-                trigSnap.kellyWinProbabilityPercent,
-                IchimokuStrategyEngine.round2(trigSnap.tenkan7).toString(),
-                IchimokuStrategyEngine.round2(trigSnap.kijun22).toString(),
-                IchimokuStrategyEngine.round2(trigSnap.tenkan10).toString(),
-                IchimokuStrategyEngine.round2(trigSnap.kijun30).toString(),
-                trigSnap.adx14,
-                trigSnap.rsi7,
-            )
-        }
+        BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> String.format(
+            Locale.US,
+            "استراتژی پیمان (الیوت–نئوویو) · فقط لایهٔ موج فعال است · ADX=%.1f · RSI7=%.1f · این استراتژی موقتاً غیرفعال است",
+            trigSnap.adx14,
+            trigSnap.rsi7,
+        )
+        BitcoinStrategyModel.BTC_52_CANDLE_REGIME -> String.format(
+            Locale.US,
+            "پنجرهٔ ۵۲ کندل · شیب=%+.2f ATR/کندل · دامنه=%.1f ATR · فشردگی نیمه=%.2f · Chikou=%s",
+            trigSnap.regressionSlope52AtrPerBar,
+            trigSnap.range52Atr,
+            trigSnap.compressionRatio26,
+            if (if (isLong) trigSnap.chikouBullishOpenSpace else trigSnap.chikouBearishOpenSpace) "آزاد" else "درگیر",
+        )
+        BitcoinStrategyModel.PARSA_52_LINE_TURN -> String.format(
+            Locale.US,
+            "SSB فلت=%d کندل · شیب SSA=%+.2f ATR · کراس TK=%s · فاصله TK=%.2f ATR · Chikou=%s",
+            trigSnap.senkouSpanBFlatBars,
+            trigSnap.senkouSpanASlopeAtrPerBar,
+            if (isLong) trigSnap.bullishTenkanKijunCrossAgeBars else trigSnap.bearishTenkanKijunCrossAgeBars,
+            trigSnap.tenkanKijunGapAtr,
+            if (if (isLong) trigSnap.chikouBullishOpenSpace else trigSnap.chikouBearishOpenSpace) "آزاد" else "درگیر",
+        )
 
         else -> String.format(
             Locale.US,
@@ -399,6 +509,26 @@ data class PerStrategyConfigOverride(
 )
 
 /**
+ * اوررایدهای اختصاصی **هر نماد بازار** که شبکهٔ عصبی از تجربهٔ همان نماد یاد گرفته است
+ * (شخصیت نماد: نویز شدوی، پیوستگی روند، اعتبار شکست و …).
+ *
+ * قانون ایمنی: هیچ‌کدام از این مقادیر نمی‌تواند `R:R` را زیر ۱.۵ ببرد یا حد ضرر را از بازهٔ
+ * مجاز قبلی تنگ‌تر کند؛ فقط «شخصی‌سازی» در همان بازه‌های مجاز است.
+ */
+@Serializable
+data class PerSymbolConfigOverride(
+    val symbol: String,
+    val minRiskReward: Double = 1.60,
+    val maxKijunExtensionAtr: Double = 1.65,
+    val slBufferAtr: Double = 0.26,
+    val breakoutBufferAtr: Double = 0.16,
+    val minEfficiencyRatio: Double = 0.22,
+    val minVolumeRatio20: Double = 0.62,
+    val neuralWinProbGatePct: Double = 56.0,
+    val minDriveBooksConsensus: Int = 6,
+)
+
+/**
  * پارامترهای قابل تنظیم و ترمیم برای «استراتژی بیس» (Base Strategy) و مدل‌های مشتق‌شده.
  */
 @Serializable
@@ -426,34 +556,108 @@ data class BaseStrategyConfig(
     val minFutureKumoThicknessAtr: Double = 0.05,
     val minSniperDistanceAtr: Double = 0.65,
     val minDriveBooksConsensus: Int = 6,
+    /** لایهٔ اختیاری نئوویو (NeoWave). پیش‌فرض خاموش ⇒ خروجی موتور بدون تغییر. */
+    val neoWaveEnabled: Boolean = false,
+    /** حداقل قواعد نیلی که باید پاس شود تا شمارش «معتبر» شمرده شود. */
+    val neoWaveMinRulesPassed: Int = NeoWaveEngine.MIN_RULE_PASS,
+    /** حداقل درصد اطمینان برای اینکه نئوویو اجازهٔ وتو داشته باشد. */
+    val neoWaveMinConfidencePct: Double = NeoWaveEngine.MIN_CONFIDENCE_PCT,
+    /** دامنهٔ زیگزاگ مونوویو بر حسب ATR. */
+    val neoWaveAmplitudeAtr: Double = NeoWaveEngine.DEFAULT_AMPLITUDE_ATR,
+    /** مسیر ورود رمزارز بر پایهٔ نئوویو (الگوی کامل و تأییدشده = ماشهٔ ورود). */
+    val neoWaveCryptoEntryEnabled: Boolean = true,
+    /** حداقل قواعد پاس‌شده برای ورود کریپتو (سخت‌گیرانه‌تر از آستانهٔ وتو). */
+    val neoWaveCryptoMinRulesPassed: Int = 8,
+    /** حداقل اطمینان شمارش برای ورود کریپتو. */
+    val neoWaveCryptoMinConfidencePct: Double = 65.0,
+    /** تنظیمات نئوویو به هوش عصبی سپرده شود (آستانه‌ها از معاملات واقعی آموخته می‌شوند). */
+    val neoWaveAutoTuneEnabled: Boolean = true,
+    /** آستانهٔ قواعدِ آموخته‌شده توسط هوش عصبی (۰ = استفاده از مقدار دستی). */
+    val neoWaveAutoRules: Int = 0,
+    /** آستانهٔ اطمینانِ آموخته‌شده توسط هوش عصبی (۰ = استفاده از مقدار دستی). */
+    val neoWaveAutoConfidencePct: Double = 0.0,
+    /** تعداد نمونه‌ای که هوش عصبی بر پایهٔ آن تصمیم گرفته است. */
+    val neoWaveAutoSamples: Int = 0,
+    /** دلیل فارسی تصمیم هوش عصبی. */
+    val neoWaveAutoBasisFa: String = "",
+    /** زمان آخرین به‌روزرسانی تنظیمات توسط هوش عصبی. */
+    val neoWaveAutoUpdatedAt: Long = 0L,
+    /** وزن آموخته‌شدهٔ ۱۲ قاعدهٔ نیلی (خالی = وزن خنثی). */
+    val neoWaveAutoRuleWeights: List<Double> = emptyList(),
     val autoTunedGeneration: Int = 0,
     val perStrategyOverrides: Map<String, PerStrategyConfigOverride> = emptyMap(),
+    /** شخصیت آموخته‌شدهٔ هر نماد؛ کلید = نماد نرمال‌شده مثل `BTC/USDT`. */
+    val perSymbolOverrides: Map<String, PerSymbolConfigOverride> = emptyMap(),
 ) {
+    /** آیا آستانه‌های نئوویو همین حالا از هوش عصبی می‌آیند. */
+    val neoWaveAutoTuningActive: Boolean
+        get() = neoWaveAutoTuneEnabled && neoWaveAutoRules in 1..12 && neoWaveAutoConfidencePct > 0.0
+
+    /** آستانهٔ مؤثر قواعد نیلی (هوش عصبی → دستی → پیش‌فرض کلاس دارایی). */
+    fun resolvedNeoWaveRules(isCrypto: Boolean): Int = when {
+        neoWaveAutoTuningActive -> neoWaveAutoRules.coerceIn(1, 12)
+        isCrypto -> neoWaveCryptoMinRulesPassed.coerceIn(1, 12)
+        else -> neoWaveMinRulesPassed.coerceIn(1, 12)
+    }
+
+    /** آستانهٔ مؤثر اطمینان نیلی. */
+    fun resolvedNeoWaveConfidence(isCrypto: Boolean): Double = when {
+        neoWaveAutoTuningActive -> neoWaveAutoConfidencePct.coerceIn(35.0, 95.0)
+        isCrypto -> neoWaveCryptoMinConfidencePct.coerceIn(35.0, 95.0)
+        else -> neoWaveMinConfidencePct.coerceIn(35.0, 95.0)
+    }
+
+    /** وزن‌های آموخته‌شدهٔ قواعد به‌صورت نقشه (خالی = بدون وزن‌دهی). */
+    fun neoWaveWeightsMap(): Map<Int, Double> =
+        if (!neoWaveAutoTuningActive) {
+            emptyMap()
+        } else {
+            neoWaveAutoRuleWeights.mapIndexedNotNull { index, w ->
+                if (w > 0.0 && index in 0 until 12) (index + 1) to w else null
+            }.toMap()
+        }
+
     val macroInterval: Interval get() = Interval.fromLabel(macroIntervalLabel)
     val strategyInterval: Interval get() = Interval.fromLabel(strategyIntervalLabel)
     val triggerInterval: Interval get() = Interval.fromLabel(triggerIntervalLabel)
 
-    fun resolveForStrategy(strategyId: String): BaseStrategyConfig {
+    /** اورراید شخصیت نماد (اگر شبکه برای این نماد دادهٔ واقعی داشته باشد). */
+    fun resolveForSymbol(rawSymbol: String?): PerSymbolConfigOverride? {
+        val sym = rawSymbol?.trim()?.uppercase(Locale.ROOT)?.takeIf { it.isNotEmpty() } ?: return null
+        return perSymbolOverrides[sym] ?: perSymbolOverrides[V1Universe.normalize(sym)]
+    }
+
+    fun resolveForStrategy(strategyId: String, rawSymbol: String? = null): BaseStrategyConfig {
         val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
-        val ov = perStrategyOverrides[normId] ?: perStrategyOverrides[strategyId] ?: return this
+        val symOv = resolveForSymbol(rawSymbol)
+        val ov = perStrategyOverrides[normId] ?: perStrategyOverrides[strategyId]
+        if (ov == null && symOv == null) return this
+        // دقیق‌ترین سطح یادگیری، اولویت دارد: شخصیت نماد ← پروفایل استراتژی ← مقدار پایه.
+        // برای R:R همیشه سخت‌گیرانه‌ترین مقدار انتخاب می‌شود تا هیچ نمادی ریسک را کم نکند.
         return copy(
-            minRiskReward = max(1.5, ov.minRiskReward),
-            maxKijunExtensionAtr = ov.maxKijunExtensionAtr.coerceIn(1.25, 2.40),
-            slBufferAtr = ov.slBufferAtr.coerceIn(0.15, 0.50),
-            breakoutBufferAtr = ov.breakoutBufferAtr.coerceIn(0.08, 0.35),
-            minEfficiencyRatio = ov.minEfficiencyRatio.coerceIn(0.14, 0.42),
-            minVolumeRatio20 = ov.minVolumeRatio20.coerceIn(0.45, 1.10),
-            maxAdverseWickRatio = ov.maxAdverseWickRatio.coerceIn(0.28, 0.58),
-            minFutureKumoThicknessAtr = ov.minFutureKumoThicknessAtr.coerceIn(0.02, 0.16),
-            minSniperDistanceAtr = ov.minSniperDistanceAtr.coerceIn(0.35, 1.05),
-            minDriveBooksConsensus = ov.minDriveBooksConsensus.coerceIn(4, 9),
+            minRiskReward = max(1.5, max(symOv?.minRiskReward ?: 0.0, ov?.minRiskReward ?: minRiskReward)),
+            maxKijunExtensionAtr = (symOv?.maxKijunExtensionAtr ?: ov?.maxKijunExtensionAtr ?: maxKijunExtensionAtr)
+                .coerceIn(1.25, 2.40),
+            slBufferAtr = (symOv?.slBufferAtr ?: ov?.slBufferAtr ?: slBufferAtr).coerceIn(0.15, 0.50),
+            breakoutBufferAtr = (symOv?.breakoutBufferAtr ?: ov?.breakoutBufferAtr ?: breakoutBufferAtr)
+                .coerceIn(0.08, 0.35),
+            minEfficiencyRatio = (symOv?.minEfficiencyRatio ?: ov?.minEfficiencyRatio ?: minEfficiencyRatio)
+                .coerceIn(0.14, 0.42),
+            minVolumeRatio20 = (symOv?.minVolumeRatio20 ?: ov?.minVolumeRatio20 ?: minVolumeRatio20)
+                .coerceIn(0.45, 1.10),
+            maxAdverseWickRatio = (ov?.maxAdverseWickRatio ?: maxAdverseWickRatio).coerceIn(0.28, 0.58),
+            minFutureKumoThicknessAtr = (ov?.minFutureKumoThicknessAtr ?: minFutureKumoThicknessAtr)
+                .coerceIn(0.02, 0.16),
+            minSniperDistanceAtr = (ov?.minSniperDistanceAtr ?: minSniperDistanceAtr).coerceIn(0.35, 1.05),
+            minDriveBooksConsensus = (symOv?.minDriveBooksConsensus ?: ov?.minDriveBooksConsensus
+                ?: minDriveBooksConsensus).coerceIn(4, 9),
         )
     }
 }
 
 /**
- * خروجی موتور «اجماع بیزین تطبیقی ۹ کتاب درایو» (Adaptive Bayesian Log-Odds 9-Book Consensus):
- * ارزیابی هم‌زمان هر ۹ کتاب PDF گوگل درایو و استخراج احتمال برد بیزین، سنگر حد ضرر ترکیبی و تارگت بهینه.
+ * خروجی موتور «اجماع بیزین تطبیقی ۹ لایهٔ ساختاری» (Adaptive Bayesian Log-Odds 9-Book Consensus):
+ * ارزیابی هم‌زمان هر ۹ لایهٔ تحلیلی و استخراج احتمال برد بیزین، سنگر حد ضرر ترکیبی و تارگت بهینه.
  */
 data class Unified9BookConsensusResult(
     val isLong: Boolean,
@@ -489,7 +693,7 @@ data class CustomStrategySlot(
 )
 
 /**
- * خروجی محاسبه دقیق ۵ خط ایچیموکو + اندیکاتورهای ۹ کتاب PDF گوگل درایو روی یک تایم‌فریم مشخص.
+ * خروجی محاسبه دقیق ۵ خط ایچیموکو + اندیکاتورهای ۹ لایهٔ تحلیلی روی یک تایم‌فریم مشخص.
  */
 data class IchimokuBarSnapshot(
     val time: Long,
@@ -513,6 +717,24 @@ data class IchimokuBarSnapshot(
     val chikouResistancePeak: Double,
     val chikouSupportTrough: Double,
     val isCurrentSpanBFlat: Boolean,
+    /** تعداد کندل‌های بستهٔ متوالی که Senkou Span B (خط دورهٔ ۵۲) در آن‌ها تخت مانده است. */
+    val senkouSpanBFlatBars: Int = 0,
+    /** شیب Span A دورهٔ جاری و قبلی بر حسب ATR در هر کندل. */
+    val senkouSpanASlopeAtrPerBar: Double = 0.0,
+    val previousSenkouSpanASlopeAtrPerBar: Double = 0.0,
+    /** سن آخرین کراس Tenkan/Kijun؛ مقدار پیش‌فرض یعنی کراسی در پنجره پیدا نشده است. */
+    val bullishTenkanKijunCrossAgeBars: Int = Int.MAX_VALUE,
+    val bearishTenkanKijunCrossAgeBars: Int = Int.MAX_VALUE,
+    /** آمار جهت/دامنهٔ پنجرهٔ قبلی ۵۲ کندلی؛ کندل جاری داخل سطح شکست محاسبه نمی‌شود. */
+    val closeChange52Atr: Double = 0.0,
+    val regressionSlope52AtrPerBar: Double = 0.0,
+    val prior52High: Double = 0.0,
+    val prior52Low: Double = 0.0,
+    val range52Atr: Double = 0.0,
+    val compressionRatio26: Double = 1.0,
+    val atrExpansionRatio52: Double = 1.0,
+    val tenkanKijunGapAtr: Double = 0.0,
+    val tenkanKijunGapExpansionAtr: Double = 0.0,
     val isKijunFlat: Boolean,
     val isTenkanFlat: Boolean,
     val flatEquilibriumLevels: List<Double>,
@@ -531,7 +753,7 @@ data class IchimokuBarSnapshot(
     val upperWickRatio: Double = 0.1,
     val lowerWickRatio: Double = 0.1,
     val recentKatanaRelease: Boolean = false,
-    // ── اندیکاتورهای استخراج‌شده از ۹ کتاب PDF گوگل درایو ──
+    // ── اندیکاتورهای استخراج‌شده از ۹ لایهٔ تحلیلی ──
     val bbMiddle20: Double = close,
     val bbUpper20: Double = close + atr14 * 2.0,
     val bbLower20: Double = close - atr14 * 2.0,
@@ -659,7 +881,9 @@ enum class StrategyTriggerType(val titleFa: String) {
     PULLBACK_BOUNCE("ماشه ۱: پولبک به تعادل (Kijun/Tenkan/S-Point) و کلوز بالای تنکان"),
     VALIDATED_BREAKOUT("ماشه ۲: شکست معتبر کومو/کیجون با عبور از سقف/کف چیکو و بافر فلت SSB"),
     SANYAKU_TK_CONTINUATION("ماشه ۳: ادامه موج سوم سانیاکو با تایید ۳ کندلی کارن پلویل"),
-    NONE("در انتظار کندل بسته ماشه"),
+    BTC_52_STRUCTURE_BREAK("شکست/بازآزمایی ساختار ۵۲ کندلی بیت‌کوین"),
+    PARSA_52_LINE_TURN("چرخش Senkou A پس از فلت ۱۸+ کندلی SSB و کراس Tenkan/Kijun"),
+    NONE("در انتظار ماشهٔ بسته‌شده"),
 }
 
 enum class StrategyReadinessState(val labelFa: String) {
@@ -936,6 +1160,38 @@ data class StrategyEvaluationReport(
     val isSniperArmedPendingRetest: Boolean = false,
     val optimalRiskReward: Double? = riskReward,
     val rrBreakdown: RrCalculationBreakdown? = null,
+    /** درصد فاصلهٔ حد ضرر از قیمت ورود (1R) پس از عبور از موتور Trade Plan Guard. */
+    val planStopPct: Double = 0.0,
+    /** درصد فاصلهٔ حد سود از قیمت ورود پس از عبور از موتور Trade Plan Guard. */
+    val planTargetPct: Double = 0.0,
+    /** اهرم متناسب با فاصلهٔ حد ضرر (لیکوییدیشن حداقل ۲.۵R دورتر از حد ضرر). */
+    val planRecommendedLeverage: Int = 0,
+    /** نشان داوری پلن: تأییدشده / اصلاح‌شده / رد شد. */
+    val planVerdictFa: String = "",
+    /** خلاصهٔ فارسی داوری پلن (دلیل اصلاح حد ضرر، حد سود و اهرم). */
+    val planGuardNoteFa: String = "",
+    /** نشان لایهٔ نئوویو (خالی = لایه خاموش است). */
+    val neoWaveBadgeFa: String = "",
+    /** آیا نئوویو این ورود را وتو کرده است. */
+    val neoWaveVeto: Boolean = false,
+    /** آیا این ورود از «مسیر ورود رمزارز بر پایهٔ نئوویو» آمده است. */
+    val cryptoNeoWaveEntry: Boolean = false,
+    /** الگوی نئوویو در این ارزیابی (برای آموزش هوش عصبی). */
+    val neoWavePatternId: String = "",
+    val neoWaveRulesPassed: Int = 0,
+    val neoWaveRulesTotal: Int = 0,
+    val neoWaveConfidencePct: Double = 0.0,
+    val neoWaveFailedRuleIds: List<Int> = emptyList(),
+    /** داوری چندتایم‌فریمی نئوویو (بالاتر + جاری) برای نمایش. */
+    val neoWaveMtfFa: String = "",
+    /** دامنهٔ زیگزاگِ داینامیک استفاده‌شده (بر پایهٔ رژیم نوسان). */
+    val neoWaveAmplitudeAtr: Double = 0.0,
+    /** توضیح فارسی مسیر ورود (برای نمایش در چک‌لیست و ژورنال). */
+    val entryPathFa: String = "",
+    /** متن گیت کیجون (استراتژی ۱۶): کراس ۹/۲۶ + خطوط پیش‌بینی ۸/۲۵، ۷/۲۴، ۶/۲۳ + وضعیت ابر. */
+    val kijunGateFa: String = "",
+    /** متن قاعدهٔ حد ضرر استراتژی ۱۶: بالای خط ۲۶ و با فاصله از کندل. */
+    val kijunStopRuleFa: String = "",
 ) {
     val entryTimeframeBadgeFa: String
         get() = "تایم ورود: ${triggerInterval.label}"
@@ -983,6 +1239,7 @@ data class StrategyEvaluationReport(
         val passedCount = conditions.count { it.passed }
         append("شروط برقرار: ").append(passedCount).append("/").append(conditions.size).append(" — ")
         append(conditions.joinToString("؛ ") { "${it.titleFa}: ${if (it.passed) "تایید" else "رد"} (${it.detailFa})" })
+        if (entryPathFa.isNotBlank()) append(" | مسیر ورود: ").append(entryPathFa)
     }
 }
 
@@ -1040,6 +1297,19 @@ data class DualTimeframeSymbolReport(
 object IchimokuStrategyEngine {
 
     const val BTC_SYMBOL = "BTC/USDT"
+
+    /**
+     * کف سود لازم برای «خروج هوشمند»: تا وقتی معامله به **۲R** نرسیده باشد، هیچ استراتژی حق
+     * بستن زودهنگام با خروج هوشمند را ندارد (دستور صریح کاربر). بالای ۲R، اگر روند تمام شود
+     * خروج هوشمند آزاد است.
+     */
+    const val MIN_SMART_EXIT_PROFIT_R: Double = 2.0
+
+    /**
+     * استراتژی ۱۶ در نسخهٔ الیوت‌محور: گیت و قاعدهٔ حد ضرر کیجون (که از لایه‌های ساختاری
+     * می‌آمدند) خاموش است و فقط هندسهٔ موج باقی می‌ماند.
+     */
+    const val KIJUN_LAYER_IN_STRATEGY_16_ENABLED: Boolean = false
 
     /** اعداد پایه و ترکیبی چرخه زمانی گوایچی هوسودا (Jikan Ron / Kihon Suchi) */
     val HOSODA_TIME_CYCLES = listOf(9, 17, 26, 33, 42, 65, 76, 129, 172)
@@ -1154,6 +1424,80 @@ object IchimokuStrategyEngine {
         val isKijunFlat = abs(kijun - prevKijun) <= flatTol
         val isTenkanFlat = abs(tenkan - prevTenkan) <= flatTol
 
+        // مشخصات افق ۵۲ کندلی: سطح شکست از ۵۲ کندل کاملِ قبل از کندل جاری ساخته می‌شود.
+        val prior52Start = (lastIdx - 52).coerceAtLeast(0)
+        val has52PriorBars = lastIdx >= 52
+        val prior52Bars = closedBars.subList(prior52Start, lastIdx)
+        val prior52High = prior52Bars.maxOfOrNull { it.high } ?: closedBars[lastIdx].high
+        val prior52Low = prior52Bars.minOfOrNull { it.low } ?: closedBars[lastIdx].low
+        val range52Atr = (prior52High - prior52Low) / atr14
+        val closeChange52Atr = if (has52PriorBars) {
+            (closeNow - closedBars[prior52Start].close) / atr14
+        } else 0.0
+        val regressionBars = closedBars.subList((lastIdx - 51).coerceAtLeast(0), lastIdx + 1)
+        val regressionMeanX = (regressionBars.size - 1) / 2.0
+        val regressionMeanY = regressionBars.map { it.close }.average()
+        var regressionNumerator = 0.0
+        var regressionDenominator = 0.0
+        regressionBars.forEachIndexed { index, bar ->
+            val dx = index - regressionMeanX
+            regressionNumerator += dx * (bar.close - regressionMeanY)
+            regressionDenominator += dx * dx
+        }
+        val regressionSlope52AtrPerBar = if (regressionDenominator > 0.0) {
+            regressionNumerator / regressionDenominator / atr14
+        } else 0.0
+        val older26 = if (lastIdx >= 52) closedBars.subList(lastIdx - 52, lastIdx - 26) else emptyList()
+        val recent26 = if (lastIdx >= 52) closedBars.subList(lastIdx - 26, lastIdx) else emptyList()
+        fun candleRange(bars: List<Candle>): Double =
+            if (bars.isEmpty()) 0.0 else (bars.maxOf { it.high } - bars.minOf { it.low })
+        val compressionRatio26 = if (older26.isNotEmpty() && candleRange(older26) > 0.0) {
+            candleRange(recent26) / candleRange(older26)
+        } else 1.0
+        val meanTr52 = if (has52PriorBars) {
+            (lastIdx - 51..lastIdx).map { i ->
+                val bar = closedBars[i]
+                val previousClose = closedBars[(i - 1).coerceAtLeast(0)].close
+                maxOf(bar.high - bar.low, abs(bar.high - previousClose), abs(bar.low - previousClose))
+            }.average()
+        } else atr14
+        val atrExpansionRatio52 = if (meanTr52 > 0.0) atr14 / meanTr52 else 1.0
+
+        val firstValidSpanBIndex = (config.senkouBPeriod - 1 + disp).coerceAtLeast(0)
+        var senkouSpanBFlatBars = if (lastIdx >= firstValidSpanBIndex) 1 else 0
+        var flatSpanBMin = currentSpanB
+        var flatSpanBMax = currentSpanB
+        for (i in (lastIdx - 1) downTo firstValidSpanBIndex) {
+            val value = currentSpanBAt(i)
+            val nextMin = min(flatSpanBMin, value)
+            val nextMax = max(flatSpanBMax, value)
+            if (nextMax - nextMin <= flatTol) {
+                senkouSpanBFlatBars++
+                flatSpanBMin = nextMin
+                flatSpanBMax = nextMax
+            } else break
+        }
+
+        var bullishTenkanKijunCrossAgeBars = Int.MAX_VALUE
+        var bearishTenkanKijunCrossAgeBars = Int.MAX_VALUE
+        for (age in 0..min(12, lastIdx - 1)) {
+            val currentIndex = lastIdx - age
+            val currentGap = tenkanAt(currentIndex) - kijunAt(currentIndex)
+            val priorGap = tenkanAt(currentIndex - 1) - kijunAt(currentIndex - 1)
+            if (bullishTenkanKijunCrossAgeBars == Int.MAX_VALUE && currentGap > 0.0 && priorGap <= 0.0) {
+                bullishTenkanKijunCrossAgeBars = age
+            }
+            if (bearishTenkanKijunCrossAgeBars == Int.MAX_VALUE && currentGap < 0.0 && priorGap >= 0.0) {
+                bearishTenkanKijunCrossAgeBars = age
+            }
+        }
+        val senkouSpanASlopeAtrPerBar = (futureSpanA - prevFutureSpanA) / atr14
+        val prevPreviousSpanA = spanAAtCreation((lastIdx - 2).coerceAtLeast(0))
+        val previousSenkouSpanASlopeAtrPerBar = (prevFutureSpanA - prevPreviousSpanA) / atr14
+        val tenkanKijunGapAtr = abs(tenkan - kijun) / atr14
+        val previousTenkanKijunGapAtr = abs(prevTenkan - prevKijun) / atr14
+        val tenkanKijunGapExpansionAtr = tenkanKijunGapAtr - previousTenkanKijunGapAtr
+
         // Extract horizontal equilibrium plateaus (Kijun & SSB flat for >= 3 bars) — Karen Péloille
         val rawPlateaus = mutableListOf<Double>()
         for (i in max(3, lastIdx - 80)..lastIdx) {
@@ -1213,7 +1557,7 @@ object IchimokuStrategyEngine {
             abs(tenkanAt(prev3Idx) - kijunAt(prev3Idx)) <= atr14 * 0.18
         val katanaRelease = compressedRecently && abs(tenkan - kijun) >= abs(prevTenkan - prevKijun) && bodyRatio >= 0.32
 
-        // ── ۱. بولینگر باند (20, 2.0) و فشردگی Squeeze (کتاب درایو ۱ — TuAnh و کتاب ۴ — Mukherjee) ──
+        // ── ۱. بولینگر باند (20, 2.0) و فشردگی Squeeze (لایهٔ ساختاری ۱ — TuAnh و لایهٔ ۴ — Mukherjee) ──
         fun bbAt(idx: Int): Triple<Double, Double, Double> {
             val start = (idx - 19).coerceAtLeast(0)
             val slice = closedBars.subList(start, idx + 1)
@@ -1245,7 +1589,7 @@ object IchimokuStrategyEngine {
         val marubozuBull = cur.close > cur.open && bodyRatio >= 0.42 && upperWick <= 0.32
         val marubozuBear = cur.close < cur.open && bodyRatio >= 0.42 && lowerWick <= 0.32
 
-        // ── ۲. میانگین‌های متحرک EMA 13, 21, 34, 48, 89 و SMA 200 (کتاب‌های ۱، ۲، ۸ و ۹) ──
+        // ── ۲. میانگین‌های متحرک EMA 13, 21, 34, 48, 89 و SMA 200 (لایه‌های ۱، ۲، ۸ و ۹) ──
         fun computeEmaSeries(period: Int): DoubleArray {
             val out = DoubleArray(closedBars.size)
             val k = 2.0 / (period + 1.0)
@@ -1271,7 +1615,7 @@ object IchimokuStrategyEngine {
         val sma200 = closedBars.subList(sma200Start, lastIdx + 1).map { it.close }.average()
         val ema21SlopeAtr = (ema21 - ema21Arr[(lastIdx - 3).coerceAtLeast(0)]) / (3.0 * atr14)
 
-        // ── ۳. محاسبه RSI(14) و RSI(7) سریع + پرش از خط ۵۰ و قله/دره RSI (کتاب‌های ۱، ۲ و ۴) ──
+        // ── ۳. محاسبه RSI(14) و RSI(7) سریع + پرش از خط ۵۰ و قله/دره RSI (لایه‌های ۱، ۲ و ۴) ──
         fun computeRsiSeries(period: Int): DoubleArray {
             val out = DoubleArray(closedBars.size) { 50.0 }
             if (closedBars.size < 2) return out
@@ -1321,7 +1665,7 @@ object IchimokuStrategyEngine {
         val rsi7BullBounce = rsi7 >= 50.0 && (rsi7 >= prevRsi7 - 1.5 || minRsi7Recent <= 58.0)
         val rsi7BearBounce = rsi7 <= 50.0 && (rsi7 <= prevRsi7 + 1.5 || maxRsi7Recent >= 42.0)
 
-        // ── ۴. فرکتال‌های ۵ کندلی بیل ویلیامز (کتاب درایو ۲ — 15minstrategy.pdf) ──
+        // ── ۴. فرکتال‌های ۵ کندلی بیل ویلیامز (لایهٔ ساختاری ۲ — 15minstrategy.pdf) ──
         var downFractal = closedBars.subList((lastIdx - 8).coerceAtLeast(0), lastIdx + 1).minOf { it.low }
         var upFractal = closedBars.subList((lastIdx - 8).coerceAtLeast(0), lastIdx + 1).maxOf { it.high }
         for (i in (lastIdx - 2) downTo max(2, lastIdx - 28)) {
@@ -1343,7 +1687,7 @@ object IchimokuStrategyEngine {
             }
         }
 
-        // ── ۵. تنظیمات ایچیموکو (10,30,60) کتاب Keenbase و تنظیمات سریع (7,22,44) کتاب Koonitz ──
+        // ── ۵. تنظیمات ایچیموکو (10,30,60) روش Keenbase و تنظیمات سریع (7,22,44) روش Koonitz ──
         val tenkan10 = midpoint(lastIdx - 9, lastIdx)
         val kijun30 = midpoint(lastIdx - 29, lastIdx)
         val src30 = (lastIdx - 29).coerceAtLeast(0)
@@ -1356,7 +1700,7 @@ object IchimokuStrategyEngine {
         val senkouA72244 = (midpoint(src22 - 6, src22) + midpoint(src22 - 21, src22)) / 2.0
         val senkouB44 = midpoint(src22 - 43, src22)
 
-        // ── ۶. اندیکاتورهای MACD (12, 26, 9) و DMI/ADX (14) (کتاب‌های ۸ و ۹ — Charles G. Koonitz) ──
+        // ── ۶. اندیکاتورهای MACD (12, 26, 9) و DMI/ADX (14) (لایه‌های ۸ و ۹ — Charles G. Koonitz) ──
         val macdSeries = DoubleArray(closedBars.size) { idx -> ema12Arr[idx] - ema26Arr[idx] }
         val macdSigArr = DoubleArray(closedBars.size)
         val kMacd = 2.0 / 10.0
@@ -1398,7 +1742,7 @@ object IchimokuStrategyEngine {
         val rawAdx = if (dxList.isNotEmpty()) dxList.takeLast(14).average() else 25.0
         val adx14 = max(rawAdx, er14 * 45.0)
 
-        // ── ۷. عبور چیکو از کومو، الگوهای کندل‌استیک ژاپنی و امتیاز معیار کلی (کتاب‌های ۴، ۵، ۶، ۷ و ۸) ──
+        // ── ۷. عبور چیکو از کومو، الگوهای کندل‌استیک ژاپنی و امتیاز معیار کلی (لایه‌های ۴، ۵، ۶، ۷ و ۸) ──
         val kumoTopAtChikou = max(currentSpanAAt(chikouIdx), currentSpanBAt(chikouIdx))
         val kumoBotAtChikou = min(currentSpanAAt(chikouIdx), currentSpanBAt(chikouIdx))
         val chikouAboveCloud26 = closeNow > kumoTopAtChikou
@@ -1451,6 +1795,20 @@ object IchimokuStrategyEngine {
             chikouResistancePeak = round2(chikouPeak),
             chikouSupportTrough = round2(chikouTrough),
             isCurrentSpanBFlat = isCurrentSpanBFlat,
+            senkouSpanBFlatBars = senkouSpanBFlatBars,
+            senkouSpanASlopeAtrPerBar = round2(senkouSpanASlopeAtrPerBar),
+            previousSenkouSpanASlopeAtrPerBar = round2(previousSenkouSpanASlopeAtrPerBar),
+            bullishTenkanKijunCrossAgeBars = bullishTenkanKijunCrossAgeBars,
+            bearishTenkanKijunCrossAgeBars = bearishTenkanKijunCrossAgeBars,
+            closeChange52Atr = round2(closeChange52Atr),
+            regressionSlope52AtrPerBar = round2(regressionSlope52AtrPerBar),
+            prior52High = round2(prior52High),
+            prior52Low = round2(prior52Low),
+            range52Atr = round2(range52Atr),
+            compressionRatio26 = round2(compressionRatio26),
+            atrExpansionRatio52 = round2(atrExpansionRatio52),
+            tenkanKijunGapAtr = round2(tenkanKijunGapAtr),
+            tenkanKijunGapExpansionAtr = round2(tenkanKijunGapExpansionAtr),
             isKijunFlat = isKijunFlat,
             isTenkanFlat = isTenkanFlat,
             flatEquilibriumLevels = mergedPlateaus.map(::round2),
@@ -1779,17 +2137,45 @@ object IchimokuStrategyEngine {
         wave: HosodaWaveProjection?,
         slBufferAtr: Double,
         triggerInterval: Interval,
+        /**
+         * استراتژی فعال — ترتیب اعتبار سنگرها بر اساس مکتب پایهٔ همان استراتژی تعیین می‌شود
+         * (پاتل: کیجون، تاتل: کومو/چیکو، هوسودا: نقطه S، پلویل: فلت/کومو، لایه‌های ۱ تا ۹: ریبون نهادی).
+         */
+        activeModel: BitcoinStrategyModel = BitcoinStrategyModel.BASE_ICHIMOKU,
     ): Double {
-        val atr = trigSnap.atr14.coerceAtLeast(referenceEntry * 0.0004)
-        val minSafeDist = minSafeStructuralStopDistance(
+        // ATR مقاوم (برش ATR های گلِیچ‌خورده) تا یک کندل خراب کل ۱R را متورم نکند
+        val atr = TradePlanGuard.robustAtr(
             symbol = symbol,
-            referencePrice = referenceEntry,
-            trigAtr14 = atr,
-            stratAtr14 = stratSnap.atr14,
-            triggerInterval = triggerInterval,
+            price = referenceEntry,
+            atrValue = trigSnap.atr14.coerceAtLeast(referenceEntry * 0.0004),
+            interval = triggerInterval,
+        )
+        val stratAtrSafe = TradePlanGuard.robustAtr(
+            symbol = symbol,
+            price = referenceEntry,
+            atrValue = stratSnap.atr14,
+            interval = triggerInterval,
+        )
+        val minSafeDist = TradePlanGuard.stopDistanceFloor(
+            symbol = symbol,
+            price = referenceEntry,
+            atr = atr,
+            interval = triggerInterval,
+            structuralFloorOverride = minSafeStructuralStopDistance(
+                symbol = symbol,
+                referencePrice = referenceEntry,
+                trigAtr14 = atr,
+                stratAtr14 = stratAtrSafe,
+                triggerInterval = triggerInterval,
+            ),
         )
         // سقف فاصله مجاز ساختاری تا ۱R بیش از حد متورم نشود و تارگت ۱.۵R..۳.۰R کاملاً در دسترس بماند
-        val maxStructuralDist = max(minSafeDist * 1.45, atr * 2.10)
+        val maxStructuralDist = TradePlanGuard.stopDistanceCeiling(
+            symbol = symbol,
+            price = referenceEntry,
+            atr = atr,
+            interval = triggerInterval,
+        )
         val adverseWick = if (isLong) trigSnap.lowerWickRatio else trigSnap.upperWickRatio
         val sweepShieldBuffer = atr * (slBufferAtr.coerceIn(0.18, 0.42) + 0.16 * adverseWick.coerceIn(0.0, 0.65))
 
@@ -1800,30 +2186,24 @@ object IchimokuStrategyEngine {
             val anchorKumoEdge = trigSnap.kumoBottom - sweepShieldBuffer * 0.85
             val anchorWaveC = (wave?.pointC ?: trigSnap.kijun) - sweepShieldBuffer
 
-            val rawCandidates = listOf(
-                anchorFractal5,
-                anchorKijun26,
-                anchorKijun30Ema34,
-                anchorKumoEdge,
-                anchorWaveC,
-            ).filter { it.isFinite() && it > 0.0 && it < referenceEntry }
+            val anchors = listOf(
+                StopAnchorKind.FRACTAL_5BAR to anchorFractal5,
+                StopAnchorKind.KIJUN_26 to anchorKijun26,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34 to anchorKijun30Ema34,
+                StopAnchorKind.KUMO_EDGE to anchorKumoEdge,
+                StopAnchorKind.WAVE_S_POINT to anchorWaveC,
+            ).filter { (_, price) -> price.isFinite() && price > 0.0 && price < referenceEntry }
 
-            // کاندیداهایی که در دالان طلایی [minSafeDist .. maxStructuralDist] قرار دارند
-            val inCorridor = rawCandidates.filter { cand ->
-                val dist = referenceEntry - cand
-                dist in minSafeDist..maxStructuralDist
-            }
-            val chosenSl = when {
-                inCorridor.isNotEmpty() -> {
-                    // انتخاب امن‌ترین سنگر ساختاری داخل دالان (که پشت هم فرکتال و هم کیجون در دالان باشد)
-                    inCorridor.minOrNull()!!
-                }
-                else -> {
-                    val primaryCluster = min(anchorFractal5, anchorKijun26)
-                    val clampedDist = (referenceEntry - primaryCluster).coerceIn(minSafeDist, maxStructuralDist)
-                    referenceEntry - clampedDist
-                }
-            }
+            // «مطمئن‌ترین» سنگرِ همان استراتژی که بیرون از کف نویز و داخل دالان نوسان باشد؛
+            // اگر هیچ سنگر مورد اعتماد استراتژی در دالان نبود، نزدیک‌ترین سنگر ساختاری انتخاب می‌شود.
+            val chosenSl = chooseStrategyStopAnchor(
+                isLong = true,
+                referenceEntry = referenceEntry,
+                anchors = anchors,
+                preferredOrder = stopAnchorPriorityFor(activeModel),
+                floorDist = minSafeDist,
+                ceilingDist = maxStructuralDist,
+            ) ?: min(referenceEntry - minSafeDist, referenceEntry - atr * 0.5)
             round2(chosenSl.coerceAtLeast(0.00001))
         } else {
             val anchorFractal5 = max(trigSnap.lastUpFractalHigh, trigSnap.high) + sweepShieldBuffer
@@ -1832,34 +2212,367 @@ object IchimokuStrategyEngine {
             val anchorKumoEdge = trigSnap.kumoTop + sweepShieldBuffer * 0.85
             val anchorWaveC = (wave?.pointC ?: trigSnap.kijun) + sweepShieldBuffer
 
-            val rawCandidates = listOf(
-                anchorFractal5,
-                anchorKijun26,
-                anchorKijun30Ema34,
-                anchorKumoEdge,
-                anchorWaveC,
-            ).filter { it.isFinite() && it > referenceEntry }
+            val anchors = listOf(
+                StopAnchorKind.FRACTAL_5BAR to anchorFractal5,
+                StopAnchorKind.KIJUN_26 to anchorKijun26,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34 to anchorKijun30Ema34,
+                StopAnchorKind.KUMO_EDGE to anchorKumoEdge,
+                StopAnchorKind.WAVE_S_POINT to anchorWaveC,
+            ).filter { (_, price) -> price.isFinite() && price > referenceEntry }
 
-            val inCorridor = rawCandidates.filter { cand ->
-                val dist = cand - referenceEntry
-                dist in minSafeDist..maxStructuralDist
-            }
-            val chosenSl = when {
-                inCorridor.isNotEmpty() -> inCorridor.maxOrNull()!!
-                else -> {
-                    val primaryCluster = max(anchorFractal5, anchorKijun26)
-                    val clampedDist = (primaryCluster - referenceEntry).coerceIn(minSafeDist, maxStructuralDist)
-                    referenceEntry + clampedDist
-                }
-            }
+            val chosenSl = chooseStrategyStopAnchor(
+                isLong = false,
+                referenceEntry = referenceEntry,
+                anchors = anchors,
+                preferredOrder = stopAnchorPriorityFor(activeModel),
+                floorDist = minSafeDist,
+                ceilingDist = maxStructuralDist,
+            ) ?: max(referenceEntry + minSafeDist, referenceEntry + atr * 0.5)
             round2(chosenSl)
         }
     }
 
+    /** سنگرهای ابطال ساختاری؛ هر استراتژی «مطمئن‌ترین» سنگر خودش را دارد. */
+    enum class StopAnchorKind(val labelFa: String) {
+        FRACTAL_5BAR("فرکتال ۵ کندلی (بیل ویلیامز/فوکا)"),
+        KIJUN_26("کیجون‌سن ۲۶ (تعادل پاتل)"),
+        RIBBON_KIJUN30_EMA34("ریبون نهادی کیجون۳۰/EMA34 (کونیتز)"),
+        KUMO_EDGE("لبهٔ کومو / SSB فلت (تاتل و پلویل)"),
+        WAVE_S_POINT("نقطهٔ S موج هوسودا/الیوت"),
+    }
+
     /**
-     * موتور «متود جامع یکپارچه کتاب‌های درایو ۱ تا ۹» با الگوریتم روز
+     * ترتیب اعتبار سنگرها بر اساس مکتب‌های پایه‌ای که هر استراتژی از آن‌ها ساخته شده است.
+     *
+     * این همان «حد ضرر متناسب هر استراتژی» است: مثلاً استراتژی پاتل روی تعادل کیجون بنا شده،
+     * پس کیجون‌سن معتبرترین ابطال آن است؛ استراتژی تاتل روی شکست کومو/چیکو بنا شده، پس لبهٔ کومو؛
+     * استراتژی هوسودا/الیوت روی ساختار موج بنا شده، پس نقطهٔ S؛ و متود جامع ۹ لایه روی ریبون نهادی.
+     */
+    fun stopAnchorPriorityFor(model: BitcoinStrategyModel): List<StopAnchorKind> {
+        if (model == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
+            return listOf(
+                StopAnchorKind.RIBBON_KIJUN30_EMA34,
+                StopAnchorKind.KIJUN_26,
+                StopAnchorKind.FRACTAL_5BAR,
+                StopAnchorKind.KUMO_EDGE,
+                StopAnchorKind.WAVE_S_POINT,
+            )
+        }
+        val order = LinkedHashSet<StopAnchorKind>()
+        if (model.hasPatel) {
+            order += listOf(
+                StopAnchorKind.KIJUN_26,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34,
+                StopAnchorKind.FRACTAL_5BAR,
+                StopAnchorKind.KUMO_EDGE,
+                StopAnchorKind.WAVE_S_POINT,
+            )
+        }
+        if (model.hasTuttle) {
+            order += listOf(
+                StopAnchorKind.KUMO_EDGE,
+                StopAnchorKind.FRACTAL_5BAR,
+                StopAnchorKind.KIJUN_26,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34,
+                StopAnchorKind.WAVE_S_POINT,
+            )
+        }
+        if (model.hasHosoda) {
+            order += listOf(
+                StopAnchorKind.WAVE_S_POINT,
+                StopAnchorKind.KIJUN_26,
+                StopAnchorKind.FRACTAL_5BAR,
+                StopAnchorKind.KUMO_EDGE,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34,
+            )
+        }
+        if (model.hasPeloille) {
+            order += listOf(
+                StopAnchorKind.KUMO_EDGE,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34,
+                StopAnchorKind.KIJUN_26,
+                StopAnchorKind.FRACTAL_5BAR,
+                StopAnchorKind.WAVE_S_POINT,
+            )
+        }
+        if (order.isEmpty()) {
+            order += StopAnchorKind.entries.toList()
+        }
+        return order.toList()
+    }
+
+    /**
+     * انتخاب سنگر حد ضرر: اول معتبرترین سنگرِ همان استراتژی که داخل دالان مجاز
+     * `[floorDist .. ceilingDist]` باشد؛ در غیر این صورت نزدیک‌ترین سنگر ساختاری.
+     */
+    private fun chooseStrategyStopAnchor(
+        isLong: Boolean,
+        referenceEntry: Double,
+        anchors: List<Pair<StopAnchorKind, Double>>,
+        preferredOrder: List<StopAnchorKind>,
+        floorDist: Double,
+        ceilingDist: Double,
+    ): Double? {
+        val byKind = anchors.toMap()
+        for (kind in preferredOrder) {
+            val price = byKind[kind] ?: continue
+            val distance = abs(price - referenceEntry)
+            if (distance in floorDist..ceilingDist) return price
+        }
+        return TradePlanGuard.chooseStructuralAnchor(
+            isLong = isLong,
+            referenceEntry = referenceEntry,
+            candidates = anchors.map { it.second },
+            floorDist = floorDist,
+            ceilingDist = ceilingDist,
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // گیت کیجون — سه شرط تازهٔ استراتژی ۱۶ (۹ لایهٔ ساختاری)
+    // ۱) کراس ۹ و ۲۶ همیشه در جهت معامله بررسی شود
+    // ۲) خطوط پیش‌بینی ۸/۲۵ · ۷/۲۴ · ۶/۲۳ جهت ۹/۲۶ را تأیید کنند
+    // ۳) وضعیت ابرها (قیمت نسبت به کومو + جهت ابر آینده) تأیید کند
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** خروجی گیت کیجون/ابر/خطوط پیش‌بینی برای استراتژی ۱۶. */
+    data class KijunPredictiveGate(
+        /** کراس تنکان ۹ و کیجون ۲۶ در جهت معامله برقرار است. */
+        val tkAligned: Boolean,
+        /** چند کندل پیش آخرین کراس در جهت معامله رخ داده (‑۱ = در پنجرهٔ بررسی نبود). */
+        val crossBarsAgo: Int,
+        /** فاصلهٔ تنکان از کیجون بر حسب ATR (قدرمطلق، در جهت معامله مثبت). */
+        val tkSpreadAtr: Double,
+        /** چند جفت از خطوط پیش‌بینی (۸/۲۵، ۷/۲۴، ۶/۲۳) جهت را تأیید کردند. */
+        val predictiveAligned: Int,
+        val predictiveTotal: Int,
+        /** وضعیت ابر تأییدکننده است. */
+        val cloudAligned: Boolean,
+        val cloudLabelFa: String,
+        val passed: Boolean,
+        val summaryFa: String,
+    )
+
+    /**
+     * محاسبهٔ میانگین سقف/کف برای یک دوره (همان تعریف تنکان/کیجون در ایچیموکو).
+     * خروجی، سریِ مقدار خط از کندلِ `period‑1` تا آخرین کندل است.
+     */
+    private fun midpointSeries(candles: List<Candle>, period: Int): List<Double> {
+        if (period < 2 || candles.size < period) return emptyList()
+        val out = ArrayList<Double>(candles.size - period + 1)
+        for (i in (period - 1) until candles.size) {
+            var highest = Double.NEGATIVE_INFINITY
+            var lowest = Double.POSITIVE_INFINITY
+            for (j in (i - period + 1)..i) {
+                val bar = candles[j]
+                if (bar.high > highest) highest = bar.high
+                if (bar.low < lowest) lowest = bar.low
+            }
+            if (highest.isFinite() && lowest.isFinite() && highest > 0.0) {
+                out.add((highest + lowest) / 2.0)
+            }
+        }
+        return out
+    }
+
+    /**
+     * گیت کیجون برای استراتژی ۱۶. طبق درخواست کاربر (نسخهٔ ۳.۹.۴۷) این گیت موقتاً کنار گذاشته شده
+     * است تا استراتژی فقط لایهٔ الیوت را داشته باشد؛ با `KIJUN_LAYER_IN_STRATEGY_16_ENABLED` قابل بازگشت است.
+     *
+     * منطق «خطوط پیش‌بینی»: هر جفت (۸/۲۵)، (۷/۲۴) و (۶/۲۳) همان میانگین سقف/کف است با پنجرهٔ
+     * یک، دو و سه دوره کوتاه‌تر از جفت ۹/۲۶؛ چون پنجرهٔ کوتاه‌تر زودتر واکنش می‌دهد، جهت این سه
+     * جفت *قبل از* کراس ۹/۲۶ برمی‌گردد و می‌تواند کراس آینده را پیش‌بینی کند. شرط اجرا:
+     * کراس ۹/۲۶ هم‌جهت + حداقل دو جفت از سه جفت پیش‌بینی هم‌جهت و در حال باز شدن + ابر هم‌جهت.
+     */
+    fun evaluateKijunPredictiveGate(
+        candlesInput: List<Candle>,
+        isLong: Boolean,
+        strategySnapshot: IchimokuBarSnapshot,
+    ): KijunPredictiveGate {
+        val bars = candlesInput.filter { it.closed }.ifEmpty { candlesInput }.takeLast(140)
+        val signed = if (isLong) 1.0 else -1.0
+        val pairs = listOf(9 to 26, 8 to 25, 7 to 24, 6 to 23)
+
+        fun pairAligned(shortPeriod: Int, longPeriod: Int): Boolean {
+            val shortSeries = midpointSeries(bars, shortPeriod)
+            val longSeries = midpointSeries(bars, longPeriod)
+            val size = min(shortSeries.size, longSeries.size)
+            if (size < 4) return false
+            val diffNow = shortSeries[size - 1] - longSeries[size - 1]
+            val diffBefore = shortSeries[size - 4] - longSeries[size - 4]
+            val rightSide = diffNow * signed > 0.0
+            val opening = (diffNow - diffBefore) * signed > 0.0
+            return rightSide && opening
+        }
+
+        val tkAligned = pairAligned(pairs[0].first, pairs[0].second)
+        val predictiveAligned = pairs.drop(1).count { pairAligned(it.first, it.second) }
+
+        // کراس تازهٔ ۹/۲۶: چند کندل پیش علامتِ اختلاف عوض شده است؟
+        val nine = midpointSeries(bars, 9)
+        val twentySix = midpointSeries(bars, 26)
+        val size = min(nine.size, twentySix.size)
+        val spreadNow = if (size > 0) nine[size - 1] - twentySix[size - 1] else 0.0
+        var crossBarsAgo = -1
+        if (size > 1 && tkAligned) {
+            var idx = size - 1
+            val lookback = min(size - 1, 13)
+            while (idx > size - 1 - lookback) {
+                val prev = nine[idx - 1] - twentySix[idx - 1]
+                if (prev * signed <= 0.0) {
+                    crossBarsAgo = (size - 1) - (idx - 1)
+                    break
+                }
+                idx--
+            }
+        }
+        val atrRef = strategySnapshot.atr14.takeIf { it.isFinite() && it > 0.0 }
+            ?: (strategySnapshot.close * 0.001)
+        val tkSpreadAtr = if (atrRef > 0.0) abs(spreadNow) / atrRef else 0.0
+
+        // ابر: قیمت بیرون از کومو، ضخامت کافی، و جهت ابر آینده هم‌سو
+        val close = strategySnapshot.close
+        val kumoTopValue = strategySnapshot.kumoTop
+        val kumoBottomValue = strategySnapshot.kumoBottom
+        val thicknessAtr = strategySnapshot.currentKumoThicknessAtr
+        val futureBullish = strategySnapshot.futureSpanA >= strategySnapshot.futureSpanB
+        val priceAboveCloud = close > kumoTopValue
+        val priceBelowCloud = close < kumoBottomValue
+        val insideCloud = !priceAboveCloud && !priceBelowCloud
+        val cloudAligned = if (isLong) {
+            priceAboveCloud && futureBullish && thicknessAtr >= 0.08
+        } else {
+            priceBelowCloud && !futureBullish && thicknessAtr >= 0.08
+        }
+        val cloudLabelFa = when {
+            insideCloud -> "قیمت داخل ابر است (بی‌تصمیم) — جهت ابر: ${if (futureBullish) "صعودی" else "نزولی"}"
+            priceAboveCloud && isLong -> "قیمت بالای ابر · ابر آینده ${if (futureBullish) "صعودی" else "نزولی"} · ضخامت ${round2(thicknessAtr)} ATR"
+            priceBelowCloud && !isLong -> "قیمت زیر ابر · ابر آینده ${if (futureBullish) "صعودی" else "نزولی"} · ضخامت ${round2(thicknessAtr)} ATR"
+            priceAboveCloud -> "قیمت بالای ابر ولی معامله فروش است (ناسازگار)"
+            else -> "قیمت زیر ابر ولی معامله خرید است (ناسازگار)"
+        }
+
+        val passed = tkAligned && predictiveAligned >= 2 && cloudAligned
+        val crossTextFa = when {
+            crossBarsAgo >= 0 -> "کراس ۹/۲۶ در جهت معامله، ${crossBarsAgo} کندل پیش"
+            tkAligned -> "تنکان بالاتر/پایین‌تر از کیجون در جهت معامله است ولی کراس تازه‌ای در ۱۳ کندل اخیر نبود"
+            else -> "کراس ۹/۲۶ در جهت معامله نیست"
+        }
+        val predictiveTextFa = "خطوط پیش‌بینی: $predictiveAligned از ۳ تأیید (۸/۲۵ · ۷/۲۴ · ۶/۲۳)"
+        val summaryFa = when {
+            passed -> "✅ گیت کیجون تأیید شد · $crossTextFa · $predictiveTextFa · $cloudLabelFa"
+            !tkAligned && predictiveAligned < 2 ->
+                "🛑 نه کراس ۹/۲۶ هم‌جهت است و نه خطوط پیش‌بینی تأیید می‌کنند · $predictiveTextFa · $cloudLabelFa"
+            !cloudAligned ->
+                "🛑 ابر هم‌جهت نیست · $crossTextFa · $predictiveTextFa · $cloudLabelFa"
+            else ->
+                "🛑 $crossTextFa · $predictiveTextFa · $cloudLabelFa"
+        }
+        return KijunPredictiveGate(
+            tkAligned = tkAligned,
+            crossBarsAgo = crossBarsAgo,
+            tkSpreadAtr = round2(tkSpreadAtr),
+            predictiveAligned = predictiveAligned,
+            predictiveTotal = pairs.size - 1,
+            cloudAligned = cloudAligned,
+            cloudLabelFa = cloudLabelFa,
+            passed = passed,
+            summaryFa = summaryFa,
+        )
+    }
+
+    /** خروجی قاعدهٔ حد ضرر کیجون. */
+    data class KijunStopRule(
+        /** حد ضرر نهایی پس از قاعده. */
+        val stop: Double,
+        /** آیا مقدار اولیه تغییر کرد؟ */
+        val adjusted: Boolean,
+        /** آیا شرایط (بالای خط ۲۶ + فاصله از کندل) با هم جمع نمی‌شوند؟ */
+        val blocked: Boolean,
+        val noteFa: String,
+    )
+
+    /**
+     * قاعدهٔ حد ضرر استراتژی ۱۶:
+     *  - برای خرید، حد ضرر باید **بالای خط دورهٔ ۲۶** باشد (تا حد ضرر قبل از شکست خط تعادل فعال شود)
+     *    و برای فروش **پایین همان خط**؛
+     *  - حد ضرر نباید به کندل بچسبد؛ حداقل فاصله = `ATR × (۰.۲۲ + ۰.۱۵ × سهم سایه)` از سقف/کف کندل.
+     * اگر این دو شرط با هم جمع نشوند (قیمت چسبیده به خط ۲۶)، پلن «مسدود» اعلام می‌شود تا معاملهٔ
+     * بی‌کیفیت باز نشود.
+     */
+    fun applyKijunStopRules(
+        isLong: Boolean,
+        candidateStop: Double,
+        triggerSnapshot: IchimokuBarSnapshot,
+    ): KijunStopRule {
+        val atr = triggerSnapshot.atr14.takeIf { it.isFinite() && it > 0.0 }
+            ?: (triggerSnapshot.close * 0.001)
+        val kijunValue = triggerSnapshot.kijun
+        if (!kijunValue.isFinite() || kijunValue <= 0.0) {
+            return KijunStopRule(
+                stop = candidateStop,
+                adjusted = false,
+                blocked = false,
+                noteFa = "خط ۲۶ خوانده نشد؛ قاعدهٔ حد ضرر کیجون اعمال نشد",
+            )
+        }
+        val wickRatio = if (isLong) triggerSnapshot.lowerWickRatio else triggerSnapshot.upperWickRatio
+        val candleGap = atr * (0.22 + 0.15 * wickRatio.coerceIn(0.0, 0.6))
+        val kijunGap = atr * 0.10
+        val safeCandidate = candidateStop.takeIf { it.isFinite() && it > 0.0 } ?: return KijunStopRule(
+            stop = candidateStop,
+            adjusted = false,
+            blocked = true,
+            noteFa = "حد ضرر محاسبه‌شده معتبر نبود؛ ورود مسدود شد",
+        )
+
+        return if (isLong) {
+            val floor = kijunValue + kijunGap
+            val ceiling = triggerSnapshot.low - candleGap
+            if (floor >= ceiling) {
+                KijunStopRule(
+                    stop = safeCandidate,
+                    adjusted = false,
+                    blocked = true,
+                    noteFa = "فضای بین خط ۲۶ (${round2(kijunValue)}) و کف کندل (${round2(triggerSnapshot.low)}) کمتر از " +
+                        "بافر لازم است؛ حد ضرر هم‌زمان «بالای خط ۲۶» و «دور از کندل» نمی‌شود",
+                )
+            } else {
+                val stop = safeCandidate.coerceIn(floor, ceiling)
+                KijunStopRule(
+                    stop = round2(stop),
+                    adjusted = abs(stop - safeCandidate) > 1e-9,
+                    blocked = false,
+                    noteFa = "حد ضرر بالای خط ۲۶ (${round2(kijunValue)}) و با فاصلهٔ ${round2((triggerSnapshot.low - stop) / atr)} ATR از کف کندل",
+                )
+            }
+        } else {
+            val floor = triggerSnapshot.high + candleGap
+            val ceiling = kijunValue - kijunGap
+            if (floor >= ceiling) {
+                KijunStopRule(
+                    stop = safeCandidate,
+                    adjusted = false,
+                    blocked = true,
+                    noteFa = "فضای بین خط ۲۶ (${round2(kijunValue)}) و سقف کندل (${round2(triggerSnapshot.high)}) کمتر از " +
+                        "بافر لازم است؛ حد ضرر هم‌زمان «پایین خط ۲۶» و «دور از کندل» نمی‌شود",
+                )
+            } else {
+                val stop = safeCandidate.coerceIn(floor, ceiling)
+                KijunStopRule(
+                    stop = round2(stop),
+                    adjusted = abs(stop - safeCandidate) > 1e-9,
+                    blocked = false,
+                    noteFa = "حد ضرر پایین خط ۲۶ (${round2(kijunValue)}) و با فاصلهٔ ${round2((stop - triggerSnapshot.high) / atr)} ATR از سقف کندل",
+                )
+            }
+        }
+    }
+
+    /**
+     * موتور «متود جامع یکپارچه لایه‌های ساختاری ۱ تا ۹» با الگوریتم روز
      * `Adaptive Bayesian Log-Odds 9-Book Consensus + Regime-Weighted Stacking`:
-     * ارزیابی هم‌زمان هر ۹ کتاب PDF گوگل درایو و استخراج احتمال برد بیزین، سنگر حد ضرر ترکیبی و تارگت بهینه.
+     * ارزیابی هم‌زمان هر ۹ لایهٔ تحلیلی و استخراج احتمال برد بیزین، سنگر حد ضرر ترکیبی و تارگت بهینه.
      */
     fun evaluateUnified9BookConsensus(
         isLong: Boolean,
@@ -1869,7 +2582,7 @@ object IchimokuStrategyEngine {
     ): Unified9BookConsensusResult {
         val atr = trigSnap.atr14.coerceAtLeast(1e-8)
 
-        // ۱. کتاب درایو ۱ (TuAnh): BB(20,2) Squeeze/Band + EMA(89)/SMA(200) + RSI(14) > 50
+        // ۱. لایهٔ ساختاری ۱ (TuAnh): BB(20,2) Squeeze/Band + EMA(89)/SMA(200) + RSI(14) > 50
         val book1 = if (isLong) {
             trigSnap.close >= trigSnap.bbMiddle20 &&
                 trigSnap.close >= trigSnap.ema89 - atr * 0.15 &&
@@ -1882,7 +2595,7 @@ object IchimokuStrategyEngine {
                 (trigSnap.isBollingerSqueeze || trigSnap.isMarubozuBreakoutBear || trigSnap.close < trigSnap.kumoBottom)
         }
 
-        // ۲. کتاب درایو ۲ (Foka 15m/Day): بیرون کومو + شیب EMA(21) و کیجون + پرش RSI(7) از خط ۵۰ + فرکتال ۵ کندلی
+        // ۲. لایهٔ ساختاری ۲ (Foka 15m/Day): بیرون کومو + شیب EMA(21) و کیجون + پرش RSI(7) از خط ۵۰ + فرکتال ۵ کندلی
         val book2 = if (isLong) {
             trigSnap.close > trigSnap.kumoTop &&
                 trigSnap.close >= trigSnap.ema21 - atr * 0.12 &&
@@ -1897,7 +2610,7 @@ object IchimokuStrategyEngine {
                 trigSnap.lastUpFractalHigh > trigSnap.close
         }
 
-        // ۳. کتاب درایو ۳ (Keenbase 10-30-60): کراس نهادی Tenkan(10)/Kijun(30) + بیرون Kumo(60)
+        // ۳. لایهٔ ساختاری ۳ (Keenbase 10-30-60): کراس نهادی Tenkan(10)/Kijun(30) + بیرون Kumo(60)
         val book3 = if (isLong) {
             trigSnap.tenkan10 >= trigSnap.kijun30 &&
                 trigSnap.close > trigSnap.kumoTop103060 &&
@@ -1908,7 +2621,7 @@ object IchimokuStrategyEngine {
                 stratSnap.close <= stratSnap.kumoTop103060
         }
 
-        // ۴. کتاب درایو ۴ (Mukherjee Kelly & RSI): حداقل ۳ سیگنال طوفان کامل (Kelly >= 62%) + الگوی شمعی + سلامت RSI
+        // ۴. لایهٔ ساختاری ۴ (Mukherjee Kelly & RSI): حداقل ۳ سیگنال طوفان کامل (Kelly >= 62%) + الگوی شمعی + سلامت RSI
         val book4 = trigSnap.kellySignalCount >= 3 && if (isLong) {
             trigSnap.tenkan >= trigSnap.kijun &&
                 trigSnap.rsi14 >= 50.0 &&
@@ -1921,7 +2634,7 @@ object IchimokuStrategyEngine {
                 (trigSnap.hasBearishCandlestickPattern || trigSnap.candleBodyRatio >= 0.30)
         }
 
-        // ۵. کتاب درایو ۵ (Mukherjee Clouds & Chikou Filter): خط ماشه تنکان + کیجون غیرفلت + آزادی چیکو
+        // ۵. لایهٔ ساختاری ۵ (Mukherjee Clouds & Chikou Filter): خط ماشه تنکان + کیجون غیرفلت + آزادی چیکو
         val book5 = !trigSnap.isKijunFlat && if (isLong) {
             trigSnap.close >= trigSnap.tenkan &&
                 trigSnap.kijunSlopeAtrPerBar >= -0.01 &&
@@ -1932,7 +2645,7 @@ object IchimokuStrategyEngine {
                 trigSnap.chikouBearishOpenSpace
         }
 
-        // ۶. کتاب درایو ۶ (HowToTrade Key Level & Kumo Twist): شکست کامل کانال کومو + Twist هم‌جهت ابر آینده
+        // ۶. لایهٔ ساختاری ۶ (HowToTrade Key Level & Kumo Twist): شکست کامل کانال کومو + Twist هم‌جهت ابر آینده
         val book6 = if (isLong) {
             trigSnap.close > trigSnap.kumoTop &&
                 stratSnap.close > stratSnap.kumoTop &&
@@ -1945,7 +2658,7 @@ object IchimokuStrategyEngine {
                 stratSnap.isFutureKumoBearish
         }
 
-        // ۷. کتاب درایو ۷ (TSG 4-Step Quick Profit): کلوز بیرون کومو + کراس TK + چیکو بالای/زیر کومو ۲۶ دوره قبل
+        // ۷. لایهٔ ساختاری ۷ (TSG 4-Step Quick Profit): کلوز بیرون کومو + کراس TK + چیکو بالای/زیر کومو ۲۶ دوره قبل
         val book7 = if (isLong) {
             trigSnap.close > trigSnap.kumoTop &&
                 trigSnap.tenkan >= trigSnap.kijun &&
@@ -1956,7 +2669,7 @@ object IchimokuStrategyEngine {
                 trigSnap.chikouBelowCloud26
         }
 
-        // ۸. کتاب درایو ۸ (Koonitz 5 Golden Rules + DMI/MACD + EMA34): ۵ قانون کونیتز با ADX/DMI یا MACD
+        // ۸. لایهٔ ساختاری ۸ (Koonitz 5 Golden Rules + DMI/MACD + EMA34): ۵ قانون کونیتز با ADX/DMI یا MACD
         val book8 = if (isLong) {
             trigSnap.close > trigSnap.kijun &&
                 trigSnap.close > trigSnap.kumoTop &&
@@ -1971,7 +2684,7 @@ object IchimokuStrategyEngine {
                 (trigSnap.isDmiBearish || trigSnap.isMacdBearish)
         }
 
-        // ۹. کتاب درایو ۹ (Koonitz Triple Screen 7-22-44 + EMA 13/34/48): هم‌جهتی ۳ تایم‌فریم و ایچیموکوی سریع
+        // ۹. لایهٔ ساختاری ۹ (Koonitz Triple Screen 7-22-44 + EMA 13/34/48): هم‌جهتی ۳ تایم‌فریم و ایچیموکوی سریع
         val macroTripleOk = if (macroSnap == null) {
             true
         } else if (isLong) {
@@ -2025,6 +2738,7 @@ object IchimokuStrategyEngine {
             wave = null,
             slBufferAtr = 0.25,
             triggerInterval = Interval.M5,
+            activeModel = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER,
         )
 
         val dynamicRr = when {
@@ -2036,20 +2750,20 @@ object IchimokuStrategyEngine {
         }.coerceIn(1.50, 3.00)
 
         val badges = buildList {
-            if (book1) add("درایو ۱ (TuAnh BB)")
-            if (book2) add("درایو ۲ (Foka 15m)")
-            if (book3) add("درایو ۳ (Keenbase 10-30-60)")
-            if (book4) add("درایو ۴ (Mukherjee Kelly)")
-            if (book5) add("درایو ۵ (Chikou Filter)")
-            if (book6) add("درایو ۶ (HowToTrade)")
-            if (book7) add("درایو ۷ (TSG 4-Step)")
-            if (book8) add("درایو ۸ (Koonitz DMI/MACD)")
-            if (book9) add("درایو ۹ (Triple Screen 7-22-44)")
+            if (book1) add("لایهٔ ۱ (فشردگی بولینگر)")
+            if (book2) add("لایهٔ ۲ (EMA21 + RSI7 + فرکتال)")
+            if (book3) add("لایهٔ ۳ (ایچیموکو ۱۰/۳۰/۶۰)")
+            if (book4) add("لایهٔ ۴ (معیار کلی + RSI)")
+            if (book5) add("لایهٔ ۵ (فیلتر چیکو)")
+            if (book6) add("لایهٔ ۶ (سطح کلیدی + کومو تویست)")
+            if (book7) add("لایهٔ ۷ (۴ گام سریع)")
+            if (book8) add("لایهٔ ۸ (DMI/MACD + EMA34)")
+            if (book9) add("لایهٔ ۹ (سه‌صفحهٔ ۷‑۲۲‑۴۴)")
         }
 
         val summary = String.format(
             Locale.US,
-            "اجماع %d/9 کتاب درایو · احتمال برد بیزین %.1f%% · تارگت بهینه 1:%.2f",
+            "اجماع %d/9 لایهٔ ساختاری · احتمال برد بیزین %.1f%% · تارگت بهینه 1:%.2f",
             count,
             bayesianProb,
             dynamicRr,
@@ -2104,6 +2818,44 @@ object IchimokuStrategyEngine {
         val stratSnap = computeSnapshot(alignedStrategyCandles, config)
         val trigSnap = computeSnapshot(alignedTriggerCandles, config)
 
+        if (activeModel == BitcoinStrategyModel.BTC_52_CANDLE_REGIME && normalizedSymbol != BTC_SYMBOL) {
+            val condition = StrategyConditionCheck(
+                index = 1,
+                titleFa = "محدودیت نماد",
+                passed = false,
+                detailFa = "این روش فقط برای BTC/USDT تعریف شده است؛ برای $normalizedSymbol هیچ معامله‌ای صادر نمی‌شود.",
+            )
+            return StrategyEvaluationReport(
+                symbol = normalizedSymbol,
+                strategyId = effectiveId,
+                strategyTitleFa = effectiveTitle,
+                strategyBadgeFa = activeModel.badgeFa,
+                macroInterval = config.macroInterval,
+                strategyInterval = config.strategyInterval,
+                triggerInterval = config.triggerInterval,
+                readiness = StrategyReadinessState.BLOCKED,
+                action = SignalAction.NO_TRADE,
+                triggerType = StrategyTriggerType.NONE,
+                confidence = 0.0,
+                livePrice = livePriceOverride ?: trigSnap?.close ?: 0.0,
+                suggestedEntry = null,
+                suggestedStopLoss = null,
+                targetV = null,
+                targetN = null,
+                targetE = null,
+                primaryTakeProfit = null,
+                riskReward = null,
+                macroSnapshot = macroSnap,
+                strategySnapshot = stratSnap,
+                triggerSnapshot = trigSnap,
+                waveProjection = null,
+                conditions = listOf(condition),
+                summaryFa = "روش ۵۲ کندلی بیت‌کوین فقط روی BTC/USDT ارزیابی می‌شود.",
+                triggerBarTime = trigSnap?.time ?: 0L,
+                evaluatedAt = nowMillis,
+            )
+        }
+
         if (stratSnap == null || trigSnap == null) {
             return StrategyEvaluationReport(
                 symbol = normalizedSymbol,
@@ -2136,27 +2888,57 @@ object IchimokuStrategyEngine {
             )
         }
 
-        // Apply model-specific & per-strategy neural-tuned overrides onto config for all 16 strategies
-        // قانون قطعی سیستم: حداقل R:R تمام استراتژی‌ها و معاملات همیشه حداقل 1:1.5 (1.5R) و بالاتر است
-        val stratOverride = config.perStrategyOverrides[activeModel.id]
-        val baseMinRr = stratOverride?.minRiskReward ?: config.minRiskReward
+        // روش‌های BTC/پارسا از هر اورراید عصبی (حتی پروفایل عمومی نماد) جدا می‌مانند؛
+        // فقط بازه‌های تایم‌فریم کاربر حفظ می‌شود و تنظیمات ثابت زیر مبنای ایمن آن‌هاست.
+        val modelConfig = if (activeModel.neuralLearningEnabled) config else config.copy(
+            maxKijunExtensionAtr = 1.8,
+            slBufferAtr = 0.25,
+            breakoutBufferAtr = 0.15,
+            minRiskReward = 1.5,
+            minEfficiencyRatio = 0.20,
+            minVolumeRatio20 = 0.60,
+            maxAdverseWickRatio = 0.45,
+            minFutureKumoThicknessAtr = 0.05,
+            minSniperDistanceAtr = 0.65,
+            minDriveBooksConsensus = 6,
+            perStrategyOverrides = emptyMap(),
+            perSymbolOverrides = emptyMap(),
+            neoWaveAutoTuneEnabled = false,
+            neoWaveAutoRules = 0,
+            neoWaveAutoConfidencePct = 0.0,
+            neoWaveAutoSamples = 0,
+            neoWaveAutoBasisFa = "",
+        )
+        // قانون قطعی سیستم: حداقل R:R تمام استراتژی‌ها و معاملات همیشه حداقل 1:1.5 و بالاتر است.
+        val stratOverride = modelConfig.perStrategyOverrides[activeModel.id]
+        val symbolOverride = modelConfig.resolveForSymbol(normalizedSymbol)
+        val baseMinRr = max(
+            stratOverride?.minRiskReward ?: modelConfig.minRiskReward,
+            symbolOverride?.minRiskReward ?: 0.0,
+        )
         val minAllowedRr = max(baseMinRr, 1.5)
-        val effectiveConfig = config.copy(
+        val effectiveConfig = modelConfig.copy(
             enablePullbackTrigger = activeModel.hasPatel || activeModel.hasHosoda || activeModel.hasPeloille || !activeModel.hasTuttle,
             enableBreakoutTrigger = activeModel.hasTuttle || activeModel.hasHosoda || activeModel.hasPeloille || !activeModel.hasPatel,
             requireHigherTfAlignment = activeModel.hasPeloille || activeModel.combinationCount >= 2 || config.requireHigherTfAlignment,
             requireChikouOpenSpace = activeModel.hasTuttle || activeModel.hasPeloille || activeModel.combinationCount >= 2 || config.requireChikouOpenSpace,
             requireFutureKumoSlope = activeModel.hasPatel || activeModel.hasTuttle || activeModel.combinationCount >= 2 || config.requireFutureKumoSlope,
             minRiskReward = if (activeModel.hasHosoda && activeModel.combinationCount == 1) max(minAllowedRr, 1.8) else minAllowedRr,
-            maxKijunExtensionAtr = (stratOverride?.maxKijunExtensionAtr ?: config.maxKijunExtensionAtr).coerceIn(1.25, 2.50),
-            slBufferAtr = (stratOverride?.slBufferAtr ?: config.slBufferAtr).coerceIn(0.15, 0.55),
-            breakoutBufferAtr = (stratOverride?.breakoutBufferAtr ?: config.breakoutBufferAtr).coerceIn(0.05, 0.35),
-            minEfficiencyRatio = (stratOverride?.minEfficiencyRatio ?: config.minEfficiencyRatio).coerceIn(0.14, 0.45),
-            minVolumeRatio20 = (stratOverride?.minVolumeRatio20 ?: config.minVolumeRatio20).coerceIn(0.40, 1.15),
-            maxAdverseWickRatio = (stratOverride?.maxAdverseWickRatio ?: config.maxAdverseWickRatio).coerceIn(0.28, 0.60),
-            minFutureKumoThicknessAtr = (stratOverride?.minFutureKumoThicknessAtr ?: config.minFutureKumoThicknessAtr).coerceIn(0.02, 0.18),
-            minSniperDistanceAtr = (stratOverride?.minSniperDistanceAtr ?: config.minSniperDistanceAtr).coerceIn(0.35, 1.10),
-            minDriveBooksConsensus = (stratOverride?.minDriveBooksConsensus ?: config.minDriveBooksConsensus).coerceIn(4, 9),
+            maxKijunExtensionAtr = (symbolOverride?.maxKijunExtensionAtr
+                ?: stratOverride?.maxKijunExtensionAtr ?: modelConfig.maxKijunExtensionAtr).coerceIn(1.25, 2.50),
+            slBufferAtr = (symbolOverride?.slBufferAtr
+                ?: stratOverride?.slBufferAtr ?: modelConfig.slBufferAtr).coerceIn(0.15, 0.55),
+            breakoutBufferAtr = (symbolOverride?.breakoutBufferAtr
+                ?: stratOverride?.breakoutBufferAtr ?: modelConfig.breakoutBufferAtr).coerceIn(0.05, 0.35),
+            minEfficiencyRatio = (symbolOverride?.minEfficiencyRatio
+                ?: stratOverride?.minEfficiencyRatio ?: modelConfig.minEfficiencyRatio).coerceIn(0.14, 0.45),
+            minVolumeRatio20 = (symbolOverride?.minVolumeRatio20
+                ?: stratOverride?.minVolumeRatio20 ?: modelConfig.minVolumeRatio20).coerceIn(0.40, 1.15),
+            maxAdverseWickRatio = (stratOverride?.maxAdverseWickRatio ?: modelConfig.maxAdverseWickRatio).coerceIn(0.28, 0.60),
+            minFutureKumoThicknessAtr = (stratOverride?.minFutureKumoThicknessAtr ?: modelConfig.minFutureKumoThicknessAtr).coerceIn(0.02, 0.18),
+            minSniperDistanceAtr = (stratOverride?.minSniperDistanceAtr ?: modelConfig.minSniperDistanceAtr).coerceIn(0.35, 1.10),
+            minDriveBooksConsensus = (symbolOverride?.minDriveBooksConsensus
+                ?: stratOverride?.minDriveBooksConsensus ?: modelConfig.minDriveBooksConsensus).coerceIn(4, 9),
         )
 
         val livePrice = livePriceOverride?.takeIf { it.isFinite() && it > 0.0 } ?: trigSnap.close
@@ -2167,7 +2949,21 @@ object IchimokuStrategyEngine {
         val bearishBias = stratSnap.isPriceBelowKumo ||
             (macroSnap?.isPriceBelowKumo == true && trigSnap.isPriceBelowKumo)
 
+        val isBtc52Model = activeModel == BitcoinStrategyModel.BTC_52_CANDLE_REGIME
+        val isParsaModel = activeModel == BitcoinStrategyModel.PARSA_52_LINE_TURN
+        val long52Context = trigSnap.regressionSlope52AtrPerBar >= 0.025 &&
+            trigSnap.closeChange52Atr >= 1.0 && trigSnap.close >= (trigSnap.prior52High + trigSnap.prior52Low) / 2.0
+        val short52Context = trigSnap.regressionSlope52AtrPerBar <= -0.025 &&
+            trigSnap.closeChange52Atr <= -1.0 && trigSnap.close <= (trigSnap.prior52High + trigSnap.prior52Low) / 2.0
+        val parsaBullishStructure = trigSnap.senkouSpanASlopeAtrPerBar >= 0.025 &&
+            trigSnap.tenkan > trigSnap.kijun && trigSnap.bullishTenkanKijunCrossAgeBars <= 8
+        val parsaBearishStructure = trigSnap.senkouSpanASlopeAtrPerBar <= -0.025 &&
+            trigSnap.tenkan < trigSnap.kijun && trigSnap.bearishTenkanKijunCrossAgeBars <= 8
         val candidateDirection = when {
+            isBtc52Model && long52Context -> SignalAction.BUY
+            isBtc52Model && short52Context -> SignalAction.SELL
+            isParsaModel && parsaBullishStructure -> SignalAction.BUY
+            isParsaModel && parsaBearishStructure -> SignalAction.SELL
             bullishBias && !bearishBias -> SignalAction.BUY
             bearishBias && !bullishBias -> SignalAction.SELL
             stratSnap.tenkan >= stratSnap.kijun -> SignalAction.BUY
@@ -2175,12 +2971,6 @@ object IchimokuStrategyEngine {
         }
 
         val isLong = candidateDirection == SignalAction.BUY
-        val unified9BookConsensus = evaluateUnified9BookConsensus(
-            isLong = isLong,
-            trigSnap = trigSnap,
-            stratSnap = stratSnap,
-            macroSnap = macroSnap,
-        )
 
         // ── Check 1: 3-TF Kumo Regime Alignment (4H / 1H / 15m) ───────────────
         val stratKumoOk = if (isLong) stratSnap.isPriceAboveKumo else stratSnap.isPriceBelowKumo
@@ -2309,16 +3099,92 @@ object IchimokuStrategyEngine {
             "بدون تله جاذبه SSB فلت (${if (trigSnap.isKatanaEquilibrium) "هم‌پوشانی کاتانا" else "تفکیک استاندارد TK"})"
         }
 
-        // ── Detect Trigger on 15m/5m (Pullback / Breakout / 3-Candle Sanyaku / 9 Drive PDF Books) ────
+        // سه کندل پایانی برای این دو روش الگوی تصمیم نیستند؛ منطقشان صرفاً از پنجرهٔ بلند و بسته می‌آید.
         val closedTriggerBars = alignedTriggerCandles.filter { it.closed }.ifEmpty { alignedTriggerCandles }
-        val triggerType = detectEntryTrigger(
-            direction = candidateDirection,
-            bars = closedTriggerBars,
-            trigSnap = trigSnap,
-            stratSnap = stratSnap,
-            config = effectiveConfig,
-            activeModel = activeModel,
-        )
+        val isDirectionalLong = isLong
+        val previousBarIndex = closedTriggerBars.lastIndex - 1
+        val priorRangeBeforePrevious = if (closedTriggerBars.size >= 54) {
+            closedTriggerBars.subList(closedTriggerBars.size - 54, closedTriggerBars.size - 2)
+        } else emptyList()
+        val previousBar = closedTriggerBars.getOrNull(previousBarIndex)
+        val priorHighBeforePrevious = priorRangeBeforePrevious.maxOfOrNull { it.high }
+        val priorLowBeforePrevious = priorRangeBeforePrevious.minOfOrNull { it.low }
+        val btc52RetestOk = if (isDirectionalLong) {
+            val priorHigh = priorHighBeforePrevious
+            priorHigh != null && previousBar != null &&
+                previousBar.close > priorHigh + trigSnap.atr14 * 0.05 &&
+                trigSnap.low <= priorHigh + trigSnap.atr14 * 0.30 &&
+                trigSnap.close >= priorHigh - trigSnap.atr14 * 0.08
+        } else {
+            val priorLow = priorLowBeforePrevious
+            priorLow != null && previousBar != null &&
+                previousBar.close < priorLow - trigSnap.atr14 * 0.05 &&
+                trigSnap.high >= priorLow - trigSnap.atr14 * 0.30 &&
+                trigSnap.close <= priorLow + trigSnap.atr14 * 0.08
+        }
+        val btc52BreakoutOk = if (isDirectionalLong) {
+            trigSnap.close > trigSnap.prior52High + trigSnap.atr14 * 0.05 || btc52RetestOk
+        } else {
+            trigSnap.close < trigSnap.prior52Low - trigSnap.atr14 * 0.05 || btc52RetestOk
+        }
+        val btc52TrendOk = if (isDirectionalLong) {
+            long52Context && trigSnap.tenkanSlopeAtrPerBar > 0.0 &&
+                trigSnap.senkouSpanASlopeAtrPerBar >= -0.02 &&
+                (macroSnap == null || !macroSnap.isPriceBelowKumo)
+        } else {
+            short52Context && trigSnap.tenkanSlopeAtrPerBar < 0.0 &&
+                trigSnap.senkouSpanASlopeAtrPerBar <= 0.02 &&
+                (macroSnap == null || !macroSnap.isPriceAboveKumo)
+        }
+        val btc52SharpMoveOk = trigSnap.candleBodyRatio >= 0.38 &&
+            (trigSnap.volumeRatio20 >= 1.05 || trigSnap.atrExpansionRatio52 >= 1.08) &&
+            (if (isDirectionalLong) trigSnap.closeLocationValue >= 0.62 else trigSnap.closeLocationValue <= 0.38)
+        val btc52ChikouOk = if (isDirectionalLong) trigSnap.chikouBullishOpenSpace else trigSnap.chikouBearishOpenSpace
+        val btc52Ready = closedTriggerBars.size >= 53 && btc52TrendOk && btc52BreakoutOk &&
+            btc52SharpMoveOk && btc52ChikouOk && trigSnap.distanceToKijunAtr <= 1.65 &&
+            trigSnap.range52Atr >= 2.0
+
+        val parsaSpanATurnOk = if (isDirectionalLong) {
+            trigSnap.previousSenkouSpanASlopeAtrPerBar <= 0.0 && trigSnap.senkouSpanASlopeAtrPerBar >= 0.025
+        } else {
+            trigSnap.previousSenkouSpanASlopeAtrPerBar >= 0.0 && trigSnap.senkouSpanASlopeAtrPerBar <= -0.025
+        }
+        val parsaCrossAge = if (isDirectionalLong) trigSnap.bullishTenkanKijunCrossAgeBars else trigSnap.bearishTenkanKijunCrossAgeBars
+        val parsaFlatOk = trigSnap.senkouSpanBFlatBars >= 18
+        val parsaSlopeOk = if (isDirectionalLong) {
+            trigSnap.tenkanSlopeAtrPerBar > 0.015 && trigSnap.kijunSlopeAtrPerBar >= -0.04 &&
+                trigSnap.senkouSpanASlopeAtrPerBar > 0.0
+        } else {
+            trigSnap.tenkanSlopeAtrPerBar < -0.015 && trigSnap.kijunSlopeAtrPerBar <= 0.04 &&
+                trigSnap.senkouSpanASlopeAtrPerBar < 0.0
+        }
+        val parsaLineSpacingOk = trigSnap.tenkanKijunGapAtr in 0.02..0.75 &&
+            trigSnap.tenkanKijunGapExpansionAtr >= -0.02 && trigSnap.distanceToKijunAtr <= 1.50
+        val parsaChikouOk = if (isDirectionalLong) trigSnap.chikouBullishOpenSpace else trigSnap.chikouBearishOpenSpace
+        val parsaSharpMoveOk = trigSnap.candleBodyRatio >= 0.35 &&
+            (trigSnap.volumeRatio20 >= 1.10 || trigSnap.atrExpansionRatio52 >= 1.05) &&
+            (if (isDirectionalLong) trigSnap.closeLocationValue >= 0.60 else trigSnap.closeLocationValue <= 0.40)
+        val parsaCloudOk = if (isDirectionalLong) {
+            trigSnap.close > trigSnap.kijun && (macroSnap == null || !macroSnap.isPriceBelowKumo)
+        } else {
+            trigSnap.close < trigSnap.kijun && (macroSnap == null || !macroSnap.isPriceAboveKumo)
+        }
+        val parsaReady = parsaFlatOk && parsaSpanATurnOk && parsaCrossAge <= 8 &&
+            parsaSlopeOk && parsaLineSpacingOk && parsaChikouOk && parsaSharpMoveOk && parsaCloudOk
+
+        val triggerType = when {
+            isBtc52Model && btc52Ready -> StrategyTriggerType.BTC_52_STRUCTURE_BREAK
+            isParsaModel && parsaReady -> StrategyTriggerType.PARSA_52_LINE_TURN
+            isBtc52Model || isParsaModel -> StrategyTriggerType.NONE
+            else -> detectEntryTrigger(
+                direction = candidateDirection,
+                bars = closedTriggerBars,
+                trigSnap = trigSnap,
+                stratSnap = stratSnap,
+                config = effectiveConfig,
+                activeModel = activeModel,
+            )
+        }
 
         // ── Compute Sniper Entry Zone & Tight Structural SL (متود یکپارچه با جامع بیس) ──
         val slBuffer = trigSnap.atr14 * effectiveConfig.slBufferAtr
@@ -2360,7 +3226,7 @@ object IchimokuStrategyEngine {
 
         // متود روز دنیا برای حد ضرر: هم‌پوشانی ۵ سنگر ابطال ساختاری (فرکتال ۵ کندلی بیل ویلیامز، کیجون۲۶، کیجون۳۰/EMA34، لبه کومو و نقطه S هوسودا)
         // به‌علاوه بافر تطبیقی ضد استاپ‌هانت و محصور در دالان طلایی نوسان [minSafeStopDist .. 2.10 * ATR14]
-        val rawTechnicalSl = computeOptimalStructuralStopLoss(
+        val baseTechnicalSl = computeOptimalStructuralStopLoss(
             symbol = normalizedSymbol,
             isLong = isLong,
             referenceEntry = referenceEntryForSl,
@@ -2369,7 +3235,20 @@ object IchimokuStrategyEngine {
             wave = wave,
             slBufferAtr = effectiveConfig.slBufferAtr,
             triggerInterval = effectiveConfig.triggerInterval,
+            activeModel = activeModel,
         )
+        val specialStopAnchor = when {
+            isBtc52Model && isLong -> trigSnap.prior52Low - trigSnap.atr14 * effectiveConfig.slBufferAtr
+            isBtc52Model -> trigSnap.prior52High + trigSnap.atr14 * effectiveConfig.slBufferAtr
+            isParsaModel && isLong && trigSnap.currentSpanB < referenceEntryForSl ->
+                trigSnap.currentSpanB - trigSnap.atr14 * effectiveConfig.slBufferAtr
+            isParsaModel && !isLong && trigSnap.currentSpanB > referenceEntryForSl ->
+                trigSnap.currentSpanB + trigSnap.atr14 * effectiveConfig.slBufferAtr
+            else -> null
+        }
+        val rawTechnicalSl = specialStopAnchor?.let { structural ->
+            if (isLong) min(baseTechnicalSl, structural) else max(baseTechnicalSl, structural)
+        } ?: baseTechnicalSl
 
         val rawStopDist = max(
             abs(sniperOptimal - rawTechnicalSl),
@@ -2377,7 +3256,17 @@ object IchimokuStrategyEngine {
         ).coerceAtLeast(minSafeStopDist)
 
         // حد ضرر ساختاری (Kijun / Senkou B / 5-Bar Fractal + ATR Buffer) کاملاً ثابت و غیرپله‌ای است
-        val technicalSl = rawTechnicalSl
+        // قاعدهٔ تازهٔ استراتژی ۱۶: حد ضرر بالای خط ۲۶ (برای خرید) و با فاصله از کندل؛ اگر جمع نشود، پلن مسدود می‌شود.
+        val kijunStopRule = if (KIJUN_LAYER_IN_STRATEGY_16_ENABLED && activeModel.isNeoWaveElliottStrategy) {
+            applyKijunStopRules(
+                isLong = isLong,
+                candidateStop = rawTechnicalSl,
+                triggerSnapshot = trigSnap,
+            )
+        } else {
+            null
+        }
+        val technicalSl = kijunStopRule?.stop ?: rawTechnicalSl
 
         val stopDist = max(
             abs(sniperOptimal - technicalSl),
@@ -2401,25 +3290,10 @@ object IchimokuStrategyEngine {
             trigSnap.close < trigSnap.open && trigSnap.closeLocationValue <= 0.55 && trigSnap.candleBodyRatio >= 0.22
         }
         val volumeMomentumOk = trigSnap.volumeRatio20 >= effectiveConfig.minVolumeRatio20
-        val reqConsensusCount = effectiveConfig.minDriveBooksConsensus.coerceIn(4, 9)
-        val driveBookRuleOk = when (activeModel) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER ->
-                unified9BookConsensus.confirmedBooksCount >= reqConsensusCount &&
-                    unified9BookConsensus.bayesianWinProbabilityPct >= 76.0
-            else -> true
-        }
+        // استراتژی ۱۶ در نسخهٔ الیوت‌محور دیگر شرط اجماع چندلایه ندارد.
+        val driveBookRuleOk = true
         val cond11Passed = directionalCandleOk && volumeMomentumOk && driveBookRuleOk
-        val driveBookExtraDetail = when (activeModel) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER ->
-                String.format(
-                    Locale.US,
-                    " · اجماع %d/9 کتاب درایو (برد بیزین=%.1f%% · Kelly=%d%%)",
-                    unified9BookConsensus.confirmedBooksCount,
-                    unified9BookConsensus.bayesianWinProbabilityPct,
-                    trigSnap.kellyWinProbabilityPercent,
-                )
-            else -> ""
-        }
+        val driveBookExtraDetail = ""
         val cond11Detail = String.format(
             Locale.US,
             "بدنه کندل: %.0f%% · CLV: %.0f%% · حجم به میانگین ۲۰: %.2fx%s",
@@ -2494,12 +3368,23 @@ object IchimokuStrategyEngine {
         val maxTpDist = stopDist * maxAllowedRr
         val optTpDist = stopDist * computedOptimalRr.coerceIn(requiredMinRr, maxAllowedRr)
 
-        val rawPrimaryTp = chosenWavePair?.second ?: if (isLong) {
-            entryAnchorForTp + optTpDist
-        } else {
-            (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
+        val btc52TargetDistance = (trigSnap.range52Atr * trigSnap.atr14 * 0.35)
+            .coerceIn(minTpDist, maxTpDist)
+        val rawPrimaryTp = when {
+            isBtc52Model && isLong -> entryAnchorForTp + btc52TargetDistance
+            isBtc52Model -> (entryAnchorForTp - btc52TargetDistance).coerceAtLeast(0.00001)
+            isParsaModel && isLong -> entryAnchorForTp + optTpDist
+            isParsaModel -> (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
+            chosenWavePair != null -> chosenWavePair.second
+            isLong -> entryAnchorForTp + optTpDist
+            else -> (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
         }
-        val selectedWaveLabel = chosenWavePair?.first ?: String.format(Locale.US, "موج بهینه هوسودا (%.2fR)", computedOptimalRr)
+        val selectedWaveLabel = when {
+            isBtc52Model -> "امتداد دامنهٔ ساختار ۵۲ کندلی"
+            isParsaModel -> "هدف حرکتی پس از چرخش Senkou A"
+            chosenWavePair != null -> chosenWavePair.first
+            else -> String.format(Locale.US, "موج بهینه هوسودا (%.2fR)", computedOptimalRr)
+        }
 
         // Check nearest HTF horizontal plateau (Karen Péloille's Flat SSB/Kijun wall)
         val allPlateaus = ((macroSnap?.flatEquilibriumLevels ?: emptyList()) + stratSnap.flatEquilibriumLevels).distinct().sorted()
@@ -2542,29 +3427,57 @@ object IchimokuStrategyEngine {
             round2(unclampedTp.coerceIn(min(minAllowedTp, maxAllowedTp), minAllowedTp))
         }
 
-        val rrFromLive = abs(effectiveTp - livePrice) / abs(livePrice - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25)
-        val rrFromSniper = abs(effectiveTp - sniperOptimal) / abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25)
-        val rr = round2(min(rrFromLive, rrFromSniper).coerceIn(1.50, 3.00))
+        // ── موتور واحد ایمن‌سازی پلن (Trade Plan Guard) ─────────────────────────
+        // حد ضرر ساختاری و هدف موج هوسودا داخل «دالان نوسان تایم‌فریم» قفل می‌شوند؛ بنابراین
+        // ۱R هرگز از نوسان واقعی همان تایم‌فریم بزرگ‌تر نمی‌شود و هدف هم روی کاغذ باقی نمی‌ماند.
+        val guardedPlan = TradePlanGuard.sanitizePlan(
+            symbol = normalizedSymbol,
+            action = if (isLong) SignalAction.BUY else SignalAction.SELL,
+            entryPrice = sniperOptimal,
+            candidateStopLoss = technicalSl,
+            candidateTakeProfit = effectiveTp,
+            desiredRiskReward = computedOptimalRr,
+            referenceAtr = trigSnap.atr14,
+            triggerInterval = effectiveConfig.triggerInterval,
+            strategyAtr = stratSnap.atr14,
+        )
+        // در گزارش‌های بدون سیگنال (NO_TRADE) اعداد ساختاری خام برای نمایش حفظ می‌شوند؛
+        // اما هر گزارش قابل‌اجرا فقط با پلن ایمن‌شده ساخته می‌شود.
+        val finalStopLoss = if (guardedPlan.isUsable) guardedPlan.stopLoss else round2(technicalSl)
+        val finalTakeProfit = if (guardedPlan.isUsable) guardedPlan.takeProfit else round2(effectiveTp)
+        val finalStopDist = if (guardedPlan.isUsable) {
+            guardedPlan.stopDistance.coerceAtLeast(trigSnap.atr14 * 0.25)
+        } else {
+            abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25)
+        }
+        val finalTargetDist = if (guardedPlan.isUsable) guardedPlan.targetDistance else abs(effectiveTp - sniperOptimal)
+
+        val rr = if (guardedPlan.isUsable) {
+            round2(guardedPlan.riskReward.coerceIn(1.50, 3.00))
+        } else {
+            round2(computedOptimalRr.coerceIn(1.50, 3.00))
+        }
         val effectiveOptimalRr = round2(max(computedOptimalRr, rr).coerceIn(1.50, 3.00))
         val obstacleClear = if (nearestObstacle == null) {
             true
         } else {
-            (min(abs(nearestObstacle - livePrice), abs(nearestObstacle - sniperOptimal)) / stopDist) >= requiredMinRr
+            (min(abs(nearestObstacle - livePrice), abs(nearestObstacle - sniperOptimal)) / finalStopDist) >= requiredMinRr
         }
         val cond12Passed = rr in requiredMinRr..maxAllowedRr && obstacleClear
 
-        val rewardDistSniper = round2(abs(effectiveTp - sniperOptimal))
-        val riskDistSniper = round2(abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25))
+        val rewardDistSniper = round2(finalTargetDist)
+        val riskDistSniper = round2(finalStopDist)
         val slBasisTextFa = buildString {
             append("هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون۲۶ (${round2(trigSnap.kijun)}) + کیجون۳۰/EMA34 + لبه کومو")
             if (activeModel == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
-                append(" + ۹ کتاب درایو (هم‌تراز جامع بیس)")
+                append(" + هندسهٔ الیوت–نئوویو (نسخهٔ پیمان، هم‌تراز جامع بیس)")
             }
             append(String.format(Locale.US, " + سپر ضد شدو (%.2f ATR) در دالان [0.80..2.10 ATR]", slBuffer))
+            append(" + قفل سقف درصدی نوسان " + effectiveConfig.triggerInterval.label)
         }
         val tpBasisTextFa = buildString {
             append(selectedWaveLabel)
-            append(" (${round2(effectiveTp)}) · قفل در بازه [1:1.50 .. 1:3.00]")
+            append(" (${round2(finalTakeProfit)}) · قفل در بازه [1:1.50 .. 1:3.00]")
             if (nearestObstacle != null) {
                 append(" · قبل از دیوار فلت تایم بالاتر ($nearestObstacle)")
             }
@@ -2582,11 +3495,12 @@ object IchimokuStrategyEngine {
             append(" + ${trendPhase.badgeFa}")
             append(" + کارایی ER=${(erStrat * 100).toInt()}%")
             append(" ← هدف: $selectedWaveLabel · 🔒 حد ضرر ساختاری کاملاً ثابت و غیرپله‌ای)")
+            append(" · 🛡️ ${guardedPlan.summaryFa()}")
         }
         val rrBreakdownObj = RrCalculationBreakdown(
             entryPrice = round2(sniperOptimal),
-            stopLossPrice = round2(technicalSl),
-            takeProfitPrice = round2(effectiveTp),
+            stopLossPrice = round2(finalStopLoss),
+            takeProfitPrice = round2(finalTakeProfit),
             riskDistance1R = riskDistSniper,
             rewardDistance = rewardDistSniper,
             actualRiskReward = rr,
@@ -2603,6 +3517,7 @@ object IchimokuStrategyEngine {
             append(String.format(Locale.US, "عدد مناسب R:R = 1:%.2f (%s · بازه مجاز 1.5..3.0)", rr, selectedWaveLabel))
             append(" · فرمول: $rewardDistSniper ÷ $riskDistSniper")
             append(" · 🔒 حد ضرر ثابت ساختاری")
+            append(" · 🛡️ ${guardedPlan.verdict.badgeFa}")
         }
 
         // ── Check 13: Directional Efficiency Ratio (Kaufman ER) & Anti-Chop Filter ──
@@ -2663,50 +3578,68 @@ object IchimokuStrategyEngine {
             StrategyConditionCheck(16, "۱۶. نقطه‌زنی میلی‌متری ورود (Sniper Entry Pocket)", cond16Passed, cond16Detail),
         )
 
-        val conditions = if (activeModel.isDrivePdfStrategy) {
-            buildDriveBookConditions(
-                model = activeModel,
+        val btc52Conditions = listOf(
+            StrategyConditionCheck(1, "۱. دادهٔ بستهٔ کامل پنجرهٔ ۵۲ کندلی", closedTriggerBars.size >= 53, "${closedTriggerBars.size} کندل بسته؛ برای سطح شکست به ۵۲ کندل قبل + کندل جاری نیاز است."),
+            StrategyConditionCheck(2, "۲. جهت و جایگاه ساختاری ۵۲ کندلی", if (isLong) long52Context else short52Context, String.format(Locale.US, "شیب رگرسیون=%+.2f ATR/کندل · تغییر=%+.2f ATR · دامنه=%.1f ATR", trigSnap.regressionSlope52AtrPerBar, trigSnap.closeChange52Atr, trigSnap.range52Atr)),
+            StrategyConditionCheck(3, "۳. شکست بسته‌شده یا بازآزمایی مرز ۵۲ کندلی", btc52BreakoutOk, "مرز قبلی: ${if (isLong) trigSnap.prior52High else trigSnap.prior52Low} · کندل جاری در محاسبهٔ مرز وارد نشده است."),
+            StrategyConditionCheck(4, "۴. فشردگی/همگرایی پیش از گسترش", trigSnap.compressionRatio26 <= 1.20 || trigSnap.isBollingerSqueeze, String.format(Locale.US, "نسبت دامنهٔ ۲۶ کندل اخیر به ۲۶ کندل قبل=%.2f · فشردگی بولینگر=%s", trigSnap.compressionRatio26, trigSnap.isBollingerSqueeze)),
+            StrategyConditionCheck(5, "۵. همسویی ابر و تایم‌فریم بالاتر", if (isLong) trigSnap.isFutureKumoBullish && (macroSnap == null || !macroSnap.isPriceBelowKumo) else trigSnap.isFutureKumoBearish && (macroSnap == null || !macroSnap.isPriceAboveKumo), "ابر آینده و تایم‌فریم بالاتر نباید جهت معامله را نقض کنند."),
+            StrategyConditionCheck(6, "۶. شیب Tenkan/Kijun و Senkou A", if (isLong) trigSnap.tenkanSlopeAtrPerBar > 0.0 && trigSnap.kijunSlopeAtrPerBar >= -0.05 && trigSnap.senkouSpanASlopeAtrPerBar >= -0.02 else trigSnap.tenkanSlopeAtrPerBar < 0.0 && trigSnap.kijunSlopeAtrPerBar <= 0.05 && trigSnap.senkouSpanASlopeAtrPerBar <= 0.02, String.format(Locale.US, "شیب TK=%+.2f/%+.2f ATR · شیب SSA=%+.2f ATR", trigSnap.tenkanSlopeAtrPerBar, trigSnap.kijunSlopeAtrPerBar, trigSnap.senkouSpanASlopeAtrPerBar)),
+            StrategyConditionCheck(7, "۷. آزادی Chikou در مسیر معامله", btc52ChikouOk, if (btc52ChikouOk) "چیکو از قیمت/کندل متناظر، TK و ابر آزاد است." else "چیکو با کندل‌ها یا ابر برخورد دارد."),
+            StrategyConditionCheck(8, "۸. کیفیت حرکت شارپ (بدنه، حجم یا گسترش ATR)", btc52SharpMoveOk, String.format(Locale.US, "بدنه=%.0f%% · حجم=%.2fx · ATR گسترش=%.2fx", trigSnap.candleBodyRatio * 100.0, trigSnap.volumeRatio20, trigSnap.atrExpansionRatio52)),
+            StrategyConditionCheck(9, "۹. فاصلهٔ قابل‌تعقیب از Kijun", trigSnap.distanceToKijunAtr <= 1.65, String.format(Locale.US, "%.2f ATR (حداکثر ۱٫۶۵)", trigSnap.distanceToKijunAtr)),
+            StrategyConditionCheck(10, "۱۰. پلن نهایی و R:R حداقل ۱:۱٫۵", cond12Passed && guardedPlan.isUsable, cond12Detail),
+        )
+        val parsaConditions = listOf(
+            StrategyConditionCheck(1, "۱. فلت واقعی Senkou Span B (خط دورهٔ ۵۲)", parsaFlatOk, "SSB به‌مدت ${trigSnap.senkouSpanBFlatBars} کندل بسته تخت؛ حد لازم ۱۸ کندل (بیش از ۱۷)."),
+            StrategyConditionCheck(2, "۲. چرخش Senkou Span A برای ابر آینده", parsaSpanATurnOk, String.format(Locale.US, "شیب قبلی=%+.2f ATR، اکنون=%+.2f ATR در جهت معامله.", trigSnap.previousSenkouSpanASlopeAtrPerBar, trigSnap.senkouSpanASlopeAtrPerBar)),
+            StrategyConditionCheck(3, "۳. کراس هم‌جهت Tenkan/Kijun در ۸ کندل", parsaCrossAge <= 8, "سن کراس: ${if (parsaCrossAge == Int.MAX_VALUE) "یافت نشد" else "$parsaCrossAge کندل"}؛ مهلت مجاز ۸ کندل بسته."),
+            StrategyConditionCheck(4, "۴. شیب همسو و نبود مخالفت شدید Kijun", parsaSlopeOk, String.format(Locale.US, "شیب Tenkan=%+.2f · Kijun=%+.2f · Senkou A=%+.2f ATR/کندل", trigSnap.tenkanSlopeAtrPerBar, trigSnap.kijunSlopeAtrPerBar, trigSnap.senkouSpanASlopeAtrPerBar)),
+            StrategyConditionCheck(5, "۵. فاصله و گسترش سنجیدهٔ Tenkan/Kijun", parsaLineSpacingOk, String.format(Locale.US, "فاصله=%.2f ATR · تغییر فاصله=%+.2f ATR · قیمت تا Kijun=%.2f ATR", trigSnap.tenkanKijunGapAtr, trigSnap.tenkanKijunGapExpansionAtr, trigSnap.distanceToKijunAtr)),
+            StrategyConditionCheck(6, "۶. آزادی Chikou", parsaChikouOk, if (parsaChikouOk) "چیکو از کندل، TK و ابر در مسیر معامله آزاد است." else "چیکو هنوز درگیر ساختار متناظر است."),
+            StrategyConditionCheck(7, "۷. کیفیت حرکت شارپ و تأیید حجم/ATR", parsaSharpMoveOk, String.format(Locale.US, "بدنه=%.0f%% · حجم=%.2fx · گسترش ATR=%.2fx", trigSnap.candleBodyRatio * 100.0, trigSnap.volumeRatio20, trigSnap.atrExpansionRatio52)),
+            StrategyConditionCheck(8, "۸. سمت قیمت و نبود تضاد تایم‌فریم بالاتر", parsaCloudOk, "قیمت نسبت به Kijun و تایم‌فریم بالاتر با جهت معامله سنجیده شد."),
+            StrategyConditionCheck(9, "۹. پلن نهایی و R:R حداقل ۱:۱٫۵", cond12Passed && guardedPlan.isUsable, cond12Detail),
+        )
+        val conditions = when {
+            isBtc52Model -> btc52Conditions
+            isParsaModel -> parsaConditions
+            activeModel.isDrivePdfStrategy -> buildElliottWaveConditions(
                 isLong = isLong,
-                config = effectiveConfig,
-                macroSnap = macroSnap,
-                stratSnap = stratSnap,
-                trigSnap = trigSnap,
                 wave = wave,
-                rr = rr,
                 selectedWaveLabel = selectedWaveLabel,
                 rewardDistSniper = rewardDistSniper,
-                riskDistSniper = riskDistSniper,
-                cond1Passed = cond1Passed,
-                cond1Detail = cond1Detail,
-                cond4Detail = cond4Detail,
-                cond5Passed = futureThicknessOk,
-                cond5Detail = cond5Detail,
-                cond6Passed = chikouOk,
-                cond6Detail = cond6Detail,
-                cond7Passed = chikouPeakClear,
-                cond8Passed = notOverextended,
-                cond9Passed = flatSsbGravityCleared,
-                cond10Passed = cond10Passed,
-                cond10Detail = cond10Detail,
                 cond12Passed = cond12Passed,
                 cond12Detail = cond12Detail,
                 cond13Passed = cond13Passed,
                 cond13Detail = cond13Detail,
                 cond14Passed = cond14Passed,
                 cond14Detail = cond14Detail,
-                cond15Passed = cond15Passed,
-                cond15Detail = cond15Detail,
                 cond16Passed = cond16Passed,
                 cond16Detail = cond16Detail,
             )
-        } else {
-            baseSixteenConditions
+            else -> baseSixteenConditions
         }
 
-        // ارتقای دقت تمام ۵ مدل استراتژی: تمام ۱۶ شرط ساختاری، مومنتوم، چیکو، هوسودا و نقطه‌زنی برای همه مدل‌ها الزامی است
-        val requiredIndicesForModel: Set<Int> = (1..16).toSet()
+        val requiredIndicesForModel: Set<Int> = when {
+            isBtc52Model -> btc52Conditions.indices.map { it + 1 }.toSet()
+            isParsaModel -> parsaConditions.indices.map { it + 1 }.toSet()
+            else -> (1..16).toSet()
+        }
         val modelCoreConditions = conditions.filter { it.index in requiredIndicesForModel }
         val allSixteenPassed = modelCoreConditions.all { it.passed }
+
+        // ── گیت کیجون (فقط استراتژی ۱۶): کراس ۹/۲۶ + خطوط پیش‌بینی ۸/۲۵، ۷/۲۴، ۶/۲۳ + وضعیت ابر ──
+        val kijunGate = if (KIJUN_LAYER_IN_STRATEGY_16_ENABLED && activeModel.isNeoWaveElliottStrategy) {
+            evaluateKijunPredictiveGate(
+                candlesInput = alignedStrategyCandles,
+                isLong = isLong,
+                strategySnapshot = stratSnap,
+            )
+        } else {
+            null
+        }
+        val kijunGatePassed = (kijunGate?.passed ?: true) && (kijunStopRule?.blocked != true)
         val firstFifteenPassed = modelCoreConditions.filter { it.index != 16 }.all { it.passed }
         val triggerFired = triggerType != StrategyTriggerType.NONE
         val passedCount = conditions.count { it.passed }
@@ -2722,40 +3655,189 @@ object IchimokuStrategyEngine {
         val confidence = round2(((passedCount.toDouble() / conditions.size.toDouble()) * 84.0 + if (triggerFired) 16.0 else 0.0).coerceIn(0.0, 100.0))
         val coreTrendScore = round2((confidence * 0.74 + phaseBonus + erBonus + rrBonus + sniperBonus).coerceIn(0.0, 100.0))
 
-        val sniperArmedPendingRetest = firstFifteenPassed && triggerFired && !cond16Passed
+        // ── لایهٔ اختیاری نئوویو (NeoWave Gate) ────────────────────────────────
+        // قانون صفر-اثر: وقتی `neoWaveEnabled = false` باشد هیچ محاسبه‌ای انجام نمی‌شود و
+        // خروجی این تابع بیت‌به‌بیت مثل نسخهٔ قبل از نئوویو می‌ماند.
+        // نئوویو–الیوت فقط و فقط در استراتژی جایگاه ۱۶ ادغام شده است و همیشه در همان استراتژی
+        // روشن است (کلید کاربر ندارد). برای هیچ روش دیگری محاسبه‌ای انجام نمی‌شود.
+        val neoWaveOn = activeModel.isNeoWaveElliottStrategy
+        // دامنهٔ زیگزاگ داینامیک: با رژیم نوسان همان نماد/تایم‌فریم مقیاس می‌گیرد (قاعدهٔ درجه/دامنهٔ نیلی).
+        val neoWaveAmplitude = if (neoWaveOn) {
+            NeoWaveEngine.dynamicAmplitudeAtr(alignedStrategyCandles, effectiveConfig.neoWaveAmplitudeAtr)
+        } else {
+            effectiveConfig.neoWaveAmplitudeAtr
+        }
+        val neoWaveVerdict = if (neoWaveOn) {
+            NeoWaveEngine.analyze(candles = alignedStrategyCandles, amplitudeAtr = neoWaveAmplitude)
+        } else {
+            null
+        }
+        // ساختار درجهٔ بالاتر (تایم‌فریم ماکرو): بر درجهٔ پایین‌تر حکومت می‌کند.
+        val neoWaveHigherVerdict = if (neoWaveOn) {
+            NeoWaveEngine.analyze(candles = alignedMacroCandles, amplitudeAtr = neoWaveAmplitude)
+        } else {
+            null
+        }
+        val neoWaveMtf = if (neoWaveOn) {
+            NeoWaveEngine.mtfConfluence(neoWaveVerdict, neoWaveHigherVerdict, isLong)
+        } else {
+            NeoWaveEngine.MtfConfluence.NEUTRAL
+        }
+        // آستانه‌ها: اگر تنظیمات به هوش عصبی سپرده شده باشد، همان مقادیر آموخته‌شده اعمال می‌شوند.
+        val neoWaveRulesThreshold = effectiveConfig.resolvedNeoWaveRules(isCrypto = false)
+        val neoWaveConfidenceThreshold = effectiveConfig.resolvedNeoWaveConfidence(isCrypto = false)
+        val neoWaveGate = if (neoWaveOn) {
+            NeoWaveEngine.gate(
+                verdict = neoWaveVerdict,
+                isLong = isLong,
+                minRulesPassed = neoWaveRulesThreshold,
+                minConfidencePct = neoWaveConfidenceThreshold,
+                ruleWeights = effectiveConfig.neoWaveWeightsMap(),
+            )
+        } else {
+            NeoWaveEngine.NeoWaveGate.OFF
+        }
+        val neoWaveTotalDelta = neoWaveGate.confidenceDelta + neoWaveMtf.deltaConfidence
+        val gatedConfidence = if (neoWaveOn) {
+            round2((confidence + neoWaveTotalDelta).coerceIn(0.0, 100.0))
+        } else {
+            confidence
+        }
+        val gatedTrendScore = if (neoWaveOn) {
+            round2((coreTrendScore + neoWaveTotalDelta * 0.5).coerceIn(0.0, 100.0))
+        } else {
+            coreTrendScore
+        }
 
-        val readiness = when {
-            allSixteenPassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
-            allSixteenPassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
-            sniperArmedPendingRetest || passedCount >= 11 -> StrategyReadinessState.WATCH_SETUP
+        val customWatchSetup = when {
+            isBtc52Model -> closedTriggerBars.size >= 53 && (long52Context || short52Context)
+            isParsaModel -> parsaFlatOk && (parsaSpanATurnOk || parsaCrossAge <= 8)
+            else -> false
+        }
+        val sniperArmedPendingRetest = !isBtc52Model && !isParsaModel && firstFifteenPassed && triggerFired && !cond16Passed
+
+        val baseReadiness = when {
+            neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) -> StrategyReadinessState.BLOCKED
+            allSixteenPassed && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
+            allSixteenPassed && kijunGatePassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
+            allSixteenPassed && !kijunGatePassed -> StrategyReadinessState.BLOCKED
+            customWatchSetup || sniperArmedPendingRetest || (!isBtc52Model && !isParsaModel && passedCount >= 11) -> StrategyReadinessState.WATCH_SETUP
             else -> StrategyReadinessState.BLOCKED
         }
 
-        val finalAction = when (readiness) {
-            StrategyReadinessState.SIGNAL_BUY -> SignalAction.BUY
-            StrategyReadinessState.SIGNAL_SELL -> SignalAction.SELL
-            else -> if (sniperArmedPendingRetest) {
-                if (isLong) SignalAction.BUY else SignalAction.SELL
-            } else {
-                SignalAction.NO_TRADE
+        // ── مسیر ورود رمزارز بر پایهٔ نئوویو ─────────────────────────────────
+        // شرط عمومی (هر ۱۶ شرط هم‌زمان) در رمزارز می‌تواند روزها برقرار نشود. در این مسیر
+        // الگوی کامل، تأییدشده و هم‌جهتِ نئوویو ماشهٔ ورود است؛ کنترل‌های ریسک دست‌نخورده‌اند
+        // (R:R ≥ ۱.۵، پلن معتبر، بدون وتو، بدون بازار بسته).
+        val isCryptoClass = AssetClass.of(normalizedSymbol) == AssetClass.CRYPTO
+        val cryptoEntryDecision = NeoWaveEngine.cryptoEntryDecision(
+            enabled = neoWaveOn && effectiveConfig.neoWaveCryptoEntryEnabled &&
+                !neoWaveGate.veto && !neoWaveMtf.veto,
+            isCrypto = isCryptoClass,
+            verdict = neoWaveVerdict,
+            isLong = isLong,
+            minRulesPassed = effectiveConfig.resolvedNeoWaveRules(isCrypto = true),
+            minConfidencePct = effectiveConfig.resolvedNeoWaveConfidence(isCrypto = true),
+            riskReward = rr,
+            hasValidPlan = finalStopLoss != null && finalTakeProfit != null && sniperOptimal != null &&
+                rr >= 1.5,
+        )
+        val cryptoNeoWaveEntry = cryptoEntryDecision.eligible &&
+            baseReadiness != StrategyReadinessState.SIGNAL_BUY &&
+            baseReadiness != StrategyReadinessState.SIGNAL_SELL
+        val readiness = when {
+            cryptoNeoWaveEntry && isLong -> StrategyReadinessState.SIGNAL_BUY
+            cryptoNeoWaveEntry -> StrategyReadinessState.SIGNAL_SELL
+            else -> baseReadiness
+        }
+
+        val finalAction = if (neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto)) {
+            SignalAction.NO_TRADE
+        } else if (!kijunGatePassed && !cryptoNeoWaveEntry) {
+            // استراتژی ۱۶ فقط با تأیید کراس ۹/۲۶، خطوط پیش‌بینی و ابر معامله می‌کند.
+            SignalAction.NO_TRADE
+        } else if (cryptoNeoWaveEntry) {
+            if (isLong) SignalAction.BUY else SignalAction.SELL
+        } else {
+            when (readiness) {
+                StrategyReadinessState.SIGNAL_BUY -> SignalAction.BUY
+                StrategyReadinessState.SIGNAL_SELL -> SignalAction.SELL
+                else -> if (sniperArmedPendingRetest) {
+                    if (isLong) SignalAction.BUY else SignalAction.SELL
+                } else {
+                    SignalAction.NO_TRADE
+                }
             }
         }
 
         val tfTag = "[تایم ${config.triggerInterval.label}]"
-        val summaryFa = when {
-            readiness == StrategyReadinessState.SIGNAL_BUY ->
-                "$tfTag 🎯 خرید نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
-            readiness == StrategyReadinessState.SIGNAL_SELL ->
-                "$tfTag 🎯 فروش نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
+        val baseSummaryFa = when {
+            readiness == StrategyReadinessState.SIGNAL_BUY -> when {
+                isBtc52Model -> "$tfTag 🟠 خرید BTC بر پایهٔ شکست/بازآزمایی ۵۲ کندلی · بدون الگوی سه کندل آخر · R:R=1:${round2(rr)}"
+                isParsaModel -> "$tfTag 🟢 خرید پارسا · فلت SSB ${trigSnap.senkouSpanBFlatBars} کندل + چرخش Senkou A + کراس TK · R:R=1:${round2(rr)}"
+                else -> "$tfTag 🎯 خرید نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
+            }
+            readiness == StrategyReadinessState.SIGNAL_SELL -> when {
+                isBtc52Model -> "$tfTag 🟠 فروش BTC بر پایهٔ شکست/بازآزمایی ۵۲ کندلی · بدون الگوی سه کندل آخر · R:R=1:${round2(rr)}"
+                isParsaModel -> "$tfTag 🔴 فروش پارسا · فلت SSB ${trigSnap.senkouSpanBFlatBars} کندل + چرخش Senkou A + کراس TK · R:R=1:${round2(rr)}"
+                else -> "$tfTag 🎯 فروش نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
+            }
             sniperArmedPendingRetest ->
                 "$tfTag 🎯 مسلح برای نقطه‌زنی ($normalizedSymbol · $effectiveTitle): در کمین لمس $sniperOptimal"
-            readiness == StrategyReadinessState.WATCH_SETUP ->
-                "$tfTag ⏳ $passedCount/۱۶ شرط (${trendPhase.badgeFa})؛ منتظر ماشه در ${config.triggerInterval.label}"
+            readiness == StrategyReadinessState.WATCH_SETUP -> when {
+                isBtc52Model -> "$tfTag ⏳ ساختار ۵۲ کندلی هم‌جهت است؛ منتظر شکست بسته‌شده/بازآزمایی و تأیید حجم/چیکو (${passedCount}/${conditions.size})"
+                isParsaModel -> "$tfTag ⏳ SSB ${trigSnap.senkouSpanBFlatBars} کندل تخت؛ منتظر چرخش Senkou A، کراس TK و تأیید شارپ (${passedCount}/${conditions.size})"
+                else -> "$tfTag ⏳ $passedCount/${conditions.size} شرط (${trendPhase.badgeFa})؛ منتظر ماشه در ${config.triggerInterval.label}"
+            }
             readiness == StrategyReadinessState.BLOCKED -> {
-                val firstFailed = modelCoreConditions.firstOrNull { !it.passed } ?: conditions.firstOrNull { !it.passed }
-                "$tfTag 🛑 $passedCount/۱۶ شرط · مانع: ${firstFailed?.titleFa ?: ""}"
+                if (!kijunGatePassed) {
+                    val why = when {
+                        kijunStopRule?.blocked == true -> kijunStopRule.noteFa
+                        kijunGate != null -> kijunGate.summaryFa
+                        else -> ""
+                    }
+                    "$tfTag 🛑 گیت کیجون اجازه نداد · $why"
+                } else {
+                    val firstFailed = modelCoreConditions.firstOrNull { !it.passed } ?: conditions.firstOrNull { !it.passed }
+                    "$tfTag 🛑 $passedCount/${conditions.size} شرط · مانع: ${firstFailed?.titleFa ?: ""}"
+                }
             }
             else -> "$tfTag در حال دریافت کندل‌های $normalizedSymbol..."
+        }
+        val neoWaveSuffix = when {
+            !neoWaveOn || neoWaveGate.noteFa.isBlank() -> ""
+            neoWaveMtf.noteFa.isBlank() -> " · ${neoWaveGate.noteFa}"
+            else -> " · ${neoWaveGate.noteFa} · ${neoWaveMtf.noteFa}"
+        }
+        val summaryFa = when {
+            neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) ->
+                "$tfTag ⛔ ورود وتو شد · $normalizedSymbol · $effectiveTitle · ${neoWaveGate.noteFa}"
+            cryptoNeoWaveEntry ->
+                "$tfTag 🌊 ورود رمزارز بر پایهٔ نئوویو · $normalizedSymbol · $effectiveTitle · " +
+                    "${cryptoEntryDecision.reasonFa} · R:R ۱:${round2(rr)}"
+            else -> baseSummaryFa + neoWaveSuffix
+        }
+        val entryPathFa = when {
+            isBtc52Model -> "روش مستقل بیت‌کوین با زمینهٔ ۵۲ کندل بسته؛ سه کندل آخر الگوی تصمیم نیستند؛ یادگیری عصبی خاموش"
+            isParsaModel -> "پارسا: SSB/خط دورهٔ ۵۲ تخت ≥۱۸ کندل + چرخش Senkou A + کراس TK؛ شیب/فاصله، چیکو و حرکت شارپ سنجیده شد؛ یادگیری عصبی خاموش"
+            cryptoNeoWaveEntry -> "🌊 مسیر نئوویو (کریپتو): ${cryptoEntryDecision.reasonFa}"
+            neoWaveOn && isCryptoClass && neoWaveVerdict != null ->
+                "🌊 کریپتو: ${cryptoEntryDecision.reasonFa}"
+            else -> ""
+        }
+
+        // شرایط نئوویو فقط برای نمایش به چک‌لیست اضافه می‌شوند (در محاسبهٔ امتیاز دخالت ندارند).
+        val displayConditions = if (neoWaveOn && neoWaveVerdict != null) {
+            conditions + neoWaveVerdict.rules.map { rule ->
+                StrategyConditionCheck(
+                    index = 16 + rule.index,
+                    titleFa = "🌊 نئوویو ${rule.index}. ${rule.titleFa}",
+                    passed = rule.passed,
+                    detailFa = rule.detailFa,
+                )
+            }
+        } else {
+            conditions
         }
 
         return StrategyEvaluationReport(
@@ -2769,25 +3851,25 @@ object IchimokuStrategyEngine {
             readiness = readiness,
             action = finalAction,
             triggerType = triggerType,
-            confidence = confidence,
+            confidence = gatedConfidence,
             livePrice = round2(livePrice),
             suggestedEntry = sniperOptimal,
-            suggestedStopLoss = technicalSl,
+            suggestedStopLoss = finalStopLoss,
             targetV = wave?.targetV,
             targetN = wave?.targetN,
             targetE = wave?.targetE,
-            primaryTakeProfit = round2(effectiveTp),
+            primaryTakeProfit = finalTakeProfit,
             riskReward = rr,
             macroSnapshot = macroSnap,
             strategySnapshot = stratSnap,
             triggerSnapshot = trigSnap,
             waveProjection = wave,
-            conditions = conditions,
+            conditions = displayConditions,
             summaryFa = summaryFa,
             triggerBarTime = trigSnap.time,
             evaluatedAt = nowMillis,
             trendPhase = trendPhase,
-            coreTrendScore = coreTrendScore,
+            coreTrendScore = gatedTrendScore,
             sniperOptimalEntry = sniperOptimal,
             sniperZoneLow = sniperLow,
             sniperZoneHigh = sniperHigh,
@@ -2795,6 +3877,28 @@ object IchimokuStrategyEngine {
             isSniperArmedPendingRetest = sniperArmedPendingRetest,
             optimalRiskReward = effectiveOptimalRr,
             rrBreakdown = rrBreakdownObj,
+            planStopPct = guardedPlan.stopPct,
+            planTargetPct = guardedPlan.targetPct,
+            planRecommendedLeverage = guardedPlan.recommendedLeverage,
+            planVerdictFa = guardedPlan.verdict.badgeFa,
+            planGuardNoteFa = guardedPlan.summaryFa(),
+            neoWaveBadgeFa = if (neoWaveOn) neoWaveGate.noteFa else "",
+            neoWaveVeto = neoWaveGate.veto,
+            neoWavePatternId = if (neoWaveOn) neoWaveVerdict?.pattern?.name.orEmpty() else "",
+            neoWaveRulesPassed = if (neoWaveOn) neoWaveVerdict?.rulesPassed ?: 0 else 0,
+            neoWaveRulesTotal = if (neoWaveOn) neoWaveVerdict?.rulesTotal ?: 0 else 0,
+            neoWaveConfidencePct = if (neoWaveOn) neoWaveVerdict?.confidencePct ?: 0.0 else 0.0,
+            neoWaveFailedRuleIds = if (neoWaveOn) {
+                neoWaveVerdict?.rules?.filter { !it.passed }?.map { it.index }.orEmpty()
+            } else {
+                emptyList()
+            },
+            neoWaveMtfFa = if (neoWaveOn) neoWaveMtf.noteFa else "",
+            neoWaveAmplitudeAtr = if (neoWaveOn) neoWaveAmplitude else 0.0,
+            cryptoNeoWaveEntry = cryptoNeoWaveEntry,
+            entryPathFa = entryPathFa,
+            kijunGateFa = kijunGate?.summaryFa.orEmpty(),
+            kijunStopRuleFa = kijunStopRule?.noteFa.orEmpty(),
         )
     }
 
@@ -2815,7 +3919,7 @@ object IchimokuStrategyEngine {
         nowMillis: Long = System.currentTimeMillis(),
         symbolInput: String = BTC_SYMBOL,
         runAllSimultaneously: Boolean = true,
-        enabledStrategyIds: Set<String> = BitcoinStrategyModel.entries.map { it.id }.toSet(),
+        enabledStrategyIds: Set<String> = BitcoinStrategyModel.activeStrategyIds,
         customStrategies: List<CustomStrategySlot> = emptyList(),
     ): DualTimeframeSymbolReport {
         val config15m = config.copy(
@@ -2833,8 +3937,15 @@ object IchimokuStrategyEngine {
         val map5m = LinkedHashMap<String, StrategyEvaluationReport>()
 
         if (runAllSimultaneously) {
-            val activeBuiltIns = BitcoinStrategyModel.entries.filter { it.id in enabledStrategyIds }
-                .ifEmpty { BitcoinStrategyModel.entries }
+            // استراتژی‌های موقتاً خاموش (فعلاً جایگاه ۱۶) حتی اگر در تنظیمات روشن باشند
+            // ارزیابی نمی‌شوند؛ شناسه و آموخته‌هایشان حفظ می‌شود تا بعداً از صفر شروع نشوند.
+            val activeBuiltIns = BitcoinStrategyModel.entries
+                .filter { it.id in enabledStrategyIds && !it.isTemporarilyDisabled }
+                .ifEmpty {
+                    BitcoinStrategyModel.entries.filterNot {
+                        it.isTemporarilyDisabled || it.requiresExplicitOptIn
+                    }
+                }
             for (model in activeBuiltIns) {
                 map15m[model.id] = evaluateBitcoinStrategy(
                     activeModel = model,
@@ -2938,181 +4049,90 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * ساخت چک‌لیست اختصاصی ۱۶ شرطی برای هر یک از ۹ کتاب PDF گوگل درایو طبق قوانین خط‌به‌خط هر کتاب.
+     * چک‌لیست اختصاصی استراتژی پیمان در نسخهٔ **الیوت–نئوویو**.
+     *
+     * بنا به درخواست کاربر فقط لایهٔ موجی باقی مانده است؛ شرط‌های اجماع چندلایه، گیت کیجون و
+     * تأییدهای DMI/MACD/Kelly حذف شده‌اند. هشت شرط زیر مستقیماً از هندسهٔ موج و کیفیت ورود
+     * ساخته می‌شوند و `confidence` موتور مثل قبل از نسبت شرط‌های پاس‌شده محاسبه می‌شود.
      */
-    private fun buildDriveBookConditions(
-        model: BitcoinStrategyModel,
+    private fun buildElliottWaveConditions(
         isLong: Boolean,
-        config: BaseStrategyConfig,
-        macroSnap: IchimokuBarSnapshot?,
-        stratSnap: IchimokuBarSnapshot,
-        trigSnap: IchimokuBarSnapshot,
         wave: HosodaWaveProjection?,
-        rr: Double,
         selectedWaveLabel: String,
         rewardDistSniper: Double,
-        riskDistSniper: Double,
-        cond1Passed: Boolean,
-        cond1Detail: String,
-        cond4Detail: String,
-        cond5Passed: Boolean,
-        cond5Detail: String,
-        cond6Passed: Boolean,
-        cond6Detail: String,
-        cond7Passed: Boolean,
-        cond8Passed: Boolean,
-        cond9Passed: Boolean,
-        cond10Passed: Boolean,
-        cond10Detail: String,
         cond12Passed: Boolean,
         cond12Detail: String,
         cond13Passed: Boolean,
         cond13Detail: String,
         cond14Passed: Boolean,
         cond14Detail: String,
-        cond15Passed: Boolean,
-        cond15Detail: String,
         cond16Passed: Boolean,
         cond16Detail: String,
     ): List<StrategyConditionCheck> {
-        val dirCandle = if (isLong) trigSnap.close >= trigSnap.open else trigSnap.close <= trigSnap.open
-        return when (model) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
-                val consensus = evaluateUnified9BookConsensus(isLong, trigSnap, stratSnap, macroSnap)
-                val reqBooks = config.minDriveBooksConsensus.coerceIn(4, 9)
-                val cConsensus = consensus.confirmedBooksCount >= reqBooks && consensus.bayesianWinProbabilityPct >= 76.0
-                val cTripleKumo = if (isLong) {
-                    trigSnap.isPriceAboveKumo && trigSnap.close > trigSnap.kumoTop103060 && trigSnap.close > trigSnap.kumoTop72244
+        val waveAligned = wave != null &&
+            ((wave.direction == SignalAction.BUY) == isLong)
+        val sPointHeld = wave?.sPointHeld == true
+        val waveRoomOk = selectedWaveLabel.isNotBlank() && rewardDistSniper > 0.0
+        val timeCycleClear = wave?.isNearTimeCycleChangeDay != true
+        return listOf(
+            StrategyConditionCheck(
+                1,
+                "۱. جهت موج الیوت هم‌سو با جهت معامله",
+                waveAligned,
+                if (wave == null) {
+                    "شمارش موج هنوز کامل نیست"
                 } else {
-                    trigSnap.isPriceBelowKumo && trigSnap.close < trigSnap.kumoBottom103060 && trigSnap.close < trigSnap.kumoBottom72244
-                }
-                val cSanyakuAndRibbon = if (isLong) {
-                    stratSnap.sanyakuBullishOrder && trigSnap.sanyakuBullishOrder &&
-                        trigSnap.close >= trigSnap.ema21 - trigSnap.atr14 * 0.15 &&
-                        trigSnap.close >= trigSnap.ema34 - trigSnap.atr14 * 0.20
-                } else {
-                    stratSnap.sanyakuBearishOrder && trigSnap.sanyakuBearishOrder &&
-                        trigSnap.close <= trigSnap.ema21 + trigSnap.atr14 * 0.15 &&
-                        trigSnap.close <= trigSnap.ema34 + trigSnap.atr14 * 0.20
-                }
-                val cMultiSpeedTk = !trigSnap.isKijunFlat && consensus.book3KeenbasePassed && consensus.book9KoonitzTripleScreenPassed
-                val cRegimeTriggerOrPullback = consensus.book1TuAnhPassed || consensus.book2FokaPassed
-                val cRsiNotExhausted = if (isLong) {
-                    trigSnap.rsi14 in 48.0..76.0 && trigSnap.rsiPeakDropLong < 10.5
-                } else {
-                    trigSnap.rsi14 in 24.0..52.0 && trigSnap.rsiTroughRiseShort < 11.5
-                }
-                listOf(
-                    StrategyConditionCheck(
-                        1,
-                        "۱. رژیم کوموی ۳ تایم‌فریم + هم‌فازی هر ۳ ابر (9,26,52 + 10,30,60 + 7,22,44)",
-                        cond1Passed && cTripleKumo,
-                        String.format(
-                            Locale.US,
-                            "%s · Kumo(52)=%s · Kumo(60)=%s · Kumo(44)=%s",
-                            cond1Detail,
-                            round2(if (isLong) trigSnap.kumoTop else trigSnap.kumoBottom).toString(),
-                            round2(if (isLong) trigSnap.kumoTop103060 else trigSnap.kumoBottom103060).toString(),
-                            round2(if (isLong) trigSnap.kumoTop72244 else trigSnap.kumoBottom72244).toString(),
-                        ),
-                    ),
-                    StrategyConditionCheck(
-                        2,
-                        "۲. چیدمان ۵ خط سانیاکو (Sanyaku) + حمایت ریبون نهایی EMA(21/34/89)",
-                        cSanyakuAndRibbon,
-                        String.format(
-                            Locale.US,
-                            "Tenkan=%s · Kijun=%s · EMA21=%s · EMA34=%s",
-                            round2(trigSnap.tenkan).toString(),
-                            round2(trigSnap.kijun).toString(),
-                            round2(trigSnap.ema21).toString(),
-                            round2(trigSnap.ema34).toString(),
-                        ),
-                    ),
-                    StrategyConditionCheck(
-                        3,
-                        "۳. کراس و شیب فعال ۳ سرعته Tenkan/Kijun (7/22, 9/26, 10/30) و کیجون غیرفلت",
-                        cMultiSpeedTk,
-                        String.format(
-                            Locale.US,
-                            "TK(7/22)=%s/%s · TK(10/30)=%s/%s · شیب کیجون=%+.2f ATR",
-                            round2(trigSnap.tenkan7).toString(),
-                            round2(trigSnap.kijun22).toString(),
-                            round2(trigSnap.tenkan10).toString(),
-                            round2(trigSnap.kijun30).toString(),
-                            trigSnap.kijunSlopeAtrPerBar,
-                        ),
-                    ),
-                    StrategyConditionCheck(
-                        4,
-                        "۴. جهت و شیب ابر آینده (۲۶ کندل جلوتر) + تایید Kumo Twist (کتاب ۶)",
-                        consensus.book6HowToTradePassed,
-                        cond4Detail,
-                    ),
-                    StrategyConditionCheck(
-                        5,
-                        "۵. ضخامت ابر آینده و ایمنی از پیچش (الیوت + پلویل + Keenbase 60)",
-                        cond5Passed,
-                        cond5Detail,
-                    ),
-                    StrategyConditionCheck(
-                        6,
-                        "۶. رهایی سه‌بعدی Chikou Span بیرون کندل‌ها و ابر ۲۶ دوره قبل (کتاب ۵ و ۷)",
-                        cond6Passed && consensus.book5MukherjeeChikouPassed && consensus.book7Tsg4StepPassed,
-                        cond6Detail,
-                    ),
-                    StrategyConditionCheck(
-                        7,
-                        "۷. شکست سقف/کف ساختاری چیکو اسپن (فیلتر مارک تاتل — ضد معامله در مقاومت)",
-                        cond7Passed,
-                        if (isLong) "عبور کلوز از سقف ساختاری چیکو (${round2(trigSnap.chikouResistancePeak)})" else "عبور کلوز از کف ساختاری چیکو (${round2(trigSnap.chikouSupportTrough)})",
-                    ),
-                    StrategyConditionCheck(
-                        8,
-                        "۸. قانون کش لاستیکی کیجون، نبود C-Clamp و سلامت قله RSI (ضد ورود در اشباع)",
-                        cond8Passed && cRsiNotExhausted,
-                        String.format(Locale.US, "فاصله کیجون=%.2f ATR · RSI14=%.1f (افت قله=%.1f)", stratSnap.distanceToKijunAtr, trigSnap.rsi14, if (isLong) trigSnap.rsiPeakDropLong else trigSnap.rsiTroughRiseShort),
-                    ),
-                    StrategyConditionCheck(
-                        9,
-                        "۹. فیلتر جاذبه فلت SSB، تعادل کاتانا و عبور امن از دیوار افقی",
-                        cond9Passed,
-                        "عبور ایمن از جاذبه فلت Senkou Span B",
-                    ),
-                    StrategyConditionCheck(
-                        10,
-                        "۱۰. هندسه موج N هوسودا، نقطه S، چرخه زمانی و فرکتال ۵ کندلی بیل ویلیامز",
-                        cond10Passed,
-                        "$cond10Detail · فرکتال=${round2(if (isLong) trigSnap.lastDownFractalLow else trigSnap.lastUpFractalHigh)}",
-                    ),
-                    StrategyConditionCheck(
-                        11,
-                        "۱۱. ماشه تطبیقی رژیم بازار (فوران بولینگر TuAnh یا پولبک EMA21/RSI7 فکا) + تایید DMI/MACD و Kelly (اجماع ≥ $reqBooks/9)",
-                        cRegimeTriggerOrPullback && consensus.book8Koonitz5RulesPassed && consensus.book4MukherjeeKellyPassed && cConsensus && dirCandle,
-                        String.format(
-                            Locale.US,
-                            "اجماع %d/9 کتاب (برد بیزین=%.1f%% · Kelly=%d%% · ADX=%.1f)",
-                            consensus.confirmedBooksCount,
-                            consensus.bayesianWinProbabilityPct,
-                            trigSnap.kellyWinProbabilityPercent,
-                            trigSnap.adx14,
-                        ),
-                    ),
-                    StrategyConditionCheck(12, "۱۲. فرمول و عدد مناسب R:R منطبق بر «جامع بیس» (حداقل ۱:۱.۵ روی امواج هوسودا)", cond12Passed, cond12Detail),
-                    StrategyConditionCheck(13, "۱۳. کارایی جهت‌دار روند کافمن (ER14) و فیلتر ضد رِنج", cond13Passed, cond13Detail),
-                    StrategyConditionCheck(14, "۱۴. فیلتر ضد فیک‌بریک‌اوت، الگوی شمعی تایید و رد شدوی معکوس", cond14Passed && dirCandle, cond14Detail),
-                    StrategyConditionCheck(15, "۱۵. شکار اصل روند (فاز Genesis / Core Expansion و عدم اشباع)", cond15Passed, cond15Detail),
-                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی میلی‌متری ورود اسنایپر (هم‌تراز جامع بیس)", cond16Passed, cond16Detail),
-                )
-            }
-
-            else -> emptyList()
-        }
+                    "جهت موج: " + if (wave.direction == SignalAction.BUY) "صعودی" else "نزولی"
+                },
+            ),
+            StrategyConditionCheck(
+                2,
+                "۲. معتبر بودن نقطهٔ چرخش (S-Point) و شکسته‌نشدن آن",
+                sPointHeld,
+                if (wave == null) "نقطهٔ S در دسترس نیست" else "نقطهٔ S: ${round2(wave.pointC)}",
+            ),
+            StrategyConditionCheck(
+                3,
+                "۳. فضای هدف موجی (V/N/E) برای ادامهٔ حرکت",
+                waveRoomOk,
+                if (wave == null) "هدف موجی محاسبه نشده" else "هدف انتخابی: $selectedWaveLabel",
+            ),
+            StrategyConditionCheck(
+                4,
+                "۴. چرخهٔ زمانی هوسودا در نقطهٔ تغییر نباشد",
+                timeCycleClear,
+                if (wave == null) "چرخهٔ زمانی نامشخص" else "چرخهٔ نزدیک: ${wave.nearestTimeCycleNumber}",
+            ),
+            StrategyConditionCheck(
+                5,
+                "۵. عدد مناسب R:R (حداقل ۱:۱.۵) روی اهداف موجی",
+                cond12Passed,
+                cond12Detail,
+            ),
+            StrategyConditionCheck(
+                6,
+                "۶. کارایی روند کافمن (ER14) برای موج جهت‌دار",
+                cond13Passed,
+                cond13Detail,
+            ),
+            StrategyConditionCheck(
+                7,
+                "۷. نبود شدوی معکوس و فیک‌بریک‌اوت در موج جاری",
+                cond14Passed,
+                cond14Detail,
+            ),
+            StrategyConditionCheck(
+                8,
+                "۸. نقطه‌زنی ورود در ناحیهٔ موج (Sniper)",
+                cond16Passed,
+                cond16Detail,
+            ),
+        )
     }
 
     /**
      * تشخیص ۴ ماشه ورود برای شکار اصل روند از لحظه تولد (`EARLY_KATANA_GENESIS`) تا قلب موج (`PULLBACK / BREAKOUT / SANYAKU`)
-     * + ماشه‌های اختصاصی استراتژی جامع ۹ کتاب درایو (`DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER`).
+     * استراتژی ۱۶ (پیمان) ماشهٔ اختصاصی ندارد و از همین ماشه‌های استاندارد استفاده می‌کند.
      */
     private fun detectEntryTrigger(
         direction: SignalAction,
@@ -3135,44 +4155,8 @@ object IchimokuStrategyEngine {
             trigSnap.atr14 * 0.03
         }
 
-        // ── ماشه‌های اختصاصی متود جامع ۹ کتاب درایو ────────────────────────────
-        when (activeModel) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
-                val consensus = evaluateUnified9BookConsensus(isLong, trigSnap, stratSnap, null)
-                val reqBooks = config.minDriveBooksConsensus.coerceIn(4, 9)
-                if (consensus.confirmedBooksCount >= reqBooks) {
-                    if (isLong && cur.close > cur.open && cur.close > trigSnap.kumoTop) {
-                        if ((trigSnap.isBollingerSqueeze && trigSnap.isMarubozuBreakoutBull) || trigSnap.recentKatanaRelease) {
-                            return StrategyTriggerType.EARLY_KATANA_GENESIS
-                        }
-                        val touchedAnchor = listOf(prev1, prev2, prev3, cur).any { b ->
-                            b.low <= max(consensus.compositeSniperAnchor, trigSnap.kijun) + trigSnap.atr14 * 0.35
-                        }
-                        if (touchedAnchor && cur.close >= min(trigSnap.tenkan7, trigSnap.tenkan)) {
-                            return StrategyTriggerType.PULLBACK_BOUNCE
-                        }
-                        if (cur.close >= trigSnap.chikouResistancePeak + breakoutBuf) {
-                            return StrategyTriggerType.VALIDATED_BREAKOUT
-                        }
-                    } else if (!isLong && cur.close < cur.open && cur.close < trigSnap.kumoBottom) {
-                        if ((trigSnap.isBollingerSqueeze && trigSnap.isMarubozuBreakoutBear) || trigSnap.recentKatanaRelease) {
-                            return StrategyTriggerType.EARLY_KATANA_GENESIS
-                        }
-                        val touchedAnchor = listOf(prev1, prev2, prev3, cur).any { b ->
-                            b.high >= min(consensus.compositeSniperAnchor, trigSnap.kijun) - trigSnap.atr14 * 0.35
-                        }
-                        if (touchedAnchor && cur.close <= max(trigSnap.tenkan7, trigSnap.tenkan)) {
-                            return StrategyTriggerType.PULLBACK_BOUNCE
-                        }
-                        if (cur.close <= trigSnap.chikouSupportTrough - breakoutBuf) {
-                            return StrategyTriggerType.VALIDATED_BREAKOUT
-                        }
-                    }
-                }
-            }
-
-            else -> Unit
-        }
+        // ماشه‌های اختصاصی متود جامع ۹ لایه حذف شدند: استراتژی ۱۶ فقط لایهٔ الیوت را دارد و از
+        // ماشه‌های استاندارد پایین استفاده می‌کند (و فعلاً غیرفعال است).
 
         if (isLong) {
             // Trigger 0: Early Katana Genesis (captures the very birth of the core trend right as TK compression releases)
@@ -3265,7 +4249,7 @@ object IchimokuStrategyEngine {
      * بررسی دقیق زمان از دست رفتن روند در یک معامله باز که در سود است (`Trend Loss In Profit Detector`):
      * تشخیص می‌دهد کی معامله باز روند خود را از دست داده و دیگر ادامه نمی‌دهد تا همان‌جا که در سود است بسته شود.
      *
-     * ۵ نشانه قطعی مرگ روند در سود بر اساس ۴ کتاب ایچیموکو:
+     * ۵ نشانه قطعی مرگ روند در سود بر اساس ۴ مکتب ایچیموکو:
      * ۱. شکست خط تعادل کیجون‌سن یا کراس معکوس تنکان/کیجون (`Kijun Breakdown / TK Counter-Cross`)
      * ۲. تخلیه کشیدگی C-Clamp با کندل بازگشتی و شدوی معکوس سنگین زیر/بالای تنکان (`C-Clamp Climax Rejection`)
      * ۳. تکمیل چرخه زمانی هوسودا (9, 17, 26, 33) همراه با فلت شدن تنکان و کندل خلاف جهت (`Hosoda Time Exhaustion`)
@@ -3289,7 +4273,9 @@ object IchimokuStrategyEngine {
 
         val trigSnap = report?.triggerSnapshot
         val stratSnap = report?.strategySnapshot ?: trigSnap
-        val rulesSummary = "شروط خروج فوری در سود: ۱) کلوز کندل پشت کیجون یا کراس معکوس TK · ۲) شدوی بازگشتی C-Clamp زیر تنکان · ۳) اتمام چرخه زمانی هوسودا (9/17/26) با تنکان فلت · ۴) برخورد به دیوار فلت MTF و افت کارایی (ER<20%)"
+        val rulesSummary = "شروط خروج هوشمند: فقط وقتی معامله به +۲R رسیده باشد و یکی از این‌ها رخ دهد: " +
+            "۱) کلوز کندل پشت کیجون یا کراس معکوس TK · ۲) شدوی بازگشتی C-Clamp زیر تنکان · " +
+            "۳) اتمام چرخه زمانی هوسودا (9/17/26) با تنکان فلت · ۴) برخورد به دیوار فلت MTF و افت کارایی (ER<20%)"
 
         if (trigSnap == null || stratSnap == null) {
             return OpenTradeTrendHealthReport(
@@ -3365,7 +4351,7 @@ object IchimokuStrategyEngine {
                 fatalProfitTriggers += "قفل شدن چیکو و سقوط کارایی روند به ${(trigSnap.efficiencyRatio14 * 100).toInt()}%"
             }
 
-            // ۵. تکنیک خروج محرمانه RSI موکرجی (کتاب درایو ۴ — comic 3): افت بیش از ۱۰ واحد از قله RSI یا شکست قله همراه با کلوز پشت تنکان
+            // ۵. تکنیک خروج محرمانه RSI موکرجی (لایهٔ ساختاری ۴ — comic 3): افت بیش از ۱۰ واحد از قله RSI یا شکست قله همراه با کلوز پشت تنکان
             val mukherjeeRsiFailure = if (isBuy) {
                 trigSnap.rsiPeakDropLong >= 11.5 && closedBeyondTenkan && oppositeCandle
             } else {
@@ -3384,7 +4370,7 @@ object IchimokuStrategyEngine {
                 )
             }
 
-            // ۶. سیستم ۴ قانون خروج کونیتز (کتاب‌های ۸ و ۹): شکست هم‌زمان کیجون و EMA34 همراه با برگشت MACD/DMI
+            // ۶. سیستم ۴ قانون خروج کونیتز (لایه‌های ۸ و ۹): شکست هم‌زمان کیجون و EMA34 همراه با برگشت MACD/DMI
             val koonitz4RuleExit = if (isBuy) {
                 trigSnap.close < trigSnap.ema34 && trigSnap.close < trigSnap.kijun &&
                     (trigSnap.isMacdBearish || trigSnap.isDmiBearish)
@@ -3397,7 +4383,8 @@ object IchimokuStrategyEngine {
             }
         }
 
-        val shouldExitInProfit = inProfit && fatalProfitTriggers.isNotEmpty()
+        // قانون کاربر: خروج هوشمند فقط وقتی مجاز است که معامله دست‌کم +۲R در سود باشد.
+        val shouldExitInProfit = inProfit && currentR >= MIN_SMART_EXIT_PROFIT_R && fatalProfitTriggers.isNotEmpty()
         val rawScore = 92 - (warnings.size * 18) - (fatalProfitTriggers.size * 35) + (if (currentR >= 1.5) 8 else 0)
         val score = rawScore.coerceIn(10, 99)
 
@@ -3450,7 +4437,7 @@ object IchimokuStrategyEngine {
 
         // ── ۱. تشخیص از دست رفتن قطعی روند ایچیموکو در سود و بستن مستقیم در سود (بدون جابجایی پله‌ای حد ضرر) ──
         val trendHealth = evaluateTrendHealthAndProfitExit(trade, report, livePrice)
-        if (trendHealth.shouldExitNowInProfit && currentRMultiple > 0.35) {
+        if (trendHealth.shouldExitNowInProfit && currentRMultiple >= MIN_SMART_EXIT_PROFIT_R) {
             return PreserveModeEvaluation(
                 tradeId = trade.id,
                 newStopLoss = fixedStopLoss,

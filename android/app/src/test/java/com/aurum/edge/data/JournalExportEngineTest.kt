@@ -28,7 +28,7 @@ class JournalExportEngineTest {
             positionOz = 0.5,
             fixedRiskUsd = 5.0,
             strategyId = "combo_1234",
-            strategyTitleFa = "ترکیب ۴ کتاب (کتاب ۱+۲+۳+۴)",
+            strategyTitleFa = "ترکیب ۴ مکتب (لایهٔ ۱+۲+۳+۴)",
             optimalRiskReward = 2.50,
         ),
         PaperTrade(
@@ -49,7 +49,7 @@ class JournalExportEngineTest {
             positionOz = 0.01,
             fixedRiskUsd = 5.0,
             strategyId = "combo_13",
-            strategyTitleFa = "ترکیب دوگانه (کتاب ۱+۳)",
+            strategyTitleFa = "ترکیب دوگانه (لایهٔ ۱+۳)",
             optimalRiskReward = 2.50,
         ),
         PaperTrade(
@@ -70,7 +70,7 @@ class JournalExportEngineTest {
             positionOz = 25.0,
             fixedRiskUsd = 5.0,
             strategyId = "combo_1234",
-            strategyTitleFa = "ترکیب ۴ کتاب (کتاب ۱+۲+۳+۴)",
+            strategyTitleFa = "ترکیب ۴ مکتب (لایهٔ ۱+۲+۳+۴)",
             optimalRiskReward = 3.00,
         ),
         PaperTrade(
@@ -91,7 +91,7 @@ class JournalExportEngineTest {
             positionOz = 0.25,
             fixedRiskUsd = 5.0,
             strategyId = "combo_24",
-            strategyTitleFa = "ترکیب دوگانه (کتاب ۲+۴)",
+            strategyTitleFa = "ترکیب دوگانه (لایهٔ ۲+۴)",
             optimalRiskReward = 2.50,
         ),
     )

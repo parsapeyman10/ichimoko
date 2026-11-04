@@ -88,13 +88,13 @@ fun TradeSnapshotArchiveGallerySection(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = "💾 ذخیره‌سازی دوگانه و خودخوان در گوشی (Pictures/AurumEdge + Download/AurumEdge/Archive)",
+                    text = "🔒 آرشیو خصوصی داخل اپ (بدون ذخیره در گالری گوشی)",
                     style = MaterialTheme.typography.labelMedium,
                     color = AurumColors.Cyan,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "هر معامله که باز می‌شود، تصویر باکیفیت و کم‌حجم WebP (~40KB) از کندل‌ها، ابر ایچیموکو، ابر آینده ۲۶ کندلی و باکس پوزیشن SL/TP به همراه متادیتای خودخوان در دل عکس داخل گوشی ذخیره می‌گردد تا بعداً هم بتوانید با یک کلیک کل دیتای معاملات را از روی عکس‌های گوشی بازخوانی کنید.",
+                    text = "تصویر WebP کم‌حجم هر معامله فقط در فضای خصوصی Aurum Edge ذخیره می‌شود و از همین کارت داخل اپ باز می‌شود؛ تصویر تازه‌ای به گالری یا Downloads اضافه نمی‌شود. برای انتقال دستی می‌توانید از خروجی PDF/ZIP استفاده کنید.",
                     style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextSecondary,
                 )
@@ -193,7 +193,7 @@ fun TradeSnapshotArchiveGallerySection(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "هنوز اسکرین‌شاتی در آرشیو ثبت نشده است؛ با زدن دکمه «خروجی PDF آرشیو اسکرین‌شات‌ها» در بالا یا باز شدن معامله جدید، تصویر چارت ایچیموکو + SL/TP ساخته و در Download/AurumEdge ذخیره می‌شود.",
+                            text = "هنوز تصویری در آرشیو خصوصی ثبت نشده است؛ با باز شدن یا بسته شدن معامله، تصویر چارت در فضای خصوصی Aurum Edge ساخته می‌شود و فقط از همین کارت داخل اپ باز می‌شود. برای انتقال به گوشی/Drive، خروجی ZIP یا PDF را خودتان درخواست کنید.",
                             style = MaterialTheme.typography.bodySmall,
                             color = AurumColors.TextSecondary,
                         )
@@ -507,7 +507,7 @@ fun TradeSnapshotViewerDialog(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "✅ چک‌لیست ۱۶ شرط ایچیموکو در لحظه ورود:",
+                        text = "✅ چک‌لیست ${record.conditionsSummary.size} شرطی روش در لحظهٔ ورود:",
                         style = MaterialTheme.typography.labelMedium,
                         color = AurumColors.Green,
                         fontWeight = FontWeight.Bold,

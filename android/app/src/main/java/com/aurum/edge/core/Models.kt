@@ -231,6 +231,8 @@ data class PaperTrade(
     val entryConditions: List<PaperConditionRecord> = emptyList(),
     val leverage: Int = 10,
     val marginUsd: Double = 0.0,
+    /** قیمت تقریبی لیکوییدیشن پوزیشن با همین اهرم (۰ = محاسبه‌نشده). */
+    val liquidationPrice: Double = 0.0,
     val commissionUsd: Double = 0.0,
     val spreadCostUsd: Double = 0.0,
     val initialStopLoss: Double? = null,
@@ -246,6 +248,15 @@ data class PaperTrade(
     val preEntry3CandleSummaryFa: String = "",
     val preEntry3Candles: List<PreEntryCandleSlot> = emptyList(),
     val tradeNumber: Int = 0,
+    /** الگوی نئوویوی لحظهٔ ورود (برای آموزش هوش عصبی؛ خالی = بدون شمارش). */
+    val neoWavePatternId: String = "",
+    val neoWaveRulesPassed: Int = 0,
+    val neoWaveRulesTotal: Int = 0,
+    val neoWaveConfidencePct: Double = 0.0,
+    /** شمارهٔ قاعده‌های نیلی که در لحظهٔ ورود شکسته بودند. */
+    val neoWaveFailedRuleIds: List<Int> = emptyList(),
+    /** مسیر ورود: `CRYPTO_NW` (ورود با نئوویو در رمزارز) یا `CLASSIC`. */
+    val neoWaveEntryPathTag: String = "",
 ) {
     val displayTradeNumber: Int
         get() = if (tradeNumber > 0) tradeNumber else ((kotlin.math.abs(id.hashCode()) % 9000) + 1)
@@ -294,6 +305,22 @@ data class PaperTrade(
 
     val effectiveLeverage: Int
         get() = (if (leverage > 0) leverage else PaperOrderRules.defaultLeverageFor(symbol)).coerceIn(1, 10)
+
+    /** قیمت لیکوییدیشن؛ اگر هنگام ثبت محاسبه نشده باشد با اهرم مؤثر بازسازی می‌شود. */
+    val effectiveLiquidationPrice: Double
+        get() = if (liquidationPrice > 0.0) {
+            liquidationPrice
+        } else {
+            TradePlanGuard.liquidationPrice(action, entry, effectiveLeverage)
+        }
+
+    /** ۱R بر حسب درصد قیمت ورود. */
+    val stopPctOfPrice: Double
+        get() = if (entry > 0.0) riskPerOz / entry else 0.0
+
+    /** فاصلهٔ لیکوییدیشن تا حد ضرر بر حسب ۱R. */
+    val liquidationBufferR: Double
+        get() = if (riskPerOz > 0.0) kotlin.math.abs(effectiveLiquidationPrice - entry) / riskPerOz else 0.0
 
     val notionalValueUsd: Double
         get() = PaperOrderRules.quotePnlToUsd(symbol, positionOz * entry, entry)
@@ -373,7 +400,7 @@ data class AppSettings(
     val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
     val selectedBitcoinStrategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
     val runAllStrategiesSimultaneously: Boolean = true,
-    val enabledStrategyIds: Set<String> = BitcoinStrategyModel.entries.map { it.id }.toSet(),
+    val enabledStrategyIds: Set<String> = BitcoinStrategyModel.activeStrategyIds,
     val baseStrategyConfig: BaseStrategyConfig = BaseStrategyConfig(),
     val customStrategies: List<CustomStrategySlot> = emptyList(),
     val categoryStrategies: Map<AssetClass, CategoryStrategy> = AssetClass.entries.associateWith { CategoryStrategy.HYBRID },
@@ -401,7 +428,7 @@ data class AppSettings(
         val allKnownIds = BitcoinStrategyModel.entries.map { it.id } + customStrategies.map { it.id }
         return if (runAllStrategiesSimultaneously) {
             val matched = allKnownIds.count { it in enabledStrategyIds }
-            if (matched > 0) matched else allKnownIds.size
+            if (matched > 0) matched else BitcoinStrategyModel.activeStrategyIds.size + customStrategies.size
         } else 1
     }
 

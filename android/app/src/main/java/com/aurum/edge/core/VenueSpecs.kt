@@ -143,6 +143,14 @@ object VenueSpecs {
     val CRYPTO_SPOT = "کاغذی USDT (مرجع Binance/KuCoin · اهرم ایمن ≤ ۱۰)"
     val US_STOCK = "NYSE/Nasdaq (IBKR Lite, $0) · Leverage 10:1"
 
+    /**
+     * نمادهای کریپتوی «میجر» با نقدینگی و عمق دفتر سفارش بالا؛ اهرم مرجع بالاتری می‌گیرند.
+     * بقیهٔ آلت‌کوین‌ها ۵x می‌مانند تا در بازارهای کم‌عمق، نویز نقدینگی پوزیشن را نزند.
+     */
+    private val CRYPTO_MAJOR_PREFIXES = listOf(
+        "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX", "LINK", "TON", "DOT", "TRX", "LTC", "BCH", "SUI", "NEAR",
+    )
+
     /** Spec مرجعِ همان نماد، با اعداد واقعی بازار و اهرم ایمن حداکثر ۱۰ (≤ 10x). */
     fun of(symbol: String): VenueSpec = when (AssetClass.of(symbol)) {
         AssetClass.CRYPTO -> {
@@ -153,7 +161,14 @@ object VenueSpecs {
                 clean.startsWith("SOL") -> Triple(0.01, 0.001, 0.01)
                 else -> Triple(0.1, 0.01, 0.0001)
             }
-            val safeCryptoLev = if (clean.startsWith("BTC") || clean.startsWith("ETH")) 5 else 3
+            // ── اهرم متناسب هر نماد (رفع رگرسیون نسخهٔ قبل که اهرم کریپتو را به ۳x/۵x کاهش داده بود) ──
+            // سقف هر نماد به عمق بازار آن بستگی دارد؛ اما سقف واقعیِ ریسک همچنان
+            // «گارد ضدلیکویید» است: لیکوییدیشن همیشه حداقل ۲.۵R دورتر از حد ضرر می‌ماند.
+            val safeCryptoLev = when {
+                clean.startsWith("BTC") || clean.startsWith("ETH") -> 10
+                CRYPTO_MAJOR_PREFIXES.any { clean.startsWith(it) } -> 7
+                else -> 5
+            }
             VenueSpec(
                 venue = CRYPTO_SPOT,
                 leverageCap = safeCryptoLev,

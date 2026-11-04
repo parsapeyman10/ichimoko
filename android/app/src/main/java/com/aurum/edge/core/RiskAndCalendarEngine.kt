@@ -67,6 +67,20 @@ data class RiskCalculationResult(
     val netProfitAtTpUsd: Double,
     val grossLossAtSlUsd: Double,
     val netLossAtSlUsd: Double,
+    /** قیمت تقریبی لیکوییدیشن پوزیشن با همین اهرم (مارجین ایزوله). */
+    val liquidationPrice: Double = 0.0,
+    /** فاصلهٔ لیکوییدیشن تا حد ضرر بر حسب ۱R (باید >= 2.5 باشد). */
+    val liquidationBufferR: Double = 0.0,
+    /** دلیل انتخاب اهرم (سقف مرجع / سقف ضدلیکویید / نیاز مارجین). */
+    val leverageReasonFa: String = "",
+    /** ۱R به‌صورت درصدی از قیمت ورود. */
+    val stopPctOfPrice: Double = 0.0,
+    /** فاصلهٔ حد سود به‌صورت درصدی از قیمت ورود. */
+    val targetPctOfPrice: Double = 0.0,
+    /** داوری پلن (تأییدشده / اصلاح‌شده / رد شد) با دالان نوسان تایم‌فریم. */
+    val planVerdictFa: String = "",
+    /** خلاصهٔ فارسی داوری پلن و دلیل تخلف‌ها. */
+    val planNoteFa: String = "",
 ) {
     val totalRoundTripFeeUsd: Double
         get() = commissionUsd + spreadCostUsd
@@ -103,6 +117,7 @@ data class RiskCalculationResult(
         commissionUsd = round2(commissionUsd),
         spreadCostUsd = round2(spreadCostUsd),
         initialStopLoss = stopLoss,
+        liquidationPrice = liquidationPrice,
         strategyId = strategyId,
         strategyTitleFa = strategyTitleFa,
         fixedRiskUsd = round2(riskBudgetUsd),
@@ -199,6 +214,8 @@ object RiskAndCalendarEngine {
         takeProfit: Double,
         preferredAction: SignalAction? = null,
         fixedRiskUsdOverride: Double? = null,
+        triggerInterval: com.aurum.edge.domain.Interval = com.aurum.edge.domain.Interval.M15,
+        referenceAtr14: Double = 0.0,
     ): RiskCalculationResult? {
         val symbol = V1Universe.normalize(symbolInput).ifBlank { "XAU/USD" }
         if (!accountBalance.isFinite() || accountBalance <= 0.0) return null
@@ -236,9 +253,28 @@ object RiskAndCalendarEngine {
         val (standardLots, lotDesc) = computeStandardLots(symbol, positionUnits, unitLabel)
 
         val spec = VenueSpecs.of(symbol)
-        val leverage = PaperOrderRules.defaultLeverageFor(symbol).coerceIn(1, 10)
         val notionalUsd = PaperOrderRules.quotePnlToUsd(symbol, positionUnits * entry, entry)
+        // اهرم دیگر یک عدد ثابت نیست: از فاصلهٔ حد ضرر، هزینهٔ رفت‌وبرگشت و مارجین نگهداری محاسبه می‌شود
+        // تا لیکوییدیشن همیشه حداقل ۲.۵R دورتر از حد ضرر بماند.
+        val leverageDecision = TradePlanGuard.decideLeverage(
+            symbol = symbol,
+            action = inferredAction,
+            entryPrice = entry,
+            stopDistance = stopDistance,
+            notionalUsd = notionalUsd,
+            accountBalance = accountBalance,
+        )
+        val leverage = leverageDecision.leverage
         val marginRequiredUsd = notionalUsd / leverage
+        val planAudit = TradePlanGuard.audit(
+            symbol = symbol,
+            action = inferredAction,
+            entryPrice = entry,
+            stopLoss = stopLoss,
+            takeProfit = takeProfit,
+            referenceAtr = referenceAtr14,
+            interval = triggerInterval,
+        )
         val commissionUsd = spec.commissionUsd(entry, positionUnits) * 2.0
         val spreadCostUsd = spec.spreadCostUsd(entry, positionUnits)
 
@@ -271,6 +307,17 @@ object RiskAndCalendarEngine {
             netProfitAtTpUsd = round2(exactProfitAtTpUsd),
             grossLossAtSlUsd = round2(exactLossAtSlUsd),
             netLossAtSlUsd = round2(exactLossAtSlUsd),
+            liquidationPrice = leverageDecision.liquidationPrice,
+            liquidationBufferR = leverageDecision.liquidationBufferR,
+            leverageReasonFa = leverageDecision.reasonFa(),
+            stopPctOfPrice = round4(stopDistance / entry),
+            targetPctOfPrice = round4(targetDistance / entry),
+            planVerdictFa = planAudit.verdict.badgeFa,
+            planNoteFa = if (planAudit.violationsFa.isEmpty()) {
+                "پلن با دالان نوسان ${triggerInterval.label} هم‌تراز است"
+            } else {
+                planAudit.violationsFa.joinToString("؛ ")
+            },
         )
     }
 
@@ -327,60 +374,34 @@ object RiskAndCalendarEngine {
         desiredRiskReward: Double = MIN_REQUIRED_RISK_REWARD,
         trigAtr14: Double = 0.0,
         triggerInterval: com.aurum.edge.domain.Interval = com.aurum.edge.domain.Interval.M5,
+        strategyAtr14: Double = trigAtr14,
     ): Pair<Double, Double> {
-        val symbol = V1Universe.normalize(symbolInput)
-        val decimals = priceDecimals(symbol, liveEntryPrice)
-        val minSafeDist = IchimokuStrategyEngine.minSafeStructuralStopDistance(
-            symbol = symbol,
-            referencePrice = liveEntryPrice,
-            trigAtr14 = trigAtr14,
-            stratAtr14 = trigAtr14,
+        val plan = TradePlanGuard.sanitizePlan(
+            symbol = V1Universe.normalize(symbolInput),
+            action = action,
+            entryPrice = liveEntryPrice,
+            candidateStopLoss = candidateStopLoss,
+            candidateTakeProfit = candidateTakeProfit,
+            desiredRiskReward = desiredRiskReward,
+            referenceAtr = trigAtr14,
             triggerInterval = triggerInterval,
+            strategyAtr = strategyAtr14,
         )
-        val maxSafeDist = if (trigAtr14.isFinite() && trigAtr14 > 0.0) {
-            max(minSafeDist * 1.45, trigAtr14 * 2.15)
-        } else {
-            max(minSafeDist * 1.50, liveEntryPrice * 0.025)
-        }
-        val safeStop = if (action == SignalAction.BUY) {
-            val rawDist = if (candidateStopLoss.isFinite() && candidateStopLoss > 0.0 && candidateStopLoss < liveEntryPrice) {
-                (liveEntryPrice - candidateStopLoss).coerceIn(minSafeDist, maxSafeDist)
-            } else {
-                minSafeDist
-            }
-            roundToDecimals((liveEntryPrice - rawDist).coerceAtLeast(0.00001), decimals)
-        } else {
-            val rawDist = if (candidateStopLoss.isFinite() && candidateStopLoss > liveEntryPrice) {
-                (candidateStopLoss - liveEntryPrice).coerceIn(minSafeDist, maxSafeDist)
-            } else {
-                minSafeDist
-            }
-            roundToDecimals(liveEntryPrice + rawDist, decimals)
-        }
-
-        val stopDist = abs(liveEntryPrice - safeStop).coerceAtLeast(minSafeDist)
-        val safeMinRr = desiredRiskReward.coerceIn(MIN_REQUIRED_RISK_REWARD, MAX_ALLOWED_RISK_REWARD)
-        val minTpDist = stopDist * MIN_REQUIRED_RISK_REWARD
-        val maxTpDist = stopDist * MAX_ALLOWED_RISK_REWARD
-        val desiredTpDist = stopDist * safeMinRr
-
-        val safeTp = if (action == SignalAction.BUY) {
-            val rawDist = if (candidateTakeProfit.isFinite() && candidateTakeProfit > liveEntryPrice) {
-                (candidateTakeProfit - liveEntryPrice).coerceIn(minTpDist, maxTpDist)
-            } else {
-                desiredTpDist.coerceIn(minTpDist, maxTpDist)
-            }
-            roundToDecimals(liveEntryPrice + rawDist, decimals)
-        } else {
-            val rawDist = if (candidateTakeProfit.isFinite() && candidateTakeProfit > 0.0 && candidateTakeProfit < liveEntryPrice) {
-                (liveEntryPrice - candidateTakeProfit).coerceIn(minTpDist, maxTpDist)
-            } else {
-                desiredTpDist.coerceIn(minTpDist, maxTpDist)
-            }
-            roundToDecimals(max(0.00001, liveEntryPrice - rawDist), decimals)
-        }
-        return safeStop to safeTp
+        if (plan.isUsable) return plan.stopLoss to plan.takeProfit
+        val fallback = TradePlanGuard.sanitizePlan(
+            symbol = V1Universe.normalize(symbolInput),
+            action = action,
+            entryPrice = liveEntryPrice,
+            candidateStopLoss = null,
+            candidateTakeProfit = null,
+            desiredRiskReward = desiredRiskReward,
+            referenceAtr = trigAtr14,
+            triggerInterval = triggerInterval,
+            strategyAtr = strategyAtr14,
+        )
+        return fallback.stopLoss to fallback.takeProfit
     }
+
 
     /**
      * دیگر در عبور از `1:3` (`3R`) حد ضرر بالا برده نمی‌شود و `TP` امتداد نمی‌یابد؛
@@ -400,22 +421,49 @@ object RiskAndCalendarEngine {
         entryPrice: Double,
         action: SignalAction = SignalAction.BUY,
         rewardRatio: Double = 2.0,
+        triggerInterval: com.aurum.edge.domain.Interval = com.aurum.edge.domain.Interval.M15,
     ): Pair<Double, Double>? {
         if (!entryPrice.isFinite() || entryPrice <= 0.0) return null
         val symbol = V1Universe.normalize(symbolInput)
-        val defaultStopPct = when (AssetClass.of(symbol)) {
-            AssetClass.FOREX -> 0.0030 // 0.30% (~30 pips on majors)
-            AssetClass.COMMODITY -> 0.0050 // 0.50% (~$13 on Gold)
-            AssetClass.STOCK -> 0.0050 // 0.50% on Dow
-            AssetClass.CRYPTO -> 0.0100 // 1.00% on Crypto
-        }
-        val stopDist = max(entryPrice * defaultStopPct, VenueSpecs.minStopDistance(symbol, entryPrice) * 3.0)
-        val tpDist = stopDist * rewardRatio.coerceIn(MIN_REQUIRED_RISK_REWARD, 3.0)
-        val decimals = priceDecimals(symbol, entryPrice)
-        val sl = if (action == SignalAction.BUY) entryPrice - stopDist else entryPrice + stopDist
-        val tp = if (action == SignalAction.BUY) entryPrice + tpDist else entryPrice - tpDist
-        return roundToDecimals(max(0.00001, sl), decimals) to roundToDecimals(max(0.00001, tp), decimals)
+        val bounds = TradePlanGuard.boundsFor(symbol, triggerInterval)
+        // مرکز دالان نوسان همان تایم‌فریم (نه یک درصد ثابت برای همهٔ نمادها)
+        val stopDist = maxOf(
+            entryPrice * bounds.minStopPct * 1.15,
+            VenueSpecs.minStopDistance(symbol, entryPrice) * 3.0,
+            entryPrice * bounds.maxStopPct * 0.45,
+        )
+        val plan = TradePlanGuard.sanitizePlan(
+            symbol = symbol,
+            action = action,
+            entryPrice = entryPrice,
+            candidateStopLoss = if (action == SignalAction.BUY) entryPrice - stopDist else entryPrice + stopDist,
+            candidateTakeProfit = null,
+            desiredRiskReward = rewardRatio,
+            referenceAtr = 0.0,
+            triggerInterval = triggerInterval,
+        )
+        if (!plan.isUsable) return null
+        return plan.stopLoss to plan.takeProfit
     }
+
+    /** داوری یک پلن دستی/گزارش برای نمایش در ماشین‌حساب و کارت استراتژی. */
+    fun auditTradePlan(
+        symbolInput: String,
+        action: SignalAction,
+        entry: Double,
+        stopLoss: Double,
+        takeProfit: Double,
+        referenceAtr14: Double = 0.0,
+        triggerInterval: com.aurum.edge.domain.Interval = com.aurum.edge.domain.Interval.M15,
+    ): TradePlanAudit = TradePlanGuard.audit(
+        symbol = symbolInput,
+        action = action,
+        entryPrice = entry,
+        stopLoss = stopLoss,
+        takeProfit = takeProfit,
+        referenceAtr = referenceAtr14,
+        interval = triggerInterval,
+    )
 
     fun evaluateAutoExit(trade: PaperTrade, tick: PriceTick): AutoExitEvaluation? {
         if (!trade.isOpen) return null

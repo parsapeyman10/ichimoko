@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.LiveTradeValuation
@@ -93,18 +94,32 @@ fun HomeScreen(
     val displayPrices = frozenPrices + freshPrices
     val displayPnl = LiveTradeValuation.total(openTradesList, displayPrices)
     val totalMarginUsed = openTradesList.sumOf { it.effectiveMarginUsd }
-    val equity = displayPnl?.let { settings.accountBalance + it }
-    val freeMargin = equity?.let { (it - totalMarginUsed).coerceAtLeast(0.0) }
     val readyCount = dualReports.values.sumOf { it.actionableReports.size }.takeIf { it > 0 }
         ?: strategyReports.values.count { it.isActionable }
 
-    val balanceStr = String.format(Locale.US, "$%,.2f", settings.accountBalance)
-    val equityStr = equity?.let { String.format(Locale.US, "$%,.2f", it) } ?: balanceStr
-    val freeMarginStr = freeMargin?.let { String.format(Locale.US, "$%,.2f", it) } ?: balanceStr
-    val netPnlStr = (if (stats.netPnl >= 0) "+" else "") + String.format(Locale.US, "$%,.2f", stats.netPnl)
-    val floatingPnlStr = displayPnl?.let {
-        (if (it >= 0) "+" else "-") + String.format(Locale.US, "$%,.2f", abs(it))
-    } ?: "$0.00"
+    // ── دفتر واحد حساب: هر عددی که در این کارت دیده می‌شود از همین یک شیء ساخته می‌شود تا
+    //    «موجودی + تحققیافته + شناور = اکوئیتی» همیشه با هم بخواند (راهنمای تفصیلی: docs/HOME_NUMBERS_FA.md).
+    val unpricedOpenTrades = openTradesList.count { trade -> displayPrices[trade.symbol] == null }
+    val ledger = com.aurum.edge.core.AccountReconciliation.snapshot(
+        baseBalanceUsd = settings.accountBalance,
+        initialCapitalUsd = settings.initialCapital,
+        realizedNetPnlUsd = stats.netPnl,
+        floatingNetPnlUsd = displayPnl,
+        marginInUseUsd = totalMarginUsed,
+        usesFixedDollarRisk = settings.useFixedDollarRisk,
+        fixedRiskUsd = settings.fixedRiskUsd,
+        riskPercent = settings.riskPercent,
+        unpricedOpenTrades = unpricedOpenTrades,
+    )
+    val balanceStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.baseBalanceUsd)
+    val equityStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.equityUsd)
+    val freeMarginStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.freeMarginUsd)
+    val marginInUseStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.marginInUseUsd)
+    val realizedStr = com.aurum.edge.core.AccountLedgerSnapshot.signed(ledger.realizedNetPnlUsd)
+    val floatingPnlStr = com.aurum.edge.core.AccountLedgerSnapshot.signed(ledger.floatingOrZeroUsd)
+    val netPnlStr = realizedStr
+    val riskStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.riskPerTradeUsd)
+    val openTradesStr = openTradesList.size.toString()
 
     Column(
         Modifier
@@ -132,7 +147,7 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                     Text(
                         text = "موجودی کل حساب (Account Balance)",
                         style = MaterialTheme.typography.labelSmall,
@@ -159,36 +174,63 @@ fun HomeScreen(
                 }
             }
 
+            // ردیف ۱ — پولِ لحظه‌ای
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 StatTile(
-                    label = "اکوئیتی لحظه‌ای",
+                    label = "اکوئیتی",
                     value = equityStr,
-                    valueColor = if (displayPnl == null) AurumColors.TextPrimary else if (displayPnl >= 0) AurumColors.Green else AurumColors.Red,
+                    valueColor = if (ledger.floatingOrZeroUsd >= 0.0) AurumColors.Green else AurumColors.Red,
                     modifier = Modifier.weight(1f),
                 )
                 StatTile(
-                    label = "سود/زیان شناور",
+                    label = "شناور",
                     value = floatingPnlStr,
-                    valueColor = if ((displayPnl ?: 0.0) >= 0.0) AurumColors.Green else AurumColors.Red,
+                    valueColor = if (ledger.floatingOrZeroUsd >= 0.0) AurumColors.Green else AurumColors.Red,
                     modifier = Modifier.weight(1f),
                 )
                 StatTile(
                     label = "مارجین آزاد",
                     value = freeMarginStr,
-                    valueColor = AurumColors.Cyan,
+                    valueColor = if (ledger.isMarginExceeded) AurumColors.Red else AurumColors.Cyan,
                     modifier = Modifier.weight(1f),
                 )
             }
 
+            // ردیف ۲ — دفتر تحقق‌یافته و ریسک
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 StatTile(
-                    label = "برآیند کل ژورنال",
+                    label = "تحقق‌یافته (ژورنال)",
+                    value = realizedStr,
+                    valueColor = if (ledger.realizedNetPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "مارجین درگیر",
+                    value = marginInUseStr,
+                    valueColor = AurumColors.Gold,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "ریسک هر معامله",
+                    value = riskStr,
+                    valueColor = AurumColors.Cyan,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            // ردیف ۳ — آمار ژورنال
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StatTile(
+                    label = "برآیند ژورنال",
                     value = netPnlStr,
                     valueColor = if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red,
                     modifier = Modifier.weight(1f),
@@ -200,11 +242,69 @@ fun HomeScreen(
                     modifier = Modifier.weight(1f),
                 )
                 StatTile(
-                    label = "ریسک هر معامله",
-                    value = "-$${settings.fixedRiskUsd.toInt()} / +$${settings.fixedRiskUsd.toInt()}×R:R",
-                    valueColor = AurumColors.Cyan,
+                    label = "معاملات باز",
+                    value = openTradesStr,
+                    valueColor = AurumColors.TextPrimary,
                     modifier = Modifier.weight(1f),
                 )
+            }
+
+            // ── معادلهٔ حساب: دقیقاً نشان می‌دهد هر عدد از کدام عدد ساخته شده ──
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.SurfaceAlt.copy(alpha = 0.55f))
+                    .padding(horizontal = 9.dp, vertical = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = ledger.equationFa(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                    lineHeight = 16.sp,
+                )
+                Text(
+                    text = "🧮 قاعدهٔ ریسک: ${ledger.riskModeFa()} · سرمایهٔ پایه: " +
+                        com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.initialCapitalUsd),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    lineHeight = 16.sp,
+                )
+                Text(
+                    text = ledger.alignmentFa(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (ledger.isAligned) AurumColors.Green else AurumColors.Gold,
+                    lineHeight = 16.sp,
+                )
+                if (!ledger.isAligned) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        Pill(
+                            text = "🔄 هم‌ترازسازی موجودی با ژورنال",
+                            color = AurumColors.Gold,
+                            modifier = Modifier.clickable { viewModel.alignAccountBalanceWithJournal() },
+                        )
+                    }
+                }
+                ledger.floatingNoteFa()?.let { note ->
+                    Text(
+                        text = "ℹ️ $note",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                        lineHeight = 16.sp,
+                    )
+                }
+                ledger.marginNoteFa()?.let { note ->
+                    Text(
+                        text = "⛔ $note",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Red,
+                        lineHeight = 16.sp,
+                    )
+                }
             }
         }
 
@@ -220,12 +320,19 @@ fun HomeScreen(
                 )
             },
         ) {
-            Row(
+            // دو ردیف مستقل: پیل‌های وضعیت در یک ردیف و وضعیت سشن سه بازار در ردیف بعدی
+            // (قبلاً هر پنج پیل در یک ردیف بودند و در عرض گوشی از کادر بیرون می‌زدند)
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Pill(
                         text = if (settings.backgroundMonitor) "🟢 پایش ۲۴/۷" else "⚪ بک‌گراند خاموش",
                         color = if (settings.backgroundMonitor) AurumColors.Cyan else AurumColors.TextMuted,
@@ -237,7 +344,13 @@ fun HomeScreen(
                         modifier = Modifier.clickable { onOpenSettings() },
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     listOf("BTC/USDT" to "رمزارز", "XAU/USD" to "طلا", "EUR/USD" to "فارکس").forEach { (sym, lbl) ->
                         val closed = MarketHours.sessionWindowFor(sym, now).closed
                         Pill("$lbl: ${if (closed) "بسته" else "باز"}", if (closed) AurumColors.Red else AurumColors.Green)
@@ -246,15 +359,14 @@ fun HomeScreen(
             }
 
             // نوار ۳ آلارم صوتی مجزا (ورود، حد سود TP، حد ضرر SL) با نمایش ولوم و قابلیت تست سریع
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 6.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(AurumColors.SurfaceAlt.copy(alpha = 0.7f))
                     .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Text(
                     text = if (settings.notifyOnSignal) "🔔 صدا (${settings.alarmVolumePercent}%):" else "🔕 آلارم خاموش:",
@@ -263,7 +375,13 @@ fun HomeScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.clickable { onOpenSettings() },
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Pill(
                         text = "⚡ تست ورود",
                         color = AurumColors.Cyan,
@@ -296,7 +414,8 @@ fun HomeScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "🧠 شبکه عصبی خودآموز (FT-Attention + SwiGLU): ${neuralState.totalLearnedTrades}/10,000 معامله",
+                        text = "🧠 شبکه عصبی خودآموز (FT-Attention + SwiGLU): ${neuralState.totalLearnedTrades}/10,000 معامله" +
+                            (if (neuralState.isGateActive) " · گیت فعال" else if (neuralState.volumeConditionMet) " · منتظر اجازهٔ شما" else ""),
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.Cyan,
                         fontWeight = FontWeight.Bold,
@@ -390,6 +509,7 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
+                                modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 text = "${c.symbol} [${c.timeframeLabel}] · ${c.masterGradeFa}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = AurumColors.Gold,
@@ -408,6 +528,7 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
+                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                         text = "🛠️ نکات قابل اصلاح برای ارتقای بعدی:",
                         style = MaterialTheme.typography.labelMedium,
                         color = AurumColors.Gold,
@@ -476,7 +597,7 @@ private fun LiveMetalsCryptoForexRadarCard(
 
     SectionCard(
         title = "🥇 رادار زنده طلا، نقره، کریپتو و فارکس (15m + 5m)",
-        subtitle = "قیمت اسپات هم‌تراز، وضعیت ۱۶ استراتژی ایچیموکو (۱۵ ترکیب + درایو جامع) و اسکن فوری تمام بازارها",
+        subtitle = "قیمت اسپات هم‌تراز، رصد روش‌های فعال ایچیموکو و اسکن فوری بازارها · روش BTC و پارسا فقط با انتخاب صریح",
         trailing = {
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Pill(
@@ -687,6 +808,7 @@ private fun LiveOpenTradesTrackingSection(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
+                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                         text = "در حال حاضر معامله بازی وجود ندارد",
                         style = MaterialTheme.typography.bodyMedium,
                         color = AurumColors.TextPrimary,
@@ -699,7 +821,7 @@ private fun LiveOpenTradesTrackingSection(
                     )
                 }
                 Text(
-                    text = "رادار ۱۵ نماد در تایم‌فریم‌های 15m و 5m در حال اسکن ۱۶ شرط ایچیموکو است؛ به محض تکمیل شروط و تایید عدد مناسب R:R (حداقل ۱:۱.۵)، معامله خودکار باز می‌شود.",
+                    text = "رادار ۱۵ نماد در تایم‌فریم‌های 15m و 5m قواعد اختصاصی روش منتخب را می‌سنجد؛ معامله فقط پس از تکمیل شروط و تأیید R:R حداقل ۱:۱.۵ مجاز است.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
                 )
@@ -930,6 +1052,7 @@ private fun LiveTradeGaugeCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
+                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                         text = "SL (-$${String.format(Locale.US, "%.1f", riskBudget)})",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (lockedProfitR > 0.05) AurumColors.Green else AurumColors.Red,
@@ -1085,6 +1208,7 @@ private fun LiveTradeGaugeCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             text = "📐 بررسی فرمول R:R و عدد مناسب این معامله",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Gold,
@@ -1156,6 +1280,7 @@ private fun LiveTradeGaugeCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             text = "🕯️ دسته‌بندی ۳ کندل قبل از ورود به معامله",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,
@@ -1188,6 +1313,7 @@ private fun LiveTradeGaugeCard(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
+                                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                                         text = "${slot.slotTitleFa} · ${slot.roleInSetupFa}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (slot.isBullish) AurumColors.Green else AurumColors.Red,
@@ -1233,7 +1359,8 @@ private fun LiveTradeGaugeCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "🧭 بررسی ادامه روند و خروج هوشمند در سود",
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
+                            text = "🧭 بررسی ادامه روند و خروج هوشمند در سود (فقط بالای +۲R)",
                             style = MaterialTheme.typography.labelMedium,
                             color = trendColor,
                             fontWeight = FontWeight.Bold,
@@ -1277,6 +1404,7 @@ private fun LiveTradeGaugeCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             text = "🏦 قوانین خرید، کمیسیون و کارمزد مرجع دیتا",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,

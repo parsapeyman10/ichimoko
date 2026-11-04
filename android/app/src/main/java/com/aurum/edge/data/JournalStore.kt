@@ -9,6 +9,7 @@ import com.aurum.edge.core.RiskAndCalendarEngine
 import com.aurum.edge.core.RiskCalculationResult
 import com.aurum.edge.core.V1Universe
 import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.SignalAction
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
@@ -185,10 +186,10 @@ class JournalStore(
         rrBreakdownFa: String = "",
         preEntryCandles: List<Candle> = emptyList(),
     ): PaperTrade {
+        // This synchronous API can be called from a UI action. Use memory-only candles here;
+        // parsing the on-device CandleVault is disk I/O and used to freeze the main thread on entry.
         val effectiveCandles = preEntryCandles.ifEmpty {
-            LiveQuoteFetcher.peekCachedCandles(calc.symbol, entryInterval).ifEmpty {
-                PhoneStorageVaultManager.loadPersistedCandles(calc.symbol, entryInterval, now)
-            }
+            LiveQuoteFetcher.peekCachedCandles(calc.symbol, entryInterval)
         }
         val activeModel = com.aurum.edge.core.BitcoinStrategyModel.fromId(strategyId)
         val pre3Context = com.aurum.edge.core.IchimokuStrategyEngine.buildPreEntry3CandleContext(
@@ -214,16 +215,8 @@ class JournalStore(
             preEntry3Candles = pre3Context.candles,
         )
         persist( listOf(trade) + _trades.value )
-        if (isDefaultJournalFile) {
-            runCatching {
-                TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
-                    context = appContext,
-                    trade = trade,
-                    report = null,
-                    triggerCandles = effectiveCandles,
-                )
-            }
-        }
+        // OPEN snapshot generation is scheduled by the ViewModel after this synchronous journal
+        // write returns. Do not render charts or touch MediaStore from this call path.
         val cfg = settingsStore?.read()
         com.aurum.edge.notify.TradeEventAlarmManager.triggerEntryAlarm(
             context = appContext,
@@ -236,7 +229,9 @@ class JournalStore(
 
     @Synchronized
     fun addTrade(trade: PaperTrade) {
+        val previous = _trades.value.firstOrNull { it.id == trade.id }
         persist(listOf(trade) + _trades.value.filterNot { it.id == trade.id })
+        applyBalanceDelta(previous, trade)
     }
 
     @Synchronized
@@ -275,6 +270,51 @@ class JournalStore(
         )
         persist(_trades.value.map { if (it.id == tradeId) modified else it })
         return modified
+    }
+
+    /**
+     * اصلاح پلن یک پوزیشن باز با موتور `TradePlanGuard` (حد ضرر و حد سود).
+     *
+     * برای پوزیشن‌هایی است که با اعداد نسخه‌های قدیمی باز شده‌اند و پلن‌شان بیرون دالان نوسان
+     * تایم‌فریم است (نمونه: `۱R = 5.66%` و `TP = 14.13%` روی `BNB/USDT 5m`). جهت معامله و
+     * اندازهٔ پوزیشن دست‌نخورده می‌ماند؛ فقط فاصلهٔ حد ضرر و حد سود به دالان همان تایم‌فریم
+     * منتقل می‌شود و R:R حفظ می‌گردد.
+     */
+    @Synchronized
+    fun repairOpenTradePlan(
+        tradeId: String,
+        newStopLoss: Double,
+        newTakeProfit: Double,
+        reasonFa: String,
+    ): PaperTrade? {
+        if (!newStopLoss.isFinite() || newStopLoss <= 0.0) return null
+        if (!newTakeProfit.isFinite() || newTakeProfit <= 0.0) return null
+        val target = _trades.value.firstOrNull { it.id == tradeId && it.isOpen } ?: return null
+        val stopDistance = abs(target.entry - newStopLoss)
+        val targetDistance = abs(newTakeProfit - target.entry)
+        if (stopDistance <= 1e-9 || targetDistance <= 1e-9) return null
+        val directionOk = when (target.action) {
+            SignalAction.BUY -> newStopLoss < target.entry && newTakeProfit > target.entry
+            SignalAction.SELL -> newStopLoss > target.entry && newTakeProfit < target.entry
+            else -> false
+        }
+        if (!directionOk) return null
+        val rr = targetDistance / stopDistance
+        val updatedNote = when {
+            reasonFa.isBlank() || target.note.contains(reasonFa) -> target.note
+            target.note.isBlank() -> reasonFa
+            else -> "${target.note} · $reasonFa"
+        }
+        val repaired = target.copy(
+            stopLoss = newStopLoss,
+            takeProfit = newTakeProfit,
+            riskReward = rr,
+            initialStopLoss = newStopLoss,
+            optimalRiskReward = rr.coerceIn(1.5, 3.0),
+            note = updatedNote,
+        )
+        persist(_trades.value.map { if (it.id == tradeId) repaired else it })
+        return repaired
     }
 
     /**
@@ -326,9 +366,9 @@ class JournalStore(
             closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
                 if (isDefaultJournalFile) {
                     runCatching {
-                        TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+                        TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
                             context = appContext,
-                            closedTrade = closedTrade,
+                            trade = closedTrade,
                         )
                     }
                 }
@@ -397,9 +437,9 @@ class JournalStore(
             closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
                 if (isDefaultJournalFile) {
                     runCatching {
-                        TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+                        TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
                             context = appContext,
-                            closedTrade = closedTrade,
+                            trade = closedTrade,
                             closeCandles = candles,
                         )
                     }
@@ -445,9 +485,9 @@ class JournalStore(
         settingsStore?.adjustBalance(roundedNet)
         if (isDefaultJournalFile) {
             runCatching {
-                TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+                TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
                     context = appContext,
-                    closedTrade = closed,
+                    trade = closed,
                 )
             }
         }
@@ -474,7 +514,23 @@ class JournalStore(
 
     @Synchronized
     fun deleteTrade(tradeId: String) {
+        val target = _trades.value.firstOrNull { it.id == tradeId }
         persist(_trades.value.filterNot { it.id == tradeId })
+        applyBalanceDelta(target, null)
+    }
+
+    /**
+     * اثر مالیِ اضافه/حذف/ویرایش یک معاملهٔ **بسته‌شده** را روی موجودی حساب اعمال می‌کند.
+     *
+     * پیش از این، `deleteTrade` معامله را پاک می‌کرد ولی سود/زیانش در موجودی می‌ماند و
+     * `addTrade` هم معاملهٔ بستهٔ دستی را به موجودی اضافه نمی‌کرد؛ نتیجه‌اش همان اختلافی بود
+     * که کاربر در صفحهٔ نخست می‌دید (موجودی ≠ سرمایهٔ پایه + سود/زیان تحققیافته).
+     */
+    private fun applyBalanceDelta(previous: PaperTrade?, next: PaperTrade?) {
+        val previousPnl = previous?.takeIf { !it.isOpen }?.pnlUsd ?: 0.0
+        val nextPnl = next?.takeIf { !it.isOpen }?.pnlUsd ?: 0.0
+        val delta = nextPnl - previousPnl
+        if (delta.isFinite() && abs(delta) >= 0.01) settingsStore?.adjustBalance(delta)
     }
 
     @Synchronized
