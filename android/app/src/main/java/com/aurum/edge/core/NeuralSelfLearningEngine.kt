@@ -300,6 +300,13 @@ data class NeuralAutoTunedParameters(
     val minVolumeRatio20: Double = 0.65,
     val minDriveBooksConsensus: Int = 6,
     val neuralWinProbGatePct: Double = 56.0,
+    /**
+     * سقف فاصلهٔ مجاز ورود از نقطهٔ بهینه در شرط ۱۶ (`Sniper Pocket`)، بر حسب ATR.
+     *
+     * این فیلد پیش‌فرض ۰.۳۵ دارد (همان سقف سخت موتور). تیونینگ فقط می‌تواند آن را
+     * سخت‌گیرانه‌تر کند، نه شل‌تر؛ پیش از این پارامتر «حداقل» اشتباهاً به‌جای سقف استفاده می‌شد.
+     */
+    val maxSniperDistanceAtr: Double = 0.35,
     /** نرخ برد اندازه‌گیری‌شده؛ ۰ = هنوز هیچ نمونه‌ای اندازه‌گیری نشده (نه یک عدد خوش‌بینانهٔ ساختگی). */
     val expectedWinRatePct: Double = 0.0,
     /** پروفیت فاکتور اندازه‌گیری‌شده؛ ۰ = بدون نمونه. */
@@ -4140,7 +4147,7 @@ class NeuralSelfLearningEngine(
             // سقف نقطه‌زنی: سخت‌گیرانه‌تر از پیش‌فرض (۰٫۳۵) هرگز از تیونینگ پذیرفته نمی‌شود.
             maxSniperDistanceAtr = minOf(
                 baseConfig.maxSniperDistanceAtr,
-                t.minSniperDistanceAtr.coerceIn(0.20, 0.55),
+                t.maxSniperDistanceAtr.coerceIn(0.20, 0.55),
             ),
             minDriveBooksConsensus = t.minDriveBooksConsensus.coerceIn(5, 8),
             autoTunedGeneration = t.tuningGeneration,
