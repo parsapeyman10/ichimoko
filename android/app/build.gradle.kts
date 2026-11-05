@@ -202,8 +202,8 @@ android {
         // 3.9.49 adds explicit SAF export for the private trade-snapshot archive: the user chooses
         // Google Drive or another document provider, original images remain app-private, and no
         // Drive token, storage permission, or automatic Gallery copy is introduced.
-        versionCode = 758
-        versionName = "3.9.49"
+        versionCode = 759
+        versionName = "3.9.50"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
