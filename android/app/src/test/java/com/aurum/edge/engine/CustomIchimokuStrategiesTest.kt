@@ -242,11 +242,15 @@ class CustomIchimokuStrategiesTest {
         assertTrue(cross.levelPrice > 0.0)
         // تاج = سطح برابری ± نصف اندازهٔ کراس، در جهت شکست (علامت هم‌جهت با جهت شکست)
         val extension = cross.crownPrice - cross.levelPrice
-        assertEquals(
-            cross.breakoutDirection == SignalAction.SELL,
-            extension < 0.0,
-        )
-        assertTrue(abs(extension) > 0.0)
+        if (cross.breakoutDirection == SignalAction.NO_TRADE) {
+            // بدون جهت شکست، تاج روی سطح برابری می‌نشیند
+            assertEquals(0.0, extension, 1e-9)
+        } else {
+            assertEquals(cross.breakoutDirection == SignalAction.SELL, extension < 0.0)
+            assertTrue(abs(extension) > 0.0)
+        }
+        // اندازهٔ کراس هرگز صفر نمی‌شود (نسبت‌ها با چهار رقم اعشار نگه داشته می‌شوند)
+        assertTrue(cross.crossSizeAtr > 0.0)
         // خروجی آنالوگ یا اندازه‌گیری‌شده است یا صریحاً «نمونهٔ کافی نیست»
         if (!evaluation.analogues.isMeasured) {
             assertTrue(evaluation.analogues.noteFa.contains("کافی نیست"))

@@ -257,7 +257,7 @@ object HiddenCrossEngine {
                 if (!ahead) return@forEach
                 out += CrownLevel(
                     price = round2(price),
-                    distanceAtr = round2(abs(price - lastPrice) / lastAtr),
+                    distanceAtr = round4(abs(price - lastPrice) / lastAtr),
                     kindFa = kind,
                     fromBarsAgo = cross.barsSinceEnd,
                 )
@@ -339,7 +339,7 @@ object HiddenCrossEngine {
                 out += EqualCross(
                     levelPrice = level,
                     bars = length,
-                    crossSizeAtr = round2(sizeAtr),
+                    crossSizeAtr = round4(sizeAtr),
                     barsSinceEnd = barsSinceEnd,
                     breakoutDirection = direction,
                     crownPrice = crownPrice(level, sizeAtr, atr[i].coerceAtLeast(bars[i].close * 0.0005), direction),
@@ -423,9 +423,9 @@ object HiddenCrossEngine {
         return HiddenCloudState(
             top = round2(top),
             bottom = round2(bottom),
-            thicknessAtr = round2(thicknessAtr),
+            thicknessAtr = round4(thicknessAtr),
             isBalanced = balanced,
-            slopeAtrPerBar = round2(slope),
+            slopeAtrPerBar = round4(slope),
             priceZone = zone,
             descriptionFa = desc,
         )
@@ -516,7 +516,7 @@ object HiddenCrossEngine {
         return AnalogueResult(
             samples = top.size,
             sameDirectionSamples = sameDirection,
-            meanForwardAtr = round2(meanForward),
+            meanForwardAtr = round4(meanForward),
             matchedAtBarsAgo = top.map { lastIdx - it.idx }.sorted(),
             noteFa = note,
         )
@@ -655,4 +655,10 @@ object HiddenCrossEngine {
     }
 
     private fun round2(v: Double): Double = if (!v.isFinite()) 0.0 else round(v * 100.0) / 100.0
+
+    /**
+     * نسبت‌های ATR با چهار رقم اعشار نگه داشته می‌شوند: در بازار آرام اندازهٔ «کراس برابری»
+     * می‌تواند ۰٫۰۰۴ ATR باشد و گرد کردن به دو رقم آن را صفر می‌کرد (تاج بی‌معنا می‌شد).
+     */
+    private fun round4(v: Double): Double = if (!v.isFinite()) 0.0 else round(v * 10_000.0) / 10_000.0
 }
