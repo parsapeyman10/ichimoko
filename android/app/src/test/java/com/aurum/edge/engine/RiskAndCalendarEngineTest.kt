@@ -421,16 +421,46 @@ class RiskAndCalendarEngineTest {
             preferredAction = SignalAction.BUY,
         )!!
         val opened = journal.openTrade(calc, note = "تست استراتژی بیس")
+        // Preserve Mode واقعی: در +۱R حد ضرر روی نقطهٔ ورود قفل می‌شود (ریسک‌فری) و حد سود
+        // دست‌نخورده می‌ماند. قیمت ۶۹٬۵۰۰ = دقیقاً +۱٫۵R (زیر آستانهٔ +۲R خروج هوشمند).
         val midEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
             trade = opened,
-            report = report.copy(livePrice = 70_200.0), // +2.2R while initial TP is 71,000 (3.0R)
+            report = report.copy(livePrice = 69_500.0), // +1.5R while initial TP is 71,000 (3.0R)
             config = config,
         )
-        assertTrue(midEval == null || midEval.newStopLoss == opened.stopLoss)
+        assertNotNull("در +۱٫۵R باید ریسک‌فری فعال شود", midEval)
+        val mid = midEval!!
+        assertTrue("ریسک‌فری نباید معامله را ببندد", mid.shouldCloseImmediatelyInProfit.not())
+        assertEquals("BE", mid.stopStageTag)
+        assertEquals("حد ضرر باید روی نقطهٔ ورود برود", 68_000.0, mid.updatedStopLoss ?: 0.0, 1e-4)
+        assertNull("حد سود نباید جابه‌جا شود", mid.updatedTakeProfit)
+
+        // مسیر پیش‌فرض `updateTradeStopLoss` همچنان حد ضرر ثابت را قفل می‌کند (بدون ratchet).
         val updatedAttempt = journal.updateTradeStopLoss(opened.id, 70_000.0, "تست عدم جابجایی پله‌ای")
         assertNotNull(updatedAttempt)
         assertEquals(67_000.0, updatedAttempt!!.stopLoss, 1e-4)
         assertEquals(3.0, updatedAttempt.riskReward, 1e-4)
+
+        // مسیر ratchet فقط در جهت سود و فقط تا زیر نقطهٔ ورود مجاز است.
+        val ratchet = journal.updateTradeStopLoss(
+            tradeId = opened.id,
+            newStopLoss = 67_500.0,
+            stageNote = "${IchimokuStrategyEngine.BE_TAG_MARK} ریسک‌فری",
+            allowRatchet = true,
+        )
+        assertNotNull("ریسک‌فری در سود باید پذیرفته شود", ratchet)
+        assertEquals(67_500.0, ratchet!!.stopLoss, 1e-4)
+        assertEquals("حد ضرر اولیه برای محاسبهٔ ۱R حفظ می‌شود", 67_000.0, ratchet.initialStopLoss ?: 0.0, 1e-4)
+        // تلاش برای عقب‌بردن حد ضرر (بدتر از حد ضرر فعلی) رد می‌شود.
+        assertNull(
+            "حد ضرر هرگز نباید به عقب برگردد",
+            journal.updateTradeStopLoss(
+                tradeId = opened.id,
+                newStopLoss = 67_200.0,
+                stageNote = "تلاش برای عقب‌بردن حد ضرر",
+                allowRatchet = true,
+            ),
+        )
 
         val preserveEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
             trade = opened,
@@ -827,31 +857,42 @@ class RiskAndCalendarEngineTest {
         neuralEngine.syncWithClosedJournalTrades(closedJournalTrades)
         assertEquals("repeated journal sync must stay idempotent", 6, neuralEngine.state.value.totalLearnedTrades)
 
-        // Two-condition rule: below 10,000 learned trades the gate must stay open even when a no-trade regime is detected
-        val evalDuringWarmup = neuralEngine.evaluateFeatures(
+        // سیاست پیش‌رونده: تا وقتی کاربر گیت را روشن نکرده، حتی با تشخیص «منطقهٔ ممنوعه»
+        // فقط هشدار داده می‌شود و ورود آزاد است.
+        val evalWithoutConsent = neuralEngine.evaluateFeatures(
             symbol = "BTC/USDT",
             features = badCryptoFeatures,
             conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
         )
-        assertTrue(evalDuringWarmup.isNoTradeCondition)
-        assertFalse(evalDuringWarmup.isBlockingTradeNow)
-        assertTrue(evalDuringWarmup.shouldAllowTrade)
+        assertTrue(evalWithoutConsent.isNoTradeCondition)
+        assertFalse(evalWithoutConsent.isBlockingTradeNow)
+        assertTrue(evalWithoutConsent.shouldAllowTrade)
 
-        // قانون دوشرطی: فعال‌سازی کاربر (شرط ۲) به‌تنهایی گیت را فعال نمی‌کند؛ شرط ۱ (۱۰,۰۰۰ معامله) هم لازم است.
+        // با فعال‌سازی کاربر، گیت از همان اولین نمونهٔ یادگیری‌شده وارد مدار می‌شود (نه پس از ۱۰٬۰۰۰)
+        // و خوشه‌ای که با ۶ نمونه «ممنوعه» علامت خورده را مسدود می‌کند.
         neuralEngine.setGateUserActivation(true)
         assertTrue(neuralEngine.state.value.gateUserActivationEnabled)
-        assertFalse(neuralEngine.state.value.volumeConditionMet)
-        assertFalse(neuralEngine.state.value.isGateActive)
-        val evalConsentOnly = neuralEngine.evaluateFeatures(
+        assertTrue("گیت باید با هر عددی که ≥۱ نمونه است فعال شود", neuralEngine.state.value.isGateActive)
+        val evalConsent = neuralEngine.evaluateFeatures(
             symbol = "BTC/USDT",
             features = badCryptoFeatures,
             conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
         )
-        assertTrue(evalConsentOnly.isNoTradeCondition)
-        assertFalse(evalConsentOnly.isBlockingTradeNow)
-        assertTrue(evalConsentOnly.shouldAllowTrade)
+        assertTrue(evalConsent.isBlockingTradeNow)
+        assertFalse(evalConsent.shouldAllowTrade)
 
-        // هر دو شرط با هم ⇒ گیت فعال: با وارد کردن یک بستهٔ دانش که شرط اول را کامل می‌کند بررسی می‌شود.
+        // خاموش‌کردن شرط دوم (تصمیم کاربر) گیت را فوراً غیرفعال می‌کند.
+        neuralEngine.setGateUserActivation(false)
+        assertFalse(neuralEngine.state.value.isGateActive)
+        val evalAfterUserDisable = neuralEngine.evaluateFeatures(
+            symbol = "BTC/USDT",
+            features = badCryptoFeatures,
+            conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
+        )
+        assertFalse(evalAfterUserDisable.isBlockingTradeNow)
+
+        // بستهٔ دانشِ ۱۰٬۰۰۰ نمونه‌ای هم باید وارد شود و شرط حجم را کامل کند؛ اما تا فعال‌سازی
+        // کاربر، گیت وارد مدار نمی‌شود.
         val bigLedger = (1..10_000).map { i ->
             NeuralLearningLedger.LearnedStamp(
                 fingerprint = NeuralLearningLedger.tradeFingerprint("seed-$i", i.toLong()),
@@ -883,24 +924,7 @@ class RiskAndCalendarEngineTest {
         assertTrue(imported.isAccepted)
         assertTrue(imported.mergedLearnedTotal >= 10_000)
         assertTrue(neuralEngine.state.value.volumeConditionMet)
-        assertTrue(neuralEngine.state.value.isGateActive)
-        val evalWhenActive = neuralEngine.evaluateFeatures(
-            symbol = "BTC/USDT",
-            features = badCryptoFeatures,
-            conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
-        )
-        assertTrue(evalWhenActive.isBlockingTradeNow)
-        assertFalse(evalWhenActive.shouldAllowTrade)
-
-        // خاموش‌کردن شرط ۲ (تصمیم کاربر) گیت را حتی بالای ۱۰,۰۰۰ معامله غیرفعال می‌کند.
-        neuralEngine.setGateUserActivation(false)
-        assertFalse(neuralEngine.state.value.isGateActive)
-        val evalAfterUserDisable = neuralEngine.evaluateFeatures(
-            symbol = "BTC/USDT",
-            features = badCryptoFeatures,
-            conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
-        )
-        assertFalse(evalAfterUserDisable.isBlockingTradeNow)
+        assertFalse("بدون فعال‌سازی کاربر گیت نباید وارد مدار شود", neuralEngine.state.value.isGateActive)
 
         // Verify Neural Brain explainability fields (learnedInsightsFeedFa, featureInsights, recentLessons)
         val brainSummary = neuralEngine.state.value

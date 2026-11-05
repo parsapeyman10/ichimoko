@@ -1213,7 +1213,10 @@ internal fun BaseStrategyRefinementPanel(
         RuleToggleRow("شیب و ضخامت ابر آینده (Future Kumo)", requireFutureKumo) { requireFutureKumo = it }
         RuleToggleRow("ماشه ۱: پولبک کیجون/تنکان/S-Point", enablePullback) { enablePullback = it }
         RuleToggleRow("ماشه ۲: شکست کومو و سقف چیکو", enableBreakout) { enableBreakout = it }
-        RuleToggleRow("سیو سود خودکار (Preserve Mode)", enablePreserve) { enablePreserve = it }
+        RuleToggleRow(
+            "سیو سود خودکار (ریسک‌فری در +۱R · قفل سود روی تنکان در +۲R)",
+            enablePreserve,
+        ) { enablePreserve = it }
 
         Button(
             onClick = {

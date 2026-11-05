@@ -504,7 +504,14 @@ data class PerStrategyConfigOverride(
     val minVolumeRatio20: Double = 0.60,
     val maxAdverseWickRatio: Double = 0.45,
     val minFutureKumoThicknessAtr: Double = 0.05,
+    /**
+     * حداقل فاصله برای «مسلح شدن» نقطه‌زنی (معنای اصلی پارامتر).
+     * توجه: تا پیش از این، همین مقدار به‌عنوان **سقف** در شرط ۱۶ استفاده می‌شد و
+     * «نقطه‌زنی میلی‌متری» را تا ۰٫۶۵ ATR شل می‌کرد. سقف واقعی اکنون [maxSniperDistanceAtr] است.
+     */
     val minSniperDistanceAtr: Double = 0.65,
+    /** سقف فاصلهٔ مجاز ورود از نقطهٔ بهینه (شرط ۱۶ · Sniper Pocket). */
+    val maxSniperDistanceAtr: Double = 0.35,
     val minDriveBooksConsensus: Int = 6,
 )
 
@@ -555,6 +562,12 @@ data class BaseStrategyConfig(
     val maxAdverseWickRatio: Double = 0.45,
     val minFutureKumoThicknessAtr: Double = 0.05,
     val minSniperDistanceAtr: Double = 0.65,
+    /**
+     * سقف فاصلهٔ مجاز ورود از نقطهٔ بهینه (شرط ۱۶ · Sniper Pocket).
+     * قبلاً همین پارامتر «حداقل» به‌اشتباه به‌عنوان سقف استفاده می‌شد و ورود تا ۰٫۶۷ ATR دور را
+     * «نقطه‌زنی میلی‌متری» می‌شمرد؛ اکنون سقف جدا و سخت‌گیرانه است.
+     */
+    val maxSniperDistanceAtr: Double = 0.35,
     val minDriveBooksConsensus: Int = 6,
     /** لایهٔ اختیاری نئوویو (NeoWave). پیش‌فرض خاموش ⇒ خروجی موتور بدون تغییر. */
     val neoWaveEnabled: Boolean = false,
@@ -1082,6 +1095,12 @@ data class PreserveModeEvaluation(
     val lockedRMultiple: Double = 0.0,
     val shouldCloseImmediatelyInProfit: Boolean = false,
     val closePrice: Double? = null,
+    /** حد ضرر جدیدی که باید روی معاملهٔ باز نوشته شود (ریسک‌فری/تریل). `null` = بدون تغییر. */
+    val updatedStopLoss: Double? = null,
+    /** حد سود بازنویسی‌شده (اگر فاصلهٔ هدف با حد ضرر جدید جابه‌جا شود). `null` = بدون تغییر. */
+    val updatedTakeProfit: Double? = null,
+    /** برچسب کوتاه مرحله: `BE` (ریسک‌فری) یا `TRAIL` (تریل). */
+    val stopStageTag: String = "",
 )
 
 enum class OpenTradeTrendState(val badgeFa: String, val summaryFa: String) {
@@ -3548,7 +3567,7 @@ object IchimokuStrategyEngine {
 
         // ── Check 16: Sniper Entry Precision & Anti-Chase Pocket ──────────────
         val distFromTenkanAtr = abs(trigSnap.close - activeTenkanRef) / trigSnap.atr14.coerceAtLeast(1e-8)
-        val maxSniperDist = effectiveConfig.minSniperDistanceAtr
+        val maxSniperDist = effectiveConfig.maxSniperDistanceAtr.coerceIn(0.20, 0.55)
         val cond16Passed = distToSniperAtr <= maxSniperDist && distFromTenkanAtr <= (maxSniperDist + 0.50)
         val cond16Detail = String.format(
             Locale.US,
@@ -4451,7 +4470,14 @@ object IchimokuStrategyEngine {
 
         // ── ۲. بستن کامل و قطعی معامله در رسیدن به حد سود اولیه (یا سقف ۳R برای معاملات با R:R اولیه ≤ ۳) با حفظ حد ضرر ثابت ──
         val reachedTp = if (isBuy) livePrice >= trade.takeProfit else livePrice <= trade.takeProfit
-        val reached3RCeilingForStandardTrade = trade.riskReward <= 3.0001 && currentRMultiple >= 3.0
+        // سقف ۳R فقط برای معامله‌ای است که حد ضررش دست‌نخورده مانده. وقتی حد ضرر در سود قفل
+        // شده (ریسک‌فری/تریل) دیگر ریسکی وجود ندارد که سقف ۳R بخواهد آن را مهار کند.
+        val hasLockedInProfit =
+            trade.note.contains(BE_TAG_MARK) ||
+                trade.note.contains(TRAIL_TAG_MARK) ||
+                fixedStopLoss != (trade.initialStopLoss ?: fixedStopLoss)
+        val reached3RCeilingForStandardTrade =
+            trade.riskReward <= 3.0001 && currentRMultiple >= 3.0 && !hasLockedInProfit
         if (reachedTp || reached3RCeilingForStandardTrade) {
             val exitTargetPrice = if (reachedTp) round2(trade.takeProfit) else round2(livePrice)
             return PreserveModeEvaluation(
@@ -4470,8 +4496,128 @@ object IchimokuStrategyEngine {
             )
         }
 
+        // ── ۳. ریسک‌فری در +۱R و تریل در +۲R (Preserve Mode واقعی) ───────────────
+        // پیش از این، حد ضرر «تحت هیچ شرایطی» جابه‌جا نمی‌شد و هر معامله‌ای که به +۱R می‌رسید
+        // تا −۱R برمی‌گشت. اکنون حد ضرر پله‌ای در سود قفل می‌شود و حد سود جابه‌جا نمی‌شود تا
+        // هندسهٔ اولیهٔ R:R دست‌نخورده بماند.
+        if (config.enablePreserveMode) {
+            val hasMovedToBe = trade.note.contains(BE_TAG_MARK) || fixedStopLoss == trade.entry
+            if (currentRMultiple >= 1.0 && !hasMovedToBe) {
+                return PreserveModeEvaluation(
+                    tradeId = trade.id,
+                    newStopLoss = round2(trade.entry),
+                    stageTitleFa = "🛡️ ریسک‌فری در +${round2(currentRMultiple)}R (حد ضرر روی نقطهٔ ورود)",
+                    reasonFa = String.format(
+                        Locale.US,
+                        "سود باز به %.2fR رسید؛ حد ضرر به نقطهٔ ورود (%.2f) منتقل شد تا معامله بدون ریسک ادامه یابد",
+                        currentRMultiple,
+                        trade.entry,
+                    ),
+                    lockedRMultiple = round2(currentRMultiple),
+                    updatedStopLoss = round2(trade.entry),
+                    stopStageTag = "BE",
+                )
+            }
+            val trailAnchor = trigSnap.tenkan
+            // در خرید: حد ضرر روی تنکان (یا ۰٫۳۵ ATR عقب‌تر از قیمت، هرکدام نزدیک‌تر) قفل می‌شود.
+            val trailCandidate = if (isBuy) {
+                maxOf(trigSnap.tenkan, livePrice - trigSnap.atr14 * 0.35)
+            } else {
+                minOf(trigSnap.tenkan, livePrice + trigSnap.atr14 * 0.35)
+            }
+            val trailImproves = if (isBuy) {
+                trailCandidate > fixedStopLoss && trailCandidate < livePrice
+            } else {
+                trailCandidate < fixedStopLoss && trailCandidate > livePrice
+            }
+            if (currentRMultiple >= 2.0 && trailImproves) {
+                return PreserveModeEvaluation(
+                    tradeId = trade.id,
+                    newStopLoss = round2(trailCandidate),
+                    stageTitleFa = "🔒 قفل سود در +${round2(currentRMultiple)}R روی تنکان (${round2(trailAnchor)})",
+                    reasonFa = String.format(
+                        Locale.US,
+                        "سود باز به %.2fR رسید؛ حد ضرر روی تنکان (%.2f) با بافر %.2f ATR قفل شد",
+                        currentRMultiple,
+                        trailAnchor,
+                        trigSnap.atr14,
+                    ),
+                    lockedRMultiple = round2(currentRMultiple),
+                    updatedStopLoss = round2(trailCandidate),
+                    stopStageTag = "TRAIL",
+                )
+            }
+        }
+
         return null
     }
+
+    /**
+     * سقف زمانی نگه‌داری معاملهٔ خودکار، بر حسب کندل تایم‌فریم ورود.
+     *
+     * ۲۰ کندل ۵ دقیقه‌ای = ۱ ساعت و ۴۰ دقیقه؛ ۲۰ کندل ۱۵ دقیقه‌ای = ۵ ساعت. ماشه‌ای
+     * (`PULLBACK_BOUNCE` و هم‌خانواده‌هایش) که در این پنجره به هدف نرسیده، دیگر «پولبک
+     * در روند» نیست؛ تبدیل به معاملهٔ بلاتکلیف شده که فقط کارمزد و ریسک گپ می‌خرد.
+     */
+    const val DEFAULT_MAX_HOLD_BARS: Int = 20
+
+    /** اگر معامله در پایان پنجرهٔ زمانی حتی به این مقدار R نرسیده باشد، خروج اجباری است. */
+    const val MIN_R_AT_TIME_STOP: Double = 0.5
+
+    data class TimeStopEvaluation(
+        val shouldClose: Boolean,
+        val barsHeld: Int,
+        val currentRMultiple: Double,
+        val reasonFa: String,
+    )
+
+    /**
+     * ترمز پنجرهٔ زمانی (Time Stop).
+     *
+     * حد ضرر و حد سود فقط دو بُعد معامله را می‌بینند؛ بُعد سوم — **زمان** — هیچ‌جا سنجیده
+     * نمی‌شد. نتیجه: پوزیشن‌هایی که ۲۰ کندل بی‌حرکت مانده بودند هم باز می‌ماندند و هم در
+     * آمار به‌صورت «معاملهٔ زیان‌ده» ثبت می‌شدند، در حالی که بهتر بود اصلاً ادامه پیدا نکنند.
+     *
+     * @param livePrice آخرین قیمت معتبر؛ `null` یعنی قضاوت انجام نمی‌شود.
+     */
+    fun evaluateTimeStop(
+        trade: PaperTrade,
+        livePrice: Double?,
+        now: Long = System.currentTimeMillis(),
+        maxHoldBars: Int = DEFAULT_MAX_HOLD_BARS,
+    ): TimeStopEvaluation {
+        if (!trade.isOpen) return TimeStopEvaluation(false, 0, 0.0, "")
+        val price = livePrice?.takeIf { it.isFinite() && it > 0.0 }
+            ?: return TimeStopEvaluation(false, 0, 0.0, "")
+        val barMs = trade.interval.millis.coerceAtLeast(60_000L)
+        val heldMs = (now - trade.openedAt).coerceAtLeast(0L)
+        val barsHeld = (heldMs / barMs).toInt()
+        if (barsHeld < maxHoldBars) return TimeStopEvaluation(false, barsHeld, 0.0, "")
+
+        val fixedStop = trade.initialStopLoss ?: trade.stopLoss
+        val oneR = abs(trade.entry - fixedStop).coerceAtLeast(1e-9)
+        val isBuy = trade.action == SignalAction.BUY
+        val currentR = ((if (isBuy) price - trade.entry else trade.entry - price) / oneR)
+        val reachedTp = if (isBuy) price >= trade.takeProfit else price <= trade.takeProfit
+        if (reachedTp || currentR >= MIN_R_AT_TIME_STOP) {
+            return TimeStopEvaluation(false, barsHeld, round2(currentR), "")
+        }
+        val reason = String.format(
+            Locale.US,
+            "⏱️ خروج زمانی: %d کندل %s گذشت و معامله فقط %+.2fR پیشرفت کرد (کمینهٔ لازم %+.2fR) — روند مورد انتظار شکل نگرفت",
+            barsHeld,
+            trade.interval.label,
+            currentR,
+            MIN_R_AT_TIME_STOP,
+        )
+        return TimeStopEvaluation(true, barsHeld, round2(currentR), reason)
+    }
+
+    /** نشانهٔ متنی مرحلهٔ ریسک‌فری در یادداشت معامله. */
+    const val BE_TAG_MARK: String = "🛡️ BE"
+
+    /** نشانهٔ متنی مرحلهٔ تریل در یادداشت معامله. */
+    const val TRAIL_TAG_MARK: String = "🔒 TRAIL"
 
     private fun mergeNearbyLevels(levels: List<Double>, tolerance: Double): List<Double> {
         if (levels.isEmpty()) return emptyList()
