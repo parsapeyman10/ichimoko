@@ -274,20 +274,21 @@ object NeuralLearningLedger {
     ): GateState {
         val safeTarget = target.coerceAtLeast(1)
         val volumeMet = learnedTotal >= safeTarget
-        val active = volumeMet && userActivationEnabled
+        // سیاست پیش‌رونده: گیت از همان اولین نمونهٔ یادگیری‌شده (و با فعال‌سازی صریح کاربر) وارد
+        // مدار می‌شود و با رشد داده سخت‌گیرتر می‌شود. منتظر ماندن برای `target` (۱۰٬۰۰۰) یعنی
+        // گیت هیچ‌وقت مانع نمی‌شود؛ همان اتفاقی که ۱۶۰ معاملهٔ زیان‌ده را اجرا کرد.
+        val active = learnedTotal >= NeuralGatePolicy.MIN_SAMPLES_FOR_GATE && userActivationEnabled
+        val stage = NeuralGatePolicy.Stage.forSamples(learnedTotal)
         val summaryFa = when {
             active ->
-                "🟢 گیت شبکه عصبی فعال است (شرط ۱ ✅ ${learnedTotal}/$safeTarget · شرط ۲ ✅ فعال‌سازی شما). " +
-                    "ورود در شرایطی که شبکه پرخطر تشخیص داده مسدود می‌شود."
-            volumeMet && !userActivationEnabled ->
-                "🟡 شرط ۱ برقرار شد (${learnedTotal}/$safeTarget) ولی گیت غیرفعال است. " +
-                    "برای فعال‌سازی باید خودتان کلید «فعال‌سازی گیت» را روشن کنید."
-            !volumeMet && userActivationEnabled ->
-                "🟠 فعال‌سازی شما ثبت شد، اما شرط ۱ کامل نیست (${learnedTotal}/$safeTarget). " +
-                    "شبکه فقط یاد می‌گیرد و پس از رسیدن به $safeTarget معامله، گیت خودکار وارد مدار می‌شود."
+                "🟢 گیت شبکه عصبی فعال است (${stage.labelFa} · نمونه ${learnedTotal} · فعال‌سازی شما). " +
+                    "ورود در شرایطی که شبکه پرخطر تشخیص دهد مسدود می‌شود و با رشد داده سخت‌گیرتر می‌شود."
+            userActivationEnabled ->
+                "🟠 فعال‌سازی شما ثبت شد ولی هیچ نمونهٔ یادگیری‌شده‌ای وجود ندارد. " +
+                    "با ثبت اولین معاملهٔ بسته‌شده، گیت خودکار وارد مدار می‌شود."
             else ->
-                "⚪ گیت غیرفعال است (فاز یادگیری ${learnedTotal}/$safeTarget، بدون فعال‌سازی دستی). " +
-                    "شبکه فقط یاد می‌گیرد و هشدار می‌دهد."
+                "⚪ گیت غیرفعال است (نمونه ${learnedTotal} · هدف بلوغ $safeTarget). " +
+                    "شبکه فقط یاد می‌گیرد و هشدار می‌دهد؛ با روشن‌کردن کلید «فعال‌سازی گیت» از همین حالا وارد مدار می‌شود."
         }
         return GateState(
             learnedTotal = learnedTotal,
