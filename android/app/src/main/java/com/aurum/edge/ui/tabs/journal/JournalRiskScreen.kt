@@ -689,9 +689,19 @@ private fun StrategyJournalCategorizationCard(
 internal fun CapitalAndRiskLimitsCard(
     settings: com.aurum.edge.core.AppSettings,
     riskLimits: com.aurum.edge.core.RiskLimitStatus,
-    onSaveSettings: (Double, Double, Double, Double, Double) -> Unit,
+    /**
+     * پارامترها: موجودی، سرمایهٔ اولیه، درصد ریسک، سقف ضرر روزانه، سقف افت سرمایه،
+     * سقف پوزیشن هم‌زمان و سقف پوزیشن هر نماد.
+     */
+    onSaveSettings: (Double, Double, Double, Double, Double, Int, Int) -> Unit,
 ) {
     var editing by rememberSaveable { mutableStateOf(false) }
+    var maxOpenTradesText by rememberSaveable(settings.maxOpenTrades) {
+        mutableStateOf(settings.maxOpenTrades.toString())
+    }
+    var maxPerSymbolText by rememberSaveable(settings.maxOpenTradesPerSymbol) {
+        mutableStateOf(settings.maxOpenTradesPerSymbol.toString())
+    }
     var balanceText by rememberSaveable(settings.accountBalance) {
         mutableStateOf(String.format(Locale.US, "%.2f", settings.accountBalance))
     }
@@ -863,6 +873,8 @@ internal fun CapitalAndRiskLimitsCard(
                                 pct,
                                 settings.dailyLossLimitPercent,
                                 settings.maxDrawdownLimitPercent,
+                                settings.maxOpenTrades,
+                                settings.maxOpenTradesPerSymbol,
                             )
                         }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -946,6 +958,26 @@ internal fun CapitalAndRiskLimitsCard(
                         modifier = Modifier.weight(1f),
                     )
                 }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = maxOpenTradesText,
+                        onValueChange = { maxOpenTradesText = it.filter(Char::isDigit).take(2) },
+                        label = { Text("سقف پوزیشن باز هم‌زمان") },
+                        supportingText = { Text("۱ تا ۱۲ — فقط روی ورود خودکار اثر دارد") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = maxPerSymbolText,
+                        onValueChange = { maxPerSymbolText = it.filter(Char::isDigit).take(1) },
+                        label = { Text("سقف پوزیشن هر نماد") },
+                        supportingText = { Text("جلوگیری از انباشت روی یک نماد") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 Button(
                     onClick = {
                         val bal = balanceText.trim().toDoubleOrNull() ?: settings.accountBalance
@@ -953,7 +985,9 @@ internal fun CapitalAndRiskLimitsCard(
                         val risk = riskPctText.trim().toDoubleOrNull() ?: settings.riskPercent
                         val daily = dailyLimitText.trim().toDoubleOrNull() ?: settings.dailyLossLimitPercent
                         val maxDd = maxDdText.trim().toDoubleOrNull() ?: settings.maxDrawdownLimitPercent
-                        onSaveSettings(bal, initCap, risk, daily, maxDd)
+                        val maxOpen = maxOpenTradesText.trim().toIntOrNull() ?: settings.maxOpenTrades
+                        val maxPerSymbol = maxPerSymbolText.trim().toIntOrNull() ?: settings.maxOpenTradesPerSymbol
+                        onSaveSettings(bal, initCap, risk, daily, maxDd, maxOpen, maxPerSymbol)
                         editing = false
                     },
                     modifier = Modifier.fillMaxWidth(),

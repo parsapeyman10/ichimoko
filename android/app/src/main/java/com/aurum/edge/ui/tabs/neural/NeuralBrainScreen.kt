@@ -1335,16 +1335,28 @@ fun NeuralBrainScreen(
                         valueColor = AurumColors.Gold,
                         modifier = Modifier.weight(1f),
                     )
+                    // پیش از این حتی با صفر نمونه «نرخ برد ۶۸.۵٪» و «کاهش خطای ۳۶.۵٪» نمایش داده
+                    // می‌شد؛ حالا تا رسیدن اولین نمونه، «اندازه‌گیری‌نشده» نوشته می‌شود.
+                    val measuredSamples = neuralState.totalLearnedTrades
+                    val measured = measuredSamples > 0
                     StatTile(
-                        label = "نرخ برد مورد انتظار",
-                        value = String.format(Locale.US, "%.1f%%", tuned.expectedWinRatePct),
-                        valueColor = AurumColors.Green,
+                        label = if (measured) "نرخ برد اندازه‌گیری‌شده" else "نرخ برد مورد انتظار",
+                        value = if (measured) {
+                            String.format(Locale.US, "%.1f%%", tuned.expectedWinRatePct)
+                        } else {
+                            com.aurum.edge.core.NeuralReportText.NOT_MEASURED
+                        },
+                        valueColor = if (measured) AurumColors.Green else AurumColors.TextMuted,
                         modifier = Modifier.weight(1f),
                     )
                     StatTile(
-                        label = "کاهش خطای ورود",
-                        value = String.format(Locale.US, "-%.1f%%", tuned.falsePositiveReductionPct),
-                        valueColor = AurumColors.Cyan,
+                        label = "سهم نمونه‌های ممنوعه",
+                        value = if (measured) {
+                            String.format(Locale.US, "%.1f%%", tuned.falsePositiveReductionPct)
+                        } else {
+                            com.aurum.edge.core.NeuralReportText.NOT_MEASURED
+                        },
+                        valueColor = if (measured) AurumColors.Cyan else AurumColors.TextMuted,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -1496,6 +1508,13 @@ fun NeuralBrainScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextPrimary,
                             )
+                            if (p.ownSamples == 0) {
+                                Text(
+                                    text = "این اعداد از نمونهٔ کلی یادگیری آمده‌اند، نه از معامله‌های خودِ این نماد.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.TextMuted,
+                                )
+                            }
                         }
                         Text(
                             text = String.format(
