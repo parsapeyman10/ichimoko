@@ -1,6 +1,7 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.AppSettings
+import com.aurum.edge.core.HiddenCrossEngine
 import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.IchimokuStrategyEngine
@@ -12,6 +13,7 @@ import com.aurum.edge.domain.Interval
 import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.PaperTrade
 import java.io.File
+import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -144,5 +146,137 @@ class CustomIchimokuStrategiesTest {
             it == BitcoinStrategyModel.PARSA_52_LINE_TURN.id || it == BitcoinStrategyModel.BTC_52_CANDLE_REGIME.id
         })
         file.delete()
+    }
+
+    // ─────────────────────────── هیدن کراس (Hidden Cross) ───────────────────────────
+
+    /** سری با نوار تنکان/کیجون باریک و یک بازهٔ هم‌پوشانی واقعی (کراس برابری). */
+    private fun hiddenCrossSeries(count: Int = 160, baseTime: Long = 1_700_000_000_000L): List<Candle> {
+        val bars = mutableListOf<Candle>()
+        var price = 100.0
+        for (i in 0 until count) {
+            // فاز آرام (ساخت هم‌پوشانی تنکان/کیجون) و فاز روند ملایم
+            val inQuietPhase = i in 100..112
+            val drift = if (inQuietPhase) 0.0 else 0.12
+            val open = price
+            val close = price + drift
+            val halfRange = if (inQuietPhase) 0.10 else 0.35
+            bars += Candle(
+                time = baseTime + i * Interval.M15.millis,
+                open = open,
+                high = maxOf(open, close) + halfRange,
+                low = minOf(open, close) - halfRange,
+                close = close,
+                volume = 100.0 + (i % 7) * 3.0,
+                closed = true,
+            )
+            price = close
+        }
+        return bars
+    }
+
+    @Test
+    fun `hidden cross method is explicit opt-in and isolated from neural tuning`() {
+        val hc = BitcoinStrategyModel.HIDDEN_CROSS
+        assertEquals("هیدن کراس · کراس برابری، تاج و ابر مخفی", hc.titleFa)
+        assertTrue(hc.requiresExplicitOptIn)
+        assertFalse(hc.neuralLearningEnabled)
+        assertFalse(hc.id in BitcoinStrategyModel.activeStrategyIds)
+        assertFalse(hc.id in AppSettings().enabledStrategyIds)
+        assertFalse(hc in BitcoinStrategyModel.neuralLearningModels)
+        assertFalse(hc.isNeoWaveElliottStrategy)
+        assertFalse(hc.isDrivePdfStrategy)
+        assertFalse(hc.isTemporarilyDisabled)
+        assertEquals(BitcoinStrategyModel.HIDDEN_CROSS, BitcoinStrategyModel.fromId("HIDDEN_CROSS"))
+
+        val playbook = hc.driveBookPlaybook()
+        assertEquals(6, playbook.entryChecklistStepsFa.size)
+        assertTrue(playbook.entryChecklistStepsFa.any { it.contains("ابر مخفی") })
+        assertTrue(playbook.entryChecklistStepsFa.any { it.contains("کراس برابری") })
+        assertTrue(playbook.entryChecklistStepsFa.any { it.contains("آنالوگ") })
+        assertTrue(playbook.takeProfitAndExitRulesFa.contains("تاج"))
+        assertTrue(playbook.stopLossFormulaFa.contains("نوار"))
+        assertTrue(playbook.specialEdgeAdvantageFa.contains("اندازه‌گیری"))
+    }
+
+    @Test
+    fun `hidden cross evaluation exposes hidden cloud and ten unambiguous conditions`() {
+        val bars = hiddenCrossSeries()
+        val report = IchimokuStrategyEngine.evaluateBitcoinStrategy(
+            activeModel = BitcoinStrategyModel.HIDDEN_CROSS,
+            config = BaseStrategyConfig(),
+            macroCandles = bars,
+            strategyCandles = bars,
+            triggerCandles = bars,
+            symbolInput = "BTC/USDT",
+        )
+        assertEquals(10, report.conditions.size)
+        assertEquals((1..10).toList(), report.conditions.map { it.index })
+        val snap = report.triggerSnapshot!!
+        // ابر مخفی = نوار تنکان/کیجون و همیشه سقف >= کف
+        assertTrue(snap.hiddenCloudTop >= snap.hiddenCloudBottom)
+        assertTrue(snap.hiddenCloudThicknessAtr >= 0.0)
+        assertTrue(snap.hiddenCloudThicknessAtr < 5.0)
+        assertTrue(snap.hiddenCloudTop > 0.0)
+        // شرایط کلیدی روش در چک‌لیست حاضرند
+        assertTrue(report.conditions.any { it.titleFa.contains("ابر مخفی") })
+        assertTrue(report.conditions.any { it.titleFa.contains("کراس برابری") })
+        assertTrue(report.conditions.any { it.titleFa.contains("آنالوگ") })
+        assertTrue(report.conditions.any { it.titleFa.contains("تاج") })
+        assertTrue(report.conditions.any { it.titleFa.contains("Chikou") })
+        // R:R هرگز زیر ۱:۱٫۵ نیست حتی وقتی پلنی ساخته نشود
+        assertTrue((report.riskReward ?: 0.0) == 0.0 || (report.riskReward ?: 0.0) >= 1.5)
+        assertEquals("HIDDEN_CROSS", report.strategyId)
+    }
+
+    @Test
+    fun `hidden cross engine finds equal cross and derives crown half of its size`() {
+        val bars = hiddenCrossSeries()
+        val evaluation = HiddenCrossEngine.evaluate(bars)
+        assertTrue(evaluation.atr14 > 0.0)
+        assertTrue(evaluation.latestTenkan > 0.0 && evaluation.latestKijun > 0.0)
+        // در فاز آرام، تنکان و کیجون روی هم می‌افتند و کراس برابری باید پیدا شود.
+        assertTrue("کراس برابری یافت نشد", evaluation.equalCrosses.isNotEmpty())
+        val cross = evaluation.activeCross!!
+        assertTrue(cross.bars >= HiddenCrossEngine.MIN_EQUAL_CROSS_BARS)
+        assertTrue(cross.levelPrice > 0.0)
+        // تاج = سطح برابری ± نصف اندازهٔ کراس، در جهت شکست (علامت هم‌جهت با جهت شکست)
+        val extension = cross.crownPrice - cross.levelPrice
+        assertEquals(
+            cross.breakoutDirection == SignalAction.SELL,
+            extension < 0.0,
+        )
+        assertTrue(abs(extension) > 0.0)
+        // خروجی آنالوگ یا اندازه‌گیری‌شده است یا صریحاً «نمونهٔ کافی نیست»
+        if (!evaluation.analogues.isMeasured) {
+            assertTrue(evaluation.analogues.noteFa.contains("کافی نیست"))
+        } else {
+            assertTrue(evaluation.analogues.agreementShare in 0.0..1.0)
+            assertTrue(evaluation.analogues.matchedAtBarsAgo.isNotEmpty())
+        }
+        assertTrue(evaluation.reasonFa.isNotBlank())
+    }
+
+    @Test
+    fun `hidden cross refuses to trade with insufficient data`() {
+        val short = flatBars(20)
+        val evaluation = HiddenCrossEngine.evaluate(short)
+        assertEquals(SignalAction.NO_TRADE, evaluation.direction)
+        assertEquals(0, evaluation.analogues.samples)
+        assertTrue(evaluation.reasonFa.contains("ناکافی"))
+
+        val report = IchimokuStrategyEngine.evaluateBitcoinStrategy(
+            activeModel = BitcoinStrategyModel.HIDDEN_CROSS,
+            config = BaseStrategyConfig(),
+            macroCandles = short,
+            strategyCandles = short,
+            triggerCandles = short,
+            symbolInput = "BTC/USDT",
+        )
+        assertEquals(SignalAction.NO_TRADE, report.action)
+        assertTrue(
+            report.readiness == StrategyReadinessState.INSUFFICIENT_DATA ||
+                report.readiness == StrategyReadinessState.BLOCKED,
+        )
     }
 }

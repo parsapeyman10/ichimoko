@@ -524,8 +524,8 @@ class RiskAndCalendarEngineTest {
         assertEquals(SymbolPollTier.OPEN_POSITION, openTier)
         assertEquals(15_000L, openTier.tickIntervalMs)
 
-        // 5. Verify all 16 strategies (15 original 4-book combinations + ONLY Unified 9-Book Drive Master Method; individual Drive 1..9 strategies removed) evaluate simultaneously on 15m and 5m + R:R Breakdown & Optimal R:R
-        assertEquals(18, BitcoinStrategyModel.entries.size)
+        // 5. Verify all strategies (4-book combinations + Unified 9-Book Drive Master Method) evaluate simultaneously on 15m and 5m + R:R Breakdown & Optimal R:R
+        assertEquals(19, BitcoinStrategyModel.entries.size)
         assertEquals(16, BitcoinStrategyModel.neuralLearningModels.size)
         assertEquals(1, BitcoinStrategyModel.drivePdfStrategies.size)
         assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.drivePdfStrategies.single())
