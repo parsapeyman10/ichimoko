@@ -342,7 +342,7 @@ object HiddenCrossEngine {
                     crossSizeAtr = round4(sizeAtr),
                     barsSinceEnd = barsSinceEnd,
                     breakoutDirection = direction,
-                    crownPrice = crownPrice(level, sizeAtr, atr[i].coerceAtLeast(bars[i].close * 0.0005), direction),
+                    crownPrice = crownPriceFor(level, sizeAtr, atr[i].coerceAtLeast(bars[i].close * 0.0005), direction),
                 )
             }
             i = max(j, i + 1)
@@ -350,8 +350,12 @@ object HiddenCrossEngine {
         return out
     }
 
-    /** سطح تاج: امتداد نصفِ اندازهٔ کراس از سطح برابری در جهت شکست. */
-    private fun crownPrice(level: Double, crossSizeAtr: Double, atrAtCross: Double, direction: SignalAction): Double {
+    /**
+     * سطح «تاج»: امتداد **نصفِ** اندازهٔ کراس از سطح برابری در جهت شکست.
+     *
+     * این تابع قلب روش است و عمداً عمومی است تا مستقل از دادهٔ بازار تست شود.
+     */
+    fun crownPriceFor(level: Double, crossSizeAtr: Double, atrAtCross: Double, direction: SignalAction): Double {
         val extension = atrAtCross * crossSizeAtr * CROWN_EXTENSION_RATIO
         return when (direction) {
             SignalAction.BUY -> level + extension

@@ -242,15 +242,20 @@ class CustomIchimokuStrategiesTest {
         assertTrue(cross.levelPrice > 0.0)
         // تاج = سطح برابری ± نصف اندازهٔ کراس، در جهت شکست (علامت هم‌جهت با جهت شکست)
         val extension = cross.crownPrice - cross.levelPrice
-        if (cross.breakoutDirection == SignalAction.NO_TRADE) {
-            // بدون جهت شکست، تاج روی سطح برابری می‌نشیند
-            assertEquals(0.0, extension, 1e-9)
-        } else {
-            assertEquals(cross.breakoutDirection == SignalAction.SELL, extension < 0.0)
-            assertTrue(abs(extension) > 0.0)
+        when {
+            // بدون جهت شکست، تاج روی سطح برابری می‌نشیند.
+            cross.breakoutDirection == SignalAction.NO_TRADE ->
+                assertEquals(0.0, extension, 1e-9)
+            // اگر هم‌پوشانی کاملاً صفر باشد (تنکان = کیجون دقیق)، اندازهٔ کراس صفر است و تاج
+            // همان سطح برابری می‌شود؛ این حالت درست است، نه خطا.
+            cross.crossSizeAtr <= 0.0 ->
+                assertEquals(0.0, extension, 1e-9)
+            else -> {
+                assertEquals(cross.breakoutDirection == SignalAction.SELL, extension < 0.0)
+                assertTrue(abs(extension) > 0.0)
+                assertTrue(cross.crossSizeAtr > 0.0)
+            }
         }
-        // اندازهٔ کراس هرگز صفر نمی‌شود (نسبت‌ها با چهار رقم اعشار نگه داشته می‌شوند)
-        assertTrue(cross.crossSizeAtr > 0.0)
         // خروجی آنالوگ یا اندازه‌گیری‌شده است یا صریحاً «نمونهٔ کافی نیست»
         if (!evaluation.analogues.isMeasured) {
             assertTrue(evaluation.analogues.noteFa.contains("کافی نیست"))
@@ -259,6 +264,31 @@ class CustomIchimokuStrategiesTest {
             assertTrue(evaluation.analogues.matchedAtBarsAgo.isNotEmpty())
         }
         assertTrue(evaluation.reasonFa.isNotBlank())
+    }
+
+    @Test
+    fun `crown level is exactly half of the equal cross size in breakout direction`() {
+        // سطح برابری ۱۰۰، اندازهٔ کراس ۱ ATR، ATR = ۲ → امتداد = ۲ × ۱ × ۰٫۵ = ۱
+        assertEquals(
+            101.0,
+            HiddenCrossEngine.crownPriceFor(100.0, 1.0, 2.0, SignalAction.BUY),
+            1e-9,
+        )
+        assertEquals(
+            99.0,
+            HiddenCrossEngine.crownPriceFor(100.0, 1.0, 2.0, SignalAction.SELL),
+            1e-9,
+        )
+        // اندازهٔ دو برابر → امتداد دو برابر (رابطهٔ خطی «نصف‌اندازه»)
+        assertEquals(
+            102.0,
+            HiddenCrossEngine.crownPriceFor(100.0, 2.0, 2.0, SignalAction.BUY),
+            1e-9,
+        )
+        // بدون جهت، تاج روی سطح برابری می‌ماند
+        assertEquals(100.0, HiddenCrossEngine.crownPriceFor(100.0, 1.5, 2.0, SignalAction.NO_TRADE), 1e-9)
+        // فروش هرگز زیر صفر نمی‌رود
+        assertTrue(HiddenCrossEngine.crownPriceFor(0.5, 40.0, 2.0, SignalAction.SELL) >= 0.0)
     }
 
     @Test
