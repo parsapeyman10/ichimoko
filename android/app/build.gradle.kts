@@ -202,6 +202,8 @@ android {
         // 3.9.49 adds explicit SAF export for the private trade-snapshot archive: the user chooses
         // Google Drive or another document provider, original images remain app-private, and no
         // Drive token, storage permission, or automatic Gallery copy is introduced.
+        // 3.9.51: روش «هیدن کراس» — ابر مخفی جهت می‌دهد و کراس برابری سطح «تاج» را می‌سازد؛
+        // تاجِ کراس برابری به‌عنوان دیوار افقی وارد استراتژی پایهٔ ۱۶ شرطی هم شده است.
         versionCode = 760
         versionName = "3.9.51"
         resourceConfigurations += listOf("en", "fa")
