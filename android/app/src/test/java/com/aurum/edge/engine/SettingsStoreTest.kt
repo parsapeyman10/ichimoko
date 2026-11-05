@@ -147,4 +147,45 @@ class SettingsStoreTest {
         }
     }
 
+    @Test fun `safety ceilings persist per store and reject out of range values`() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val store = SettingsStore(context)
+        val defaults = store.read()
+        assertEquals(3, defaults.maxOpenTrades)
+        assertEquals(1, defaults.maxOpenTradesPerSymbol)
+
+        store.update { it.copy(maxOpenTrades = 5, maxOpenTradesPerSymbol = 2) }
+        val reread = SettingsStore(context).read()
+        assertEquals(5, reread.maxOpenTrades)
+        assertEquals(2, reread.maxOpenTradesPerSymbol)
+
+        // مقدار خراب ذخیره‌شده نباید دروازه را باز کند
+        prefs.edit().putInt("max_open_trades", 999).putInt("max_open_trades_per_symbol", 0).commit()
+        val clamped = SettingsStore(context).read()
+        assertEquals(12, clamped.maxOpenTrades)
+        assertEquals(1, clamped.maxOpenTradesPerSymbol)
+    }
+
+    @Test fun `risk brake migration restores protective limits once and keeps manual ones`() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        prefs.edit()
+            .putFloat("daily_loss_limit_percent", 100.0f)
+            .putFloat("max_drawdown_limit_percent", 100.0f)
+            .commit()
+        val store = SettingsStore(context)
+        store.ensureBalance100kMigrated()
+        val afterMigration = SettingsStore(context).read()
+        assertEquals(SettingsStore.DEFAULT_DAILY_LOSS_LIMIT_PERCENT, afterMigration.dailyLossLimitPercent, 1e-9)
+        assertEquals(SettingsStore.DEFAULT_MAX_DRAWDOWN_LIMIT_PERCENT, afterMigration.maxDrawdownLimitPercent, 1e-9)
+
+        // انتخاب دستی بعد از مهاجرت دست‌نخورده می‌ماند (مهاجرت فقط یک‌بار اجرا می‌شود)
+        store.update { it.copy(dailyLossLimitPercent = 2.5) }
+        store.ensureBalance100kMigrated()
+        assertEquals(2.5, SettingsStore(context).read().dailyLossLimitPercent, 1e-9)
+    }
+
 }
