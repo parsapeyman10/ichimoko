@@ -55,24 +55,6 @@ data class HealingRecord(
     val newValue: Double,
     val createdAtMs: Long,
 ) {
-    fun toAction(): AiTraderEngine.SelfHealingAction? {
-        val kind = runCatching { AiTraderEngine.HealingKind.valueOf(kindCode) }.getOrNull() ?: return null
-        return AiTraderEngine.SelfHealingAction(
-            id = id,
-            kind = kind,
-            strategyId = strategyId,
-            targetFa = targetFa,
-            conditionIndex = conditionIndex,
-            conditionTitleFa = conditionTitleFa,
-            problemFa = problemFa,
-            reasonFa = reasonFa,
-            samples = samples,
-            previousValue = previousValue,
-            newValue = newValue,
-            createdAtMs = createdAtMs,
-        )
-    }
-
     companion object {
         fun from(action: AiTraderEngine.SelfHealingAction): HealingRecord = HealingRecord(
             id = action.id,
@@ -190,10 +172,6 @@ object TraderMemoryStore {
                 lastSummaryFa = summaryFa,
             )
         }
-
-    /** آیا این نوع اصلاح قبلاً اعمال شده است؟ (برای جلوگیری از حلقهٔ اصلاح تکراری) */
-    fun wasAlreadyHealed(kind: AiTraderEngine.HealingKind): Boolean =
-        read().activeSignatures.contains(kind.name)
 
     /** پاک‌کردن حافظه (فقط با تصمیم صریح کاربر). */
     fun clear(context: Context? = null): TraderMemorySnapshot {
