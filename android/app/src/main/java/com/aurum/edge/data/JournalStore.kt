@@ -399,14 +399,6 @@ class JournalStore(
             val alarmEnabled = cfg?.notifyOnSignal != false
             val soundUri = cfg?.alertSoundUri.orEmpty()
             closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
-                if (isDefaultJournalFile) {
-                    runCatching {
-                        TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
-                            context = appContext,
-                            trade = closedTrade,
-                        )
-                    }
-                }
                 if (isProfit) {
                     com.aurum.edge.notify.TradeEventAlarmManager.triggerTakeProfitAlarm(
                         context = appContext,
@@ -470,15 +462,6 @@ class JournalStore(
             val alarmEnabled = cfg?.notifyOnSignal != false
             val soundUri = cfg?.alertSoundUri.orEmpty()
             closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
-                if (isDefaultJournalFile) {
-                    runCatching {
-                        TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
-                            context = appContext,
-                            trade = closedTrade,
-                            closeCandles = candles,
-                        )
-                    }
-                }
                 if (isProfit) {
                     com.aurum.edge.notify.TradeEventAlarmManager.triggerTakeProfitAlarm(
                         context = appContext,
@@ -518,14 +501,6 @@ class JournalStore(
         )
         persist(_trades.value.map { if (it.id == tradeId) closed else it })
         settingsStore?.adjustBalance(roundedNet)
-        if (isDefaultJournalFile) {
-            runCatching {
-                TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
-                    context = appContext,
-                    trade = closed,
-                )
-            }
-        }
         val cfg = settingsStore?.read()
         val alarmEnabled = cfg?.notifyOnSignal != false
         val soundUri = cfg?.alertSoundUri.orEmpty()

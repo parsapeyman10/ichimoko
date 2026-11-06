@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aurum.edge.app.AppContainer
+import com.aurum.edge.core.AiTraderEngine
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.AutoExitKind
 import com.aurum.edge.core.BaseStrategyConfig
@@ -43,6 +44,7 @@ import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.PairScanStatus
 import com.aurum.edge.data.SessionExitLearningStore
+import com.aurum.edge.data.TraderMemoryStore
 import com.aurum.edge.service.BackgroundTradingService
 import java.util.Locale
 import java.util.UUID
@@ -62,23 +64,39 @@ import com.aurum.edge.core.CrashReporter
 /**
  * وضعیت کارت «بکاپ اسکرین‌شات‌ها» در تب آپدیت.
  */
-data class ScreenshotBackupUiState(
-    val imageCount: Int = 0,
-    val imageBytes: Long = 0L,
-    val recordCount: Int = 0,
-    val lastZipName: String = "",
-    val lastZipBytes: Long = 0L,
-)
 
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     companion object {
-        /** در هر بار اجرا حداکثر چند تصویر آرشیو ساخته شود (بار پردازشی سبک بماند). */
-        private const val STARTUP_ARCHIVE_SNAPSHOTS_PER_PASS = 1
-
-        /** چند بار (با فاصله) تلاش شود تا تصاویر آرشیوِ جامانده تکمیل شوند. */
-        private const val STARTUP_ARCHIVE_SNAPSHOT_PASSES = 2
+        /** هر چند وقت یک‌بار معامله‌گر خودش را بازبینی و اصلاح کند. */
+        private const val AI_TRADER_CYCLE_MS = 15L * 60L * 1000L
     }
+
+    // ─── معامله‌گر هوشمند (نه دستیار): پیش‌بینی خبری + خودترمیمی + ماتریس برتری ───
+    //
+    // سه بخش پیش از این جدا و بی‌اثر بودند: دستیار فقط توضیح می‌داد، نکات قابل اصلاح فقط
+    // ساخته می‌شدند و ماتریس برتری فقط نمایشی بود. این وضعیت، خروجی هر سه را به «تصمیم» تبدیل
+    // می‌کند و روی خود موتور اثر می‌گذارد.
+    private val _aiTraderForecasts = MutableStateFlow<List<AiTraderEngine.SymbolConditionsForecast>>(emptyList())
+    val aiTraderForecasts: StateFlow<List<AiTraderEngine.SymbolConditionsForecast>> =
+        _aiTraderForecasts.asStateFlow()
+
+    private val _aiTraderHealings = MutableStateFlow<List<AiTraderEngine.SelfHealingAction>>(emptyList())
+    val aiTraderHealings: StateFlow<List<AiTraderEngine.SelfHealingAction>> =
+        _aiTraderHealings.asStateFlow()
+
+    private val _aiTraderMatrix = MutableStateFlow<List<AiTraderEngine.EdgeMatrixRow>>(emptyList())
+    val aiTraderMatrix: StateFlow<List<AiTraderEngine.EdgeMatrixRow>> =
+        _aiTraderMatrix.asStateFlow()
+
+    private val _aiTraderSummaryFa = MutableStateFlow<List<String>>(emptyList())
+    val aiTraderSummaryFa: StateFlow<List<String>> = _aiTraderSummaryFa.asStateFlow()
+
+    private val _aiTraderMemory = MutableStateFlow(com.aurum.edge.data.TraderMemorySnapshot())
+    val aiTraderMemory: StateFlow<com.aurum.edge.data.TraderMemorySnapshot> = _aiTraderMemory.asStateFlow()
+
+    @Volatile
+    private var lastAiTraderCycleAtMs: Long = 0L
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
     val market: StateFlow<MarketState> = container.verifiedMarket
@@ -191,10 +209,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             runCatching { com.aurum.edge.data.PhoneStorageVaultManager.attachContext(container.appContext) }
             runCatching { com.aurum.edge.data.SessionExitLearningStore.init(container.appContext) }
             yield()
-            runCatching { com.aurum.edge.data.TradeSnapshotArchiveManager.init(container.appContext) }
-            // بودجهٔ حافظهٔ آرشیو: قدیمی‌ترین تصاویر حذف می‌شوند تا حافظه بی‌پایان رشد نکند.
-            runCatching { com.aurum.edge.data.TradeSnapshotArchiveManager.pruneToBudget(container.appContext) }
-            yield()
+            // «آرشیو تصویری معاملات» کاملاً حذف شد (درخواست کاربر: نه فایل سنگین، نه دیتای مناسب).
+            // نه ساخت تصویر، نه بازخوانی فهرست، نه بودجهٔ حافظه — هیچ‌کدام در راه‌اندازی اجرا نمی‌شوند.
             runCatching { com.aurum.edge.core.MasterIchimokuTradingAssistant.init(container.appContext) }
 
             // فرصت دادن به اولین فریم و اولین تیک قیمت تا کارهای سنگین با نمایش اولیه رقابت نکنند.
@@ -211,36 +227,21 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     forceAllShards = true,
                 )
                 yield()
-                com.aurum.edge.data.TradeSnapshotArchiveManager.scanAndRestoreFromPhoneStorage(
-                    context = container.appContext,
-                    journalStore = container.journalStore,
-                )
-                yield()
                 container.neuralEngine.restoreBrainBackupFromPhoneStorage(container.appContext)
             }
 
-            // ساخت تصویر آرشیو برای معاملاتی که تصویر ندارند — به‌صورت تدریجی (حداکثر ۲ تصویر در
-            // هر بار اجرا) تا پردازش تصویر، پردازنده و حافظهٔ گوشی را در لحظهٔ استفاده از UI نخورد.
-            delay(3_000L)
-            runCatching {
-                val pendingTrades = trades.value
-                repeat(STARTUP_ARCHIVE_SNAPSHOT_PASSES) { pass ->
-                    com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
-                        context = container.appContext,
-                        trades = pendingTrades,
-                        maxTrades = STARTUP_ARCHIVE_SNAPSHOTS_PER_PASS,
-                    )
-                    if (pass < STARTUP_ARCHIVE_SNAPSHOT_PASSES - 1) delay(2_500L)
-                }
-            }
             // ── آموزش شبکهٔ عصبی روی همهٔ ۱۶ استراتژی در هر اجرا ──────────────────
             // بعد از بارگذاری ژورنال/دفتر یادگیری و با فاصله از فریم اول اجرا می‌شود تا UI سبک بماند.
             delay(1_200L)
+            TraderMemoryStore.init(container.appContext)
             runCatching {
                 container.neuralEngine.learnAllStrategiesNow(settings.value.baseStrategyConfig)
                 val refreshed = container.neuralEngine.applyAutoTunedParametersToConfig(settings.value.baseStrategyConfig)
                 container.settingsStore.update { cur -> cur.copy(baseStrategyConfig = refreshed) }
             }
+            // حافظهٔ معامله‌گر از گوشی و یک چرخهٔ کامل (پیش‌بینی + خودترمیمی + ماتریس برتری).
+            runCatching { _aiTraderMemory.value = TraderMemoryStore.read(container.appContext) }
+            runCatching { runAiTraderCycleInternal(System.currentTimeMillis()) }
             CrashReporter.breadcrumb("app:startup-work-done")
         }
         if (!updateCheckStarted) {
@@ -1025,8 +1026,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    val tradeSnapshotArchiveRecords: StateFlow<List<com.aurum.edge.data.ArchivedTradeSnapshotRecord>> =
-        com.aurum.edge.data.TradeSnapshotArchiveManager.records
 
     val phoneVaultStatus: StateFlow<com.aurum.edge.data.PhoneVaultStatusSummary> =
         com.aurum.edge.data.PhoneStorageVaultManager.vaultStatus
@@ -1119,16 +1118,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         _liveTicks.value[trade.symbol]?.let { tick ->
             _lastDisplayMarks.value = OpenPositionDisplay.record(_lastDisplayMarks.value, trade, tick, now)
-        }
-        // رندر و ثبت تصویر در فضای خصوصی آرشیو اپ، روی Dispatchers.IO تا رشتهٔ اصلی آزاد بماند.
-        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val cachedCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
-            com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
-                context = container.appContext,
-                trade = trade,
-                report = matchedReport,
-                triggerCandles = cachedCandles,
-            )
         }
         refreshSymbolLivePrice(trade.symbol)
         syncBackgroundServiceState()
@@ -1232,31 +1221,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun captureOrRefreshTradeSnapshot(trade: PaperTrade) {
-        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val sym = V1Universe.normalize(trade.symbol)
-            val rep = _dualSymbolStrategyReports.value[sym]?.reportFor(trade.interval, trade.strategyId)
-            val candles = LiveQuoteFetcher.peekCachedCandles(sym, trade.interval)
-            val openRec = com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
-                context = container.appContext,
-                trade = trade,
-                report = rep,
-                triggerCandles = candles,
-            )
-            val closeRec = if (!trade.isOpen) {
-                com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
-                    context = container.appContext,
-                    closedTrade = trade,
-                    closeCandles = candles,
-                )
-            } else null
-            val activeRec = closeRec ?: openRec
-            if (activeRec != null) {
-                val kb = (activeRec.imageSizeBytes / 1024L).coerceAtLeast(1L)
-                _toast.value = "🔒 تصویر چارت معامله #${trade.displayTradeNumber} (${trade.symbol} · ${kb}KB WebP) در آرشیو خصوصی اپ ثبت شد و از داخل Aurum Edge باز می‌شود"
-            }
-        }
-    }
+    /**
+     * «آرشیو تصویری» حذف شد.
+     *
+     * این تابع قبلاً یک WebP از چارت هر معامله می‌ساخت و در حافظهٔ خصوصی اپ نگه می‌داشت. کاربر
+     * صریحاً گفت نه فایل سنگین می‌خواهد و نه آن تصاویر دیتای مناسبی می‌دهند، پس مسیر ساخت/ثبت
+     * تصویر کامل برداشته شد. دادهٔ لازم برای یادگیری همان کندل‌ها و گزارش‌های ژورنال است.
+     * امضای این تابع نگه داشته شده تا فراخوانی‌های موجود نشکنند.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun captureOrRefreshTradeSnapshot(trade: PaperTrade) = Unit
 
     fun restoreAllDataAndSnapshotsFromPhone() {
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -1264,10 +1238,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             val restoredShards = if (shardTrades.isNotEmpty()) {
                 container.journalStore.importTrades(shardTrades, replaceExisting = false)
             } else 0
-            val restoredSnapshots = com.aurum.edge.data.TradeSnapshotArchiveManager.scanAndRestoreFromPhoneStorage(
-                context = container.appContext,
-                journalStore = container.journalStore,
-            )
             val restoredBrain = container.neuralEngine.restoreBrainBackupFromPhoneStorage(container.appContext)
             val vaultStat = com.aurum.edge.data.PhoneStorageVaultManager.refreshVaultStatus(
                 context = container.appContext,
@@ -1277,91 +1247,21 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             _toast.value = buildString {
                 append("🔄 بازخوانی از حافظه گوشی: ")
                 append("$restoredShards معامله از شاردهای روزانه · ")
-                append("${vaultStat.totalStoredCandlesCount} کندل ۱ ماه اخیر · ")
-                append("${com.aurum.edge.data.TradeSnapshotArchiveManager.records.value.size} تصویر آرشیو")
+                append("${vaultStat.totalStoredCandlesCount} کندل ۱ ماه اخیر")
                 if (restoredBrain) append(" + شبکه عصبی")
             }
         }
     }
 
+    /** بازگردانی «تصویر آرشیو» از گوشی حذف شد؛ متادیتای معامله از خود ژورنال می‌آید. */
+    @Suppress("UNUSED_PARAMETER")
     fun importSnapshotFromPhoneUri(uri: android.net.Uri) {
-        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val rec = com.aurum.edge.data.TradeSnapshotArchiveManager.importSnapshotFromUri(
-                context = container.appContext,
-                uri = uri,
-                journalStore = container.journalStore,
-            )
-            if (rec != null) {
-                container.neuralEngine.syncWithClosedJournalTrades(trades.value)
-                _toast.value = "✅ تصویر و دیتای کامل معامله ${rec.symbol} (${rec.strategyTitleFa}) از گوشی بازیابی شد"
-            } else {
-                _toast.value = "⚠️ فایل انتخابی حاوی متادیتای آرشیو Aurum Edge نبود"
-            }
-        }
-    }
-
-    fun backupNeuralBrainToPhoneNow() {
-        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val ok = container.neuralEngine.saveBrainBackupToPhoneStorage(container.appContext)
-            _toast.value = if (ok) {
-                "💾 حافظه کامل شبکه عصبی در Download/AurumEdge/Archive/AurumNeuralBrain_Backup.json ذخیره شد"
-            } else {
-                "💾 حافظه شبکه عصبی در حافظه داخلی اپ همگام‌سازی شد"
-            }
-        }
-    }
-
-    fun closeTradeManually(
-        tradeId: String,
-        exitPrice: Double,
-        reason: String = "بستن با قیمت لحظه‌ای",
-    ) {
-        val closed = container.journalStore.closeTradeAtPrice(
-            tradeId = tradeId,
-            exitPrice = exitPrice,
-            reason = reason,
-            now = System.currentTimeMillis(),
-        )
-        if (closed != null) {
-            val pnl = closed.pnlUsd ?: 0.0
-            val pnlStr = String.format(Locale.US, "%s$%.2f", if (pnl >= 0) "+" else "", pnl)
-            _toast.value = "معامله ${closed.symbol} بسته و در تقویم ژورنال ثبت شد ($pnlStr)"
-        }
-    }
-
-    fun deleteJournalTrade(tradeId: String) {
-        container.journalStore.deleteTrade(tradeId)
-        _toast.value = "معامله از ژورنال حذف شد"
+        _toast.value = "ℹ️ آرشیو تصویری از این نسخه حذف شده است؛ معاملات از ژورنال و شاردهای روزانه بازیابی می‌شوند"
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // بکاپ اسکرین‌شات‌های آرشیو (تب آپدیت)
+    // «بکاپ اسکرین‌شات» حذف شد (درخواست کاربر: هم گرفتنش نه، هم در بارگذاری نادیده گرفته شود)
     // ─────────────────────────────────────────────────────────────────────────────
-
-    private val _screenshotBackup = MutableStateFlow(ScreenshotBackupUiState())
-    val screenshotBackup: StateFlow<ScreenshotBackupUiState> = _screenshotBackup.asStateFlow()
-
-    /**
-     * تازه‌سازی تعداد/حجم تصاویر آرشیو برای نمایش در تب آپدیت.
-     *
-     * این کار فهرست فایل‌های آرشیو را از دیسک می‌خواند؛ اجرای آن روی رشتهٔ اصلی می‌توانست
-     * در گوشی‌های پر از تصویر باعث لگ یا بسته شدن اپ شود، پس همیشه روی IO اجرا می‌شود.
-     */
-    fun refreshScreenshotBackupStats() {
-        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val basket = runCatching {
-                com.aurum.edge.data.TradeSnapshotArchiveManager.archiveBasket(container.appContext)
-            }.getOrElse { err ->
-                com.aurum.edge.core.CrashReporter.recordNonFatal(container.appContext, "archiveBasket", err)
-                com.aurum.edge.data.ArchivedSnapshotBasket()
-            }
-            _screenshotBackup.value = _screenshotBackup.value.copy(
-                imageCount = basket.imageCount,
-                imageBytes = basket.imageBytes,
-                recordCount = basket.recordCount,
-            )
-        }
-    }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // عیب‌یابی: گزارش کرش‌های ثبت‌شده داخل اپ
@@ -1414,120 +1314,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** ساخت ZIP از تصاویر آرشیو و ذخیرهٔ آن در پوشهٔ دانلود گوشی. */
-    fun saveScreenshotBackupToDownloads() {
-        _toast.value = "⏳ در حال ساخت بکاپ تصاویر…"
-        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val bundle = com.aurum.edge.data.TradeSnapshotArchiveManager
-                .buildSnapshotZipBundle(container.appContext)
-            val zip = bundle.zipFile
-            if (zip == null) {
-                _toast.value = "⚠️ " + (bundle.errorFa ?: "ساخت بکاپ تصاویر ناموفق بود")
-                return@launch
-            }
-            val saved = com.aurum.edge.data.TradeSnapshotArchiveManager
-                .saveSnapshotZipToDownloads(container.appContext, zip)
-            _screenshotBackup.value = _screenshotBackup.value.copy(
-                lastZipName = bundle.fileName,
-                lastZipBytes = bundle.zipBytes,
-            )
-            refreshScreenshotBackupStats()
-            _toast.value = saved.fold(
-                onSuccess = { path ->
-                    "💾 بکاپ " + bundle.imageCount + " تصویر (" + humanKbFa(bundle.zipBytes) + ") در " + path + " ذخیره شد"
-                },
-                onFailure = { err ->
-                    "⚠️ ذخیره در پوشهٔ دانلود نشد: " + (err.message ?: "خطای نامشخص")
-                },
-            )
-        }
-    }
-
-    /** ذخیرهٔ نسخهٔ ZIP در مقصدی که کاربر با پنجرهٔ رسمی Android انتخاب می‌کند (از جمله Drive). */
-    fun saveScreenshotBackupToUri(uri: android.net.Uri?, stampMs: Long) {
-        if (uri == null) return
-        _toast.value = "⏳ در حال ساخت بکاپ برای مقصد انتخاب‌شده…"
-        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val actualStampMs = stampMs.takeIf { it > 0L } ?: System.currentTimeMillis()
-            val bundle = com.aurum.edge.data.TradeSnapshotArchiveManager
-                .buildSnapshotZipBundle(container.appContext, actualStampMs)
-            val zip = bundle.zipFile
-            if (zip == null) {
-                runCatching { container.appContext.contentResolver.delete(uri, null, null) }
-                _toast.value = "⚠️ " + (bundle.errorFa ?: "ساخت بکاپ تصاویر ناموفق بود")
-                return@launch
-            }
-            var destinationWritten = false
-            try {
-                val output = container.appContext.contentResolver.openOutputStream(uri, "wt")
-                    ?: error("باز کردن مقصد انتخاب‌شده ممکن نشد")
-                output.use { stream ->
-                    zip.inputStream().buffered().use { input -> input.copyTo(stream) }
-                }
-                destinationWritten = true
-                _screenshotBackup.value = _screenshotBackup.value.copy(
-                    lastZipName = bundle.fileName,
-                    lastZipBytes = bundle.zipBytes,
-                )
-                refreshScreenshotBackupStats()
-                _toast.value = "✅ بکاپ " + bundle.imageCount + " تصویر ذخیره شد؛ اصل آرشیو خصوصی داخل اپ باقی ماند"
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                if (!destinationWritten) runCatching { container.appContext.contentResolver.delete(uri, null, null) }
-                throw cancelled
-            } catch (err: Exception) {
-                if (!destinationWritten) runCatching { container.appContext.contentResolver.delete(uri, null, null) }
-                _toast.value = "⚠️ ذخیره در مقصد انتخاب‌شده ناموفق بود: " + (err.message ?: "خطای نامشخص")
-            } finally {
-                runCatching { zip.delete() }
-            }
-        }
-    }
-
-    /** ارسال ZIP تصاویر آرشیو با Share Sheet اندروید (تلگرام/واتساپ/ایمیل/درایو). */
-    fun shareScreenshotBackup() {
-        _toast.value = "⏳ در حال ساخت بکاپ تصاویر…"
-        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val bundle = com.aurum.edge.data.TradeSnapshotArchiveManager
-                .buildSnapshotZipBundle(container.appContext)
-            val zip = bundle.zipFile
-            if (zip == null) {
-                _toast.value = "⚠️ " + (bundle.errorFa ?: "ساخت بکاپ تصاویر ناموفق بود")
-                return@launch
-            }
-            _screenshotBackup.value = _screenshotBackup.value.copy(
-                lastZipName = bundle.fileName,
-                lastZipBytes = bundle.zipBytes,
-            )
-            val shared = com.aurum.edge.data.TradeSnapshotArchiveManager
-                .shareSnapshotZip(container.appContext, zip)
-            _toast.value = shared.fold(
-                onSuccess = { "📤 پنجرهٔ ارسال باز شد — " + bundle.imageCount + " تصویر (" + humanKbFa(bundle.zipBytes) + ")" },
-                onFailure = { err -> "⚠️ ارسال ممکن نشد: " + (err.message ?: "خطای نامشخص") },
-            )
-            refreshScreenshotBackupStats()
-        }
-    }
-
-    /** بازگردانی تصاویر و فهرست از یک فایل ZIP انتخابی کاربر. */
-    fun restoreScreenshotBackupFromZip(uri: android.net.Uri?) {
-        if (uri == null) return
-        _toast.value = "⏳ در حال بازخوانی فایل بکاپ…"
-        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val count = runCatching {
-                com.aurum.edge.data.TradeSnapshotArchiveManager
-                    .importSnapshotZip(container.appContext, uri)
-            }.getOrElse { err ->
-                _toast.value = "⚠️ بازخوانی فایل ZIP ناموفق بود: " + (err.message ?: "خطای نامشخص")
-                return@launch
-            }
-            _toast.value = if (count > 0) {
-                "✅ " + count + " تصویر از فایل بکاپ بازگردانی شد"
-            } else {
-                "⚠️ در این فایل تصویری پیدا نشد"
-            }
-            refreshScreenshotBackupStats()
-        }
-    }
+    // ─────────────────────────────────────────────────────────────────────────────
+    // بکاپ اسکرین‌شات: حذف کامل (گرفتن، ذخیره، اشتراک، بازگردانی و آمار تعداد/حجم)
+    // ─────────────────────────────────────────────────────────────────────────────
 
     /** اندازهٔ خوانا برای گزارش‌های فارسی (کیلوبایت/مگابایت). */
     private fun humanKbFa(bytes: Long): String = when {
@@ -1551,6 +1340,161 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         maxConcurrentPositions = cfg.maxOpenTrades.coerceIn(1, 12),
         maxPositionsPerSymbol = cfg.maxOpenTradesPerSymbol.coerceIn(1, 4),
     )
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // معامله‌گر هوشمند: چرخهٔ کامل تصمیم‌گیری
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * یک چرخهٔ کامل معامله‌گر.
+     *
+     * سه کار انجام می‌دهد و هر سه را **ذخیره** می‌کند:
+     *
+     * ۱. **پیش‌بینی خبری** روی همهٔ نمادهای رصدشده: شرایط نوظهور هر نماد را پیش از رسیدن به
+     *    سیگنال بیرون می‌کشد (نه واکنش، پیش‌دستی).
+     * ۲. **خودترمیمی**: از گلوگاه‌های واقعی (دلیل‌های باخت) و نکات دستیار، اقدام‌های مشخص با
+     *    نمونه می‌سازد و روی کانفیگ اعمال می‌کند — نکته به تغییر تبدیل می‌شود.
+     * ۳. **ماتریس برتری**: بودجهٔ ریسک هر استراتژی را با لبهٔ تعدیل‌شده با نمونه توزیع می‌کند.
+     *
+     * @param force اگر false باشد، حداکثر هر ۱۵ دقیقه یک‌بار اجرا می‌شود (هزینهٔ محاسباتی).
+     */
+    fun runAiTraderCycle(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastAiTraderCycleAtMs < AI_TRADER_CYCLE_MS) return
+        lastAiTraderCycleAtMs = now
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching { runAiTraderCycleInternal(now) }.onFailure { err ->
+                CrashReporter.recordNonFatal(container.appContext, "aiTraderCycle", err)
+            }
+        }
+    }
+
+    private suspend fun runAiTraderCycleInternal(now: Long) {
+        val cfg = settings.value
+        val journal = trades.value
+
+        // ── ۱. پیش‌بینی خبری روی همهٔ نمادهای رصدشده ──
+        val reportsBySymbol: Map<String, List<StrategyEvaluationReport>> =
+            _dualSymbolStrategyReports.value.mapValues { (_, dual) ->
+                dual.reports15mByStrategy.values.toList() + dual.reports5mByStrategy.values.toList()
+            }
+        val forecasts = AiTraderEngine.forecastEmergingConditions(
+            reportsBySymbol = reportsBySymbol,
+            nowMillis = now,
+        )
+        _aiTraderForecasts.value = forecasts
+
+        // ── ۲. خودترمیمی: گلوگاه‌ها را از معاملات واقعی بردار ──
+        val blockedReasons = buildLossReasonDistribution(journal)
+        val notes = runCatching {
+            com.aurum.edge.core.MasterIchimokuTradingAssistant.generateActionableImprovementNotes(
+                trades = journal,
+                dualReports = _dualSymbolStrategyReports.value,
+                currentConfig = cfg.baseStrategyConfig,
+            )
+        }.getOrDefault(emptyList())
+
+        val activeModel = cfg.activeBitcoinStrategyModel()
+        val healings = AiTraderEngine.healSelf(
+            strategyId = activeModel.id,
+            strategyTitleFa = activeModel.titleFa,
+            config = cfg.baseStrategyConfig,
+            blockedReasons = blockedReasons,
+            notes = notes,
+            nowMillis = now,
+        )
+        _aiTraderHealings.value = healings
+
+        // اصلاح‌ها فقط اگر کاربر «مدیریت خودکار» را روشن کرده باشد روی موتور اعمال می‌شوند.
+        if (healings.isNotEmpty() && cfg.autoPaperTrading) {
+            val (nextConfig, applied) = AiTraderEngine.applyHealing(cfg.baseStrategyConfig, healings)
+            if (applied.isNotEmpty()) {
+                container.settingsStore.update { current -> current.copy(baseStrategyConfig = nextConfig) }
+                TraderMemoryStore.recordActions(applied, container.appContext)
+            }
+        }
+
+        // ── ۳. ماتریس برتری و توزیع بودجهٔ ریسک ──
+        val summary = container.neuralEngine.state.value
+        val matrix = AiTraderEngine.buildEdgeMatrix(summary.strategyEdgeMatrix)
+        _aiTraderMatrix.value = matrix
+
+        // ── ۴. ذخیرهٔ همیشگی درس‌ها و برداشت‌ها روی گوشی ──
+        val lines = AiTraderEngine.buildTraderSummaryFa(
+            forecasts = forecasts,
+            healings = healings,
+            matrix = matrix,
+        ) + summary.learnedInsightsFeedFa.take(20)
+        val headLine = "چرخهٔ معامله‌گر: ${forecasts.count { it.isActionable }} نماد آماده · " +
+            "${healings.size} اصلاح · ${matrix.count { it.allocationShare > 0.0 }} استراتژی با بودجه"
+        _aiTraderSummaryFa.value = lines
+        val memory = TraderMemoryStore.recordLessons(
+            linesFa = lines,
+            summaryFa = headLine,
+            context = container.appContext,
+        )
+        _aiTraderMemory.value = memory
+    }
+
+    /**
+     * توزیع دلیل‌های باخت از ژورنال.
+     *
+     * منبع، متن دلیل بستن هر معاملهٔ باخته است؛ همان چیزی که کاربر در ژورنال می‌بیند. اگر دلیل
+     * ثبت نشده باشد، معامله با برچسب «دلیل نامشخص» شمرده می‌شود تا مجموع همیشه با تعداد
+     * باخت‌ها بخواند و درصدها ساختگی نشوند.
+     */
+    private fun buildLossReasonDistribution(journal: List<PaperTrade>): Map<String, Int> {
+        val out = LinkedHashMap<String, Int>()
+        journal.filter { !it.isOpen }.forEach { trade ->
+            val pnl = trade.pnlUsd ?: 0.0
+            if (pnl >= 0.0) return@forEach
+            val reason = trade.exitReason?.takeIf { it.isNotBlank() }
+                ?: trade.note.takeIf { it.isNotBlank() }
+                ?: "دلیل نامشخص"
+            // خیلی طولانی نکن؛ ۶۰ کاراکتر اول برای الگوشناسی کافی است.
+            val key = reason.take(60)
+            out[key] = (out[key] ?: 0) + 1
+        }
+        return out
+    }
+
+    /** خروجی دستی: اجرای فوری چرخه (دکمهٔ «همین حالا تحلیل کن»). */
+    fun runAiTraderCycleNow() = runAiTraderCycle(force = true)
+
+    /** بازخوانی حافظهٔ معامله‌گر از گوشی برای نمایش. */
+    fun refreshAiTraderMemory() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _aiTraderMemory.value = TraderMemoryStore.read(container.appContext)
+        }
+    }
+
+    /** پاک‌کردن حافظهٔ معامله‌گر (فقط با تصمیم صریح کاربر). */
+    fun clearAiTraderMemory() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _aiTraderMemory.value = TraderMemoryStore.clear(container.appContext)
+            _toast.value = "🗑️ حافظهٔ معامله‌گر پاک شد"
+        }
+    }
+
+    /** مسیر فایل حافظهٔ معامله‌گر (برای نمایش در UI). */
+    fun aiTraderMemoryPath(): String =
+        TraderMemoryStore.storagePathFa(container.appContext)
+
+    /** کپی خلاصهٔ درس‌های ذخیره‌شده در کلیپ‌بورد. */
+    fun copyAiTraderLessons() {
+        val lines = _aiTraderSummaryFa.value.ifEmpty {
+            TraderMemoryStore.read(container.appContext).lessonLinesFa
+        }
+        if (lines.isEmpty()) {
+            _toast.value = "⚠️ هنوز درسی ذخیره نشده است"
+            return
+        }
+        copyTextToClipboard(
+            labelFa = "خلاصهٔ معامله‌گر",
+            text = lines.joinToString("\n"),
+            successToastFa = "📋 خلاصهٔ معامله‌گر کپی شد",
+        )
+    }
 
     /**
      * وضعیت سقف ضرر روزانه/افت سرمایه با تنظیمات فعلی. مسیر معاملهٔ خودکار پیش از این هیچ‌جا
@@ -2519,32 +2463,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * «PDF آرشیو تصویری» حذف شد.
+     *
+     * کاربر خواست نه تصویری گرفته شود و نه آن تصاویر جایی بارگذاری/صادر شوند. این تابع برای
+     * سازگاری با دکمه‌های موجود نگه داشته شده و فقط مسیر جایگزین را می‌گوید: گزارش PDF معمولی
+     * ژورنال از تب «کارنامه» ساخته می‌شود.
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun exportArchiveScreenshotsPdfNow(shareAfterExport: Boolean = true) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching {
-                com.aurum.edge.data.JournalExportEngine.exportArchiveScreenshotsPdf(
-                    context = container.appContext,
-                    trades = trades.value,
-                ).getOrThrow()
-            }.onSuccess { (pdfFile, savedPath) ->
-                refreshSavedJournalFiles()
-                val msg = "📸 خروجی PDF آرشیو اسکرین‌شات تمام معاملات ساخته و در $savedPath ذخیره شد"
-                _lastExportStatusFa.value = msg
-                _toast.value = msg
-                if (shareAfterExport) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        com.aurum.edge.data.JournalExportEngine.shareExportedFile(
-                            context = container.appContext,
-                            file = pdfFile,
-                            format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
-                        )
-                    }
-                }
-            }.onFailure { err ->
-                _toast.value = "⚠️ خطا در تولید خروجی آرشیو اسکرین‌شات: ${err.message}"
-            }
-        }
+        _toast.value = "ℹ️ آرشیو تصویری حذف شده است؛ از تب کارنامه «گزارش PDF ژورنال» را بگیرید"
     }
+ }
 
     fun triggerTestTradeAlarm(kind: com.aurum.edge.notify.TradeAlarmKind) {
         val cfg = settings.value
@@ -2568,16 +2498,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _savedJournalFiles.value = com.aurum.edge.data.JournalExportEngine.listSavedExportFiles(container.appContext)
     }
 
+    /**
+     * خروجی PDF از کل ژورنال.
+     *
+     * نام این تابع از دوره‌ای مانده که «آرشیو تصویری» هم ساخته می‌شد؛ آن بخش حذف شده و اکنون
+     * فقط PDF ساخته و اشتراک گذاشته می‌شود. نام تابع برای سازگاری با فراخوانی‌های موجود حفظ شد.
+     */
     fun recordAllTradesWithArchiveSnapshotsAndExportPdf() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 val allTrades = trades.value
-                val snapshots = com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
-                    context = container.appContext,
-                    trades = allTrades,
-                    maxTrades = 120,
-                    saveToPhoneGallery = false,
-                )
                 val cfg = settings.value
                 val report = com.aurum.edge.data.JournalExportEngine.buildInstitutionalTearSheet(
                     trades = allTrades,
@@ -2595,11 +2525,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     report = report,
                     format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
                 ).getOrNull()
-                Triple(pdfFile, snapshots.size, downloadsPath)
-            }.onSuccess { (pdfFile, snapCount, downloadsPath) ->
+                pdfFile to downloadsPath
+            }.onSuccess { (pdfFile, downloadsPath) ->
                 refreshSavedJournalFiles()
                 val dlNote = downloadsPath?.let { " و در $it" }.orEmpty()
-                val msg = "✅ اسکرین‌شات آرشیو تمام معاملات ($snapCount تصویر) ثبت و فایل PDF (${pdfFile.name}) ساخته$dlNote ذخیره شد"
+                val msg = "✅ فایل PDF ژورنال (${pdfFile.name}) ساخته$dlNote ذخیره شد"
                 _lastExportStatusFa.value = msg
                 _toast.value = msg
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
@@ -2612,7 +2542,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     }
                 }
             }.onFailure { err ->
-                _toast.value = "⚠️ خطا در ثبت اسکرین‌شات آرشیو و ساخت PDF: ${err.message}"
+                _toast.value = "⚠️ خطا در ساخت PDF: ${err.message}"
             }
         }
     }
@@ -3239,17 +3169,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 if (s.strategyEdgeMatrix.isEmpty()) add("هنوز معاملهٔ بسته‌شده‌ای برای رتبه‌بندی استراتژی‌ها ثبت نشده است.")
                 s.strategyEdgeMatrix.sortedByDescending { it.edgeScore }.forEach { e ->
                     add("• ${e.strategyTitleFa} (${e.strategyBadgeFa}) — امتیاز لبه ${e.edgeScore} | معامله ${e.tradesCount} | نرخ برد ${R.pct(e.winRatePercent)} | PF ${R.number(e.profitFactor, 2)} | E[R] ${R.rMultiple(e.expectancyR)} | بهترین TF ${e.bestTimeframeLabel} | بهترین نماد ${e.bestSymbol} | ${e.tradingVerdictFa}")
-                }
-            },
-        )
-
-        sections += NeuralCopySection(
-            key = "sessions",
-            titleFa = "هوش سشن‌های معاملاتی",
-            lines = buildList {
-                if (s.sessionEdges.isEmpty()) add("هنوز داده‌ای برای سشن‌های معاملاتی جمع نشده است.")
-                s.sessionEdges.forEach { e ->
-                    add("• ${e.sessionTitleFa} (${e.utcHoursLabel}) — معامله ${e.tradesCount} | نرخ برد ${R.pct(e.winRatePercent, samples = e.tradesCount)} | میانگین ${R.rMultiple(e.avgR, samples = e.tradesCount)} | ${e.sessionAdviceFa}")
                 }
             },
         )

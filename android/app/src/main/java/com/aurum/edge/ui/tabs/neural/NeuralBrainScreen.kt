@@ -52,7 +52,6 @@ import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
-import com.aurum.edge.ui.components.TradeSnapshotArchiveGallerySection
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.theme.AurumColors
 import java.util.Locale
@@ -166,7 +165,6 @@ fun NeuralBrainScreen(
                     )
                 }
                 Button(
-                    onClick = { viewModel.exportArchiveScreenshotsPdfNow(shareAfterExport = true) },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = AurumColors.Cyan,
                         contentColor = Color.Black,
@@ -219,6 +217,12 @@ fun NeuralBrainScreen(
                 lineHeight = 16.sp,
             )
         }
+
+        // ── معامله‌گر هوشمند: پیش‌بینی شرایط + خودترمیمی + ماتریس برتری (اول از همه) ──
+        com.aurum.edge.ui.components.AiTraderDashboardSection(
+            viewModel = viewModel,
+            initiallyExpanded = true,
+        )
 
         // ── پنل «زمان‌بندی سشن و خروج هوشمند» — یادگیری چقدر زودتر بستن ──────────────
         SectionCard(
@@ -2092,57 +2096,10 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۱-د. هوش سشن‌های معاملاتی (آسیا، لندن، هم‌پوشانی لندن-نیویورک، نیویورک) ──
-        SectionCard(
-            title = "🌍 هوش سشن‌های معاملاتی (Session Trading Edge)",
-            onCopy = { viewModel.copyNeuralBrainSection("sessions") },
-            subtitle = "عملکرد و استراتژی پیشنهادی شبکه عصبی در هر یک از ۴ سشن اصلی بازار جهانی",
-            initiallyExpanded = false,
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                neuralState.sessionEdges.forEach { ses ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(AurumColors.SurfaceAlt)
-                            .border(0.8.dp, AurumColors.Cyan.copy(alpha = 0.35f), RoundedCornerShape(9.dp))
-                            .padding(9.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                modifier = Modifier.weight(1f).padding(end = 6.dp),
-                                text = ses.sessionTitleFa,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = AurumColors.Gold,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Pill(
-                                text = "برد: ${ses.winRatePercent}% · ${String.format(Locale.US, "%+.2fR", ses.avgR)}",
-                                color = AurumColors.Green,
-                            )
-                        }
-                        Text(
-                            text = "ساعت جهانی: ${ses.utcHoursLabel} · تعداد معاملات ثبت‌شده: ${ses.tradesCount}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AurumColors.Cyan,
-                        )
-                        Text(
-                            text = "💡 استراتژی بهینه این سشن: ${ses.sessionAdviceFa}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AurumColors.TextPrimary,
-                        )
-                    }
-                }
-            }
-        }
+        // ── ۱-د. «هوش سشن‌ها» حذف شد ───────────────────────────────────────────
+        // کاربر خواست زمان‌بندی سشن‌ها اصلاً در یادگیری نباشد. تنها بازدارندهٔ زمانی که می‌ماند
+        // «بازار بسته» است و در کارت ایمنی ورود نشان داده می‌شود.
 
-        // ── ۲. گزارش زنده «آنچه شبکه عصبی یاد گرفته و فهمیده است» ──────────────
         SectionCard(
             title = "💡 خلاصه آموخته‌ها و برداشت‌های شبکه عصبی به زبان ساده",
             onCopy = { viewModel.copyNeuralBrainSection("insights") },
@@ -2487,11 +2444,7 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۸. گالری آرشیو تصویری معاملات بازشده (اسکرین‌شات ایچیموکو + SL/TP) ──
-        TradeSnapshotArchiveGallerySection(
-            viewModel = viewModel,
-            initiallyExpanded = false,
-        )
+        // گالری «آرشیو تصویری» حذف شد (درخواست کاربر).
     }
 }
 

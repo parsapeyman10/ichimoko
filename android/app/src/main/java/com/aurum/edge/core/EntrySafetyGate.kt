@@ -46,10 +46,17 @@ object EntrySafetyGate {
     /** تایم‌فریم‌هایی که نمادهای محدود در آن‌ها مجاز نیستند. */
     val LOW_TIMEFRAMES: Set<Interval> = setOf(Interval.M1, Interval.M3, Interval.M5, Interval.M15)
 
-    /** سشن‌هایی (به وقت UTC) که ورود خودکار در آن‌ها مسدود است. */
-    val DEFAULT_BLOCKED_SESSIONS_UTC_HOURS: Set<Int> = setOf(0, 1, 2, 3, 4, 5, 6)
+    /**
+     * سشن‌های مسدود: **خالی، و عمداً خالی.**
+     *
+     * در نسخهٔ ۳.۹.۵۰ ساعت‌های ۰۰:۰۰–۰۷:۰۰ UTC («آسیا») از ورود خودکار منع می‌شدند. این منع حذف شد:
+     * کاربر خواسته «زمان‌بندی سشن‌ها اصلاً در یادگیری نباشد» و ساعتِ روز نباید به‌تنهایی مانع
+     * معامله شود. تنها چیزی که می‌ماند این است که **با معاملهٔ باز داخل بازارِ بسته نرویم** —
+     * و آن با [MarketHours.closedFor] سنجیده می‌شود، نه با ساعت UTC.
+     */
+    val DEFAULT_BLOCKED_SESSIONS_UTC_HOURS: Set<Int> = emptySet()
 
-    /** برچسب فارسی سشن بر اساس ساعت UTC. */
+    /** برچسب فارسی سشن بر اساس ساعت UTC — فقط برای نمایش، نه برای فیلترکردن. */
     fun sessionLabelFa(utcHour: Int): String = when (utcHour) {
         in 12..15 -> "هم‌پوشانی لندن–نیویورک"
         in 7..11 -> "لندن"
@@ -88,6 +95,7 @@ object EntrySafetyGate {
         val maxPositionsPerSymbol: Int = DEFAULT_MAX_POSITIONS_PER_SYMBOL,
         val maxSignalAgeBars: Int = DEFAULT_MAX_SIGNAL_AGE_BARS,
         val maxFeeToRiskRatio: Double = DEFAULT_MAX_FEE_TO_RISK_RATIO,
+        /** @deprecated خالی است. ممنوعیت ساعتِ روز حذف شد؛ فقط بازارِ بسته جلوی ورود را می‌گیرد. */
         val blockedSessionsUtcHours: Set<Int> = DEFAULT_BLOCKED_SESSIONS_UTC_HOURS,
         val restrictedSymbolsLowTimeframe: Boolean = true,
     )
@@ -157,12 +165,10 @@ object EntrySafetyGate {
             }
         }
 
-        // ۳. فیلتر سشن
-        if (enforceSession && limits.blockedSessionsUtcHours.isNotEmpty()) {
-            val hour = utcHourOf(nowMillis)
-            if (hour in limits.blockedSessionsUtcHours) {
-                reasons += "سشن ${sessionLabelFa(hour)} (ساعت ${hour}:00 UTC) در فهرست سشن‌های مسدود است"
-            }
+        // ۳. بازار بسته: هرگز با معاملهٔ باز وارد بازارِ تعطیل نمی‌شویم.
+        //    این تنها «زمان‌بندی»ای است که باقی مانده است؛ ساعتِ روز به‌تنهایی هیچ ممنوعیتی نمی‌سازد.
+        if (enforceSession && MarketHours.closedFor(norm, nowMillis)) {
+            reasons += "بازار $norm در این لحظه بسته است (${MarketHours.sessionBadgeFa(norm, nowMillis)})"
         }
 
         // ۳-ب. نمادهای محدود در تایم‌فریم پایین (شاخص در ۵m/۱۵m زیر هزینهٔ معامله است)

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -101,6 +102,15 @@ import kotlin.math.max
 private val WEEKDAY_HEADERS_FA = listOf("شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه")
 private val RISK_PRESETS = listOf(0.5, 1.0, 1.5, 2.0, 3.0, 5.0)
 private val RR_PRESETS = listOf(1.5, 2.0, 3.0)
+
+/**
+ * کف ارتفاع هر خانهٔ تقویم.
+ *
+ * قبلاً خانه‌ها فقط `aspectRatio(1f)` داشتند و ارتفاع ردیف از محتوای همان ردیف می‌آمد؛ نتیجه
+ * این بود که ردیف بدون معامله کوتاه‌تر می‌شد و شبکه «دندانه‌دار» می‌شد. با کف ثابت، همهٔ
+ * ردیف‌ها هم‌ارتفاع‌اند حتی وقتی هیچ خانه‌ای معامله ندارد.
+ */
+private val CALENDAR_CELL_MIN_HEIGHT = 34.dp
 
 @Composable
 fun JournalRiskScreen(
@@ -283,13 +293,13 @@ fun JournalRiskScreen(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // ترتیب تب‌ها = ترتیب منطقی کار: تقویم ← معاملات باز ← ماشین‌حساب ← خروجی ← آرشیو
+            // ترتیب تب‌ها = ترتیب منطقی کار: تقویم ← معاملات باز ← ماشین‌حساب ← خروجی
+            // تب «آرشیو تصویری» حذف شد (درخواست کاربر: نه گرفتن اسکرین‌شات، نه بارگذاری آن).
             listOf(
                 0 to "📅 تقویم ژورنال (${filteredClosedTrades.size})",
                 1 to "📜 معاملات باز (${filteredOpenTrades.size})",
                 2 to "🧮 ماشین‌حساب حجم",
                 3 to "📊 خروجی و بکاپ",
-                4 to "📸 آرشیو تصویری",
             ).forEach { (idx, label) ->
                 Pill(
                     text = label,
@@ -317,7 +327,7 @@ fun JournalRiskScreen(
             report = performanceReport,
             scopeLabelFa = filterScopeLabelFa,
             onOpenExport = { subPage = 3 },
-            onOpenArchive = { subPage = 4 },
+            onOpenArchive = {},
         )
 
         // ── ۲. جعبه‌ابزار ژورنال: همهٔ خروجی‌ها/بکاپ/تنظیمات در یک کارت تاشو ──────────
@@ -377,11 +387,6 @@ fun JournalRiskScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Pill(
-                        text = "📸📄 PDF آرشیو اسکرین‌شات‌ها",
-                        color = AurumColors.Gold,
-                        modifier = Modifier.clickable { viewModel.exportArchiveScreenshotsPdfNow(shareAfterExport = true) },
-                    )
                     Pill(
                         text = "🧠📄 PDF هوش مصنوعی + رگرسیون",
                         color = AurumColors.Cyan,
@@ -487,13 +492,6 @@ fun JournalRiskScreen(
             trades = filteredTrades,
         )
 
-            }
-
-            4 -> {
-                com.aurum.edge.ui.components.TradeSnapshotArchiveGallerySection(
-                    viewModel = viewModel,
-                    initiallyExpanded = false,
-                )
             }
 
             3 -> {
@@ -1977,7 +1975,20 @@ private fun MonthlyPnlCalendarSection(
     // ۰ = کل ماه، ۱..۳۱ = معاملات همان روز
     var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(0) }
 
-    val calendar = remember(selectedYear, selectedMonth, trades.size, closedTrades.size, closedTrades.firstOrNull()?.id) {
+    // کلیدهای remember باید «نسخهٔ داده» را نشان دهند، نه چیزهایی که هر ۲۰ ثانیه عوض می‌شوند.
+    // قبلاً `closedTrades.size` و شناسهٔ اولین معامله به‌عنوان کلید بودند: با هر تیک ساعت
+    // recomposition رخ می‌داد و اگر یکی از این‌ها تغییر می‌کرد، کل تقویم ماه دوباره ساخته می‌شد.
+    val journalRevision = remember(trades) {
+        var hash = trades.size
+        trades.forEach { trade ->
+            hash = 31 * hash + trade.id.hashCode()
+            hash = 31 * hash + (trade.closedAt ?: trade.openedAt).hashCode()
+            hash = 31 * hash + (trade.pnlUsd?.hashCode() ?: 0)
+            hash = 31 * hash + if (trade.isOpen) 1 else 0
+        }
+        hash
+    }
+    val calendar = remember(selectedYear, selectedMonth, journalRevision) {
         RiskAndCalendarEngine.buildMonthlyCalendar(
             year = selectedYear,
             month = selectedMonth,
@@ -2179,8 +2190,15 @@ private fun MonthlyPnlCalendarSection(
                             calendar.days[dayNumber - 1]
                         } else null
                         if (daySummary == null) {
-                            // خانهٔ خالی هم‌ارتفاع ردیف می‌ماند تا شبکه دندانه‌دار نشود.
-                            Box(modifier = Modifier.weight(1f).aspectRatio(1f))
+                            // خانهٔ خالی فقط با aspectRatio(1f) هم‌ارتفاع بقیه نمی‌شود: ارتفاع
+                            // ردیف از محتوای واقعی می‌آید. با کف ارتفاع، ردیف اول ماه‌هایی که
+                            // روز خالی دارند کوتاه‌تر از ردیف‌های دیگر نمی‌شود.
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .heightIn(min = CALENDAR_CELL_MIN_HEIGHT),
+                            )
                         } else {
                             val intensity = if (maxAbsDayPnl <= 0.0) {
                                 0.0
@@ -2192,7 +2210,10 @@ private fun MonthlyPnlCalendarSection(
                                 isSelected = selectedDayOfMonth == daySummary.dayOfMonth,
                                 isToday = isCurrentMonth && todayZoned.dayOfMonth == daySummary.dayOfMonth,
                                 intensity = intensity,
-                                modifier = Modifier.weight(1f).aspectRatio(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .heightIn(min = CALENDAR_CELL_MIN_HEIGHT),
                                 onClick = {
                                     selectedDayOfMonth = if (selectedDayOfMonth == daySummary.dayOfMonth) {
                                         0

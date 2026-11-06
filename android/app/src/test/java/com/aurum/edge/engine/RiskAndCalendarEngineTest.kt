@@ -933,60 +933,16 @@ class RiskAndCalendarEngineTest {
         assertEquals(6, brainSummary.recentLessons.size)
         assertTrue(brainSummary.noTradeClusters.isNotEmpty())
 
-        // Verify TradeSnapshotArchiveManager self-readable embedded image payload round-trip & default alarm ringtone settings
+        // تنظیمات پیش‌فرض زنگ هشدار (آرشیو تصویری حذف شده است)
         val defaultSettings = com.aurum.edge.core.AppSettings()
         assertEquals("CUSTOM_ONLY", defaultSettings.alarmTonePreset)
         assertEquals("Ding-Dong", defaultSettings.entryAlarmSoundName)
         assertEquals("Red Dwarf", defaultSettings.tpAlarmSoundName)
         assertEquals("Latch", defaultSettings.slAlarmSoundName)
 
-        val sampleTrade = com.aurum.edge.core.PaperTrade(
-            id = "SNAP_TEST_1",
-            symbol = "XAU/USD",
-            action = SignalAction.BUY,
-            interval = Interval.M15,
-            entry = 2_745.0,
-            stopLoss = 2_738.0,
-            takeProfit = 2_762.5,
-            riskReward = 2.5,
-            confidence = 91.0,
-            openedAt = 1_760_200_000_000L,
-            fixedRiskUsd = 5.0,
-            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
-            strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
-        )
-        val sampleArchiveRecord = com.aurum.edge.data.ArchivedTradeSnapshotRecord(
-            tradeId = sampleTrade.id,
-            symbol = sampleTrade.symbol,
-            timeframeLabel = sampleTrade.interval.label,
-            action = sampleTrade.action.name,
-            strategyId = sampleTrade.strategyId,
-            strategyTitleFa = sampleTrade.strategyTitleFa,
-            strategyBadgeFa = "Foka 15m",
-            entryPrice = sampleTrade.entry,
-            stopLossPrice = sampleTrade.stopLoss,
-            takeProfitPrice = sampleTrade.takeProfit,
-            riskReward = sampleTrade.riskReward,
-            optimalRiskReward = 3.0,
-            fixedRiskUsd = 5.0,
-            expectedProfitUsd = 12.5,
-            confidence = 91.0,
-            openedAtMs = sampleTrade.openedAt,
-            fullPaperTrade = sampleTrade,
-        )
-        val fakeWebpHeader = byteArrayOf(0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50)
-        val combinedBytes = com.aurum.edge.data.TradeSnapshotArchiveManager.attachEmbeddedJsonToImageBytes(
-            webpBytes = fakeWebpHeader,
-            record = sampleArchiveRecord,
-        )
-        val decodedRecord = com.aurum.edge.data.TradeSnapshotArchiveManager.extractEmbeddedSnapshotFromBytes(combinedBytes)
-        assertNotNull(decodedRecord)
-        assertEquals("SNAP_TEST_1", decodedRecord!!.tradeId)
-        assertEquals("XAU/USD", decodedRecord.symbol)
-        assertEquals(2_745.0, decodedRecord.entryPrice, 1e-4)
-        assertEquals(2_738.0, decodedRecord.stopLossPrice, 1e-4)
-        assertEquals(2_762.5, decodedRecord.takeProfitPrice, 1e-4)
-        assertNotNull(decodedRecord.fullPaperTrade)
+        // آرشیو تصویری حذف شد: نه فایل تصویری ساخته می‌شود، نه متادیتا داخل تصویر جاسازی می‌شود.
+        // فقط تنظیمات پیش‌فرض زنگ هشدار سنجیده می‌شود (بخشی از این تست که مستقل از آرشیو است).
+        assertTrue(BitcoinStrategyModel.HIDDEN_CROSS.id.isNotBlank())
 
         // Verify all 9 Drive PDF strategies have complete DriveBookPlaybookSpec + live telemetry + dedicated 16 conditions
         BitcoinStrategyModel.drivePdfStrategies.forEach { driveModel ->
@@ -1011,7 +967,9 @@ class RiskAndCalendarEngineTest {
         // Verify Trading-Focused Neural Engine analytics & MasterIchimokuTradingAssistant improvement notes
         val summaryAfter = neuralEngine.state.value
         assertEquals(16, summaryAfter.strategyEdgeMatrix.size)
-        assertEquals(4, summaryAfter.sessionEdges.size)
+        // زمان‌بندی سشن‌ها از یادگیری حذف شد: هیچ لبهٔ سشنی ساخته نمی‌شود (تنها وظیفهٔ زمانی،
+        // جلوگیری از نگه‌داشتن معامله در بازار بسته است که در EntrySafetyGate/MarketHours است).
+        assertTrue(summaryAfter.sessionEdges.isEmpty())
         assertTrue(summaryAfter.tradeForensics.topWinDriversFa.isNotEmpty())
         assertTrue(summaryAfter.tradeForensics.topLossCausesFa.isNotEmpty())
         assertTrue(summaryAfter.tradeForensics.actionableTradingRulesFa.isNotEmpty())
@@ -1078,14 +1036,8 @@ class RiskAndCalendarEngineTest {
         assertTrue(defaultAppSettings.slAlarmEnabled)
         assertTrue(defaultAppSettings.showSettingsDescriptions)
 
-        val closeSnap = com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
-            context = context,
-            closedTrade = sampleTrade.copy(tradeNumber = 12, exitPrice = 69500.0, pnlUsd = 10.0),
-            closeCandles = sampleBars,
-        )
-        assertNotNull(closeSnap)
-        assertTrue(closeSnap!!.isCloseSnapshot)
-        assertEquals(12, closeSnap.displayTradeNumber)
+        // آرشیو تصویری حذف شد: شمارهٔ نمایشی معامله مستقل از آرشیو تست می‌شود.
+        assertEquals(12, sampleTrade.copy(tradeNumber = 12, exitPrice = 69500.0, pnlUsd = 10.0).displayTradeNumber)
 
         // Verify v3.9.19 features: Unified 9-Book Drive Master Method + Causal Market Attribution + News Intelligence + Post-Training CEM/Bayesian Auto-Tuner
         val consensus9 = IchimokuStrategyEngine.evaluateUnified9BookConsensus(
@@ -1153,33 +1105,7 @@ class RiskAndCalendarEngineTest {
         assertEquals(1.55, driveEffectiveCfg.maxKijunExtensionAtr, 1e-4)
 
         // Verify v3.9.24 features:
-        // 1. All trades are recorded with OPEN and CLOSE archive screenshots
-        val closedForArchive = sampleTrade.copy(
-            id = "PDF_ARCH_1",
-            tradeNumber = 21,
-            stopLoss = 2_738.0,
-            initialStopLoss = 2_738.0,
-            takeProfit = 2_766.0,
-            riskReward = 4.0, // > 3.0 initial R:R preserved with fixed SL
-            closedAt = sampleTrade.openedAt + 1_800_000L,
-            exitPrice = 2_766.0,
-            pnlUsd = 20.0,
-        )
-        val ensuredSnaps = com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
-            context = context,
-            trades = listOf(sampleTrade, closedForArchive),
-        )
-        assertTrue(ensuredSnaps.any { it.tradeId == "PDF_ARCH_1" && !it.isCloseSnapshot })
-        assertTrue(ensuredSnaps.any { it.tradeId == "PDF_ARCH_1" && it.isCloseSnapshot })
-        val generatedArchiveSnaps = ensuredSnaps.filter { it.tradeId == "PDF_ARCH_1" }
-        assertTrue("New screenshots must stay private to the app", generatedArchiveSnaps.all { it.phoneGalleryUri.isBlank() })
-        val archiveRoot = File(context.filesDir, "trade_snapshots_v1").canonicalPath + File.separator
-        assertTrue(
-            "New screenshot files must be written under the app-private archive",
-            generatedArchiveSnaps.all { File(it.localImagePath).canonicalPath.startsWith(archiveRoot) },
-        )
-
-        // 2. Full PDF export embeds visual Ichimoku archive screenshots for all trades
+        // «آرشیو تصویری» حذف شد؛ فقط خروجی PDF ژورنال باقی می‌ماند و باید فایل معتبر بسازد.
         val tearSheetForPdf = com.aurum.edge.data.JournalExportEngine.buildInstitutionalTearSheet(
             trades = listOf(sampleTrade, closedForArchive),
             initialCapital = 100_000.0,
@@ -1231,13 +1157,7 @@ class RiskAndCalendarEngineTest {
         val regMinRrRow = regReportAll.parameterRows.first { it.paramKey == "minRiskReward" }
         assertTrue(regMinRrRow.regressedValue in 1.50..3.00)
 
-        // 4. Dedicated Archive Screenshots PDF Export & Full AI/Neural Data PDF Export
-        val (archPdfFile, _) = com.aurum.edge.data.JournalExportEngine.exportArchiveScreenshotsPdf(
-            context = context,
-            trades = listOf(sampleTrade, closedForArchive),
-        ).getOrThrow()
-        assertTrue(archPdfFile.exists() && archPdfFile.length() > 300L)
-
+        // 4. Full AI/Neural Data PDF Export (خروجی آرشیو تصویری حذف شد)
         val (aiPdfFile, _) = com.aurum.edge.data.JournalExportEngine.exportFullAiAndNeuralReportPdf(
             context = context,
             neuralSummary = neuralEngineV3919.state.value,

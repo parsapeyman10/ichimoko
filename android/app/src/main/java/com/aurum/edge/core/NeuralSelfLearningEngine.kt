@@ -822,38 +822,11 @@ class NeuralSelfLearningEngine(
             )
         }.sortedWith(compareByDescending<NeuralStrategyTradingEdge> { it.tradesCount }.thenByDescending { it.edgeScore })
 
-        // ── ۲. هوش سشن‌های معاملاتی (آسیا، لندن، هم‌پوشانی لندن-نیویورک، نیویورک) ──
-        fun utcHourOf(ms: Long): Int = ((ms / 3_600_000L) % 24L).toInt()
-        val sessionSpecs = listOf(
-            Triple("OVERLAP_LDN_NY", "🔥 هم‌پوشانی لندن و نیویورک (طلایی‌ترین حجم)", "12:00 تا 16:00 UTC") to (12..15),
-            Triple("LONDON", "🇬🇧 سشن لندن و اروپا (شروع روندهای اصلی)", "07:00 تا 12:00 UTC") to (7..11),
-            Triple("NEW_YORK", "🇺🇸 سشن نیویورک (ادامه موج و شاخص داوجونز)", "16:00 تا 21:00 UTC") to (16..20),
-            Triple("ASIA", "🇯🇵 سشن آسیا و توکیو (نوسان متعادل/پولبک)", "00:00 تا 07:00 UTC") to (0..6),
-        )
-        val sessionEdges = sessionSpecs.map { (meta, hourRange) ->
-            val (code, titleFa, hoursLabel) = meta
-            val sList = cur.replayBuffer.filter { utcHourOf(it.timestampMs) in hourRange }
-            val sCount = sList.size
-            // «بدون نمونه» یعنی «نامعلوم» (۰)، نه یک نرخ برد خوش‌بینانهٔ ثابت. اعداد قبلی
-            // (۷۱٪/۶۷٪/۶۴٪/۵۸٪) باعث می‌شدند سشنی با صفر معامله «طلایی» گزارش شود.
-            val sWr = if (sCount > 0) (sList.count { it.won }.toDouble() / sCount.toDouble()) * 100.0 else 0.0
-            val sAvgR = if (sCount > 0) sList.sumOf { it.achievedR } / sCount.toDouble() else 0.0
-            val advice = when (code) {
-                "OVERLAP_LDN_NY" -> "بهترین سشن برای شکست کومو (تاتل، لایهٔ ۱ بولینگر و لایهٔ ۸) روی طلا، فارکس و بیت‌کوین"
-                "LONDON" -> "بهترین سشن برای موج N هوسودا و سیستم سریع 7-22-44 (لایهٔ ۹) در شروع روند روزانه"
-                "NEW_YORK" -> "بهترین سشن برای پولبک کیجون پاتل و لایهٔ ۲ (EMA21+RSI7+Fractal) روی طلا، داوجونز و کریپتو"
-                else -> "در سشن آسیا از استراتژی‌های شکست پرهیز کنید و فقط پولبک‌های دقیق کیجون و لایهٔ ۳ (10,30,60) را شکار کنید"
-            }
-            NeuralTradingSessionEdge(
-                sessionCode = code,
-                sessionTitleFa = titleFa,
-                utcHoursLabel = hoursLabel,
-                tradesCount = sCount,
-                winRatePercent = round(sWr * 10.0) / 10.0,
-                avgR = round(sAvgR * 100.0) / 100.0,
-                sessionAdviceFa = advice,
-            )
-        }
+        // ── ۲. «زمان‌بندی سشن» حذف شد (درخواست صریح کاربر) ──────────────────────
+        // آمار سشن (آسیا/لندن/هم‌پوشانی/نیویورک) دیگر نه محاسبه می‌شود، نه در کارنامه می‌آید و
+        // هیچ پارامتری از آن تیون نمی‌شود. تنها بازدارندهٔ زمانی، «بازار بسته» است که در
+        // `EntrySafetyGate` و `MarketHours` سنجیده می‌شود: با پوزیشن باز داخل بازار تعطیل نمی‌رویم.
+        val sessionEdges = emptyList<NeuralTradingSessionEdge>()
 
         // ── ۳. کالبدشکافی تریدی علل تارگت و استاپ (Trade Outcome Forensics) ──
         val allWins = cur.replayBuffer.filter { it.won }

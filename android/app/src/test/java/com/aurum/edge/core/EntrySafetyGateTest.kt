@@ -282,8 +282,15 @@ class EntrySafetyGateTest {
         )
     }
 
+    /**
+     * زمان‌بندی سشن از یادگیری و از دروازهٔ ورود حذف شد. تنها «وظیفهٔ زمانی» باقی‌مانده این است که
+     * با معاملهٔ باز داخل بازارِ تعطیل نرویم؛ ساعت UTC به‌تنهایی هیچ ممنوعیتی نمی‌سازد.
+     */
     @Test
-    fun `blocked asian session is rejected`() {
+    fun `utc hour alone never blocks entry but closed market does`() {
+        // هیچ ساعتی در فهرست مسدود نیست.
+        assertTrue(EntrySafetyGate.DEFAULT_BLOCKED_SESSIONS_UTC_HOURS.isEmpty())
+        // بیت‌کوین ۲۴ساعته است؛ در هر ساعتی مجاز.
         val utcNow = 1_760_010_000_000L
         val hour = EntrySafetyGate.utcHourOf(utcNow)
         val expectedBlocked = hour in EntrySafetyGate.DEFAULT_BLOCKED_SESSIONS_UTC_HOURS
