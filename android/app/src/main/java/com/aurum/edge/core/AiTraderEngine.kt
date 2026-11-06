@@ -102,7 +102,10 @@ object AiTraderEngine {
     ): List<SymbolConditionsForecast> {
         val out = ArrayList<SymbolConditionsForecast>()
         for ((symbol, reports) in reportsBySymbol) {
-            val valid = reports.filter { it.conditions.isNotEmpty() && it.triggerSnapshot != null }
+            // شرط کافی برای پیش‌بینی، وجود «شرط‌های ارزیابی‌شده» است؛ نبودِ snapshot ماشه
+            // (مثلاً وقتی کندل تازه هنوز بسته نشده) نباید نماد را کامل از پیش‌بینی حذف کند.
+            // اطلاعات snapshot فقط وقتی موجود باشد به متن شواهد اضافه می‌شود.
+            val valid = reports.filter { it.conditions.isNotEmpty() }
             if (valid.isEmpty()) continue
             // استراتژی با بیشترین پیشروی (بیشترین شرط پاس + بالاترین امتیاز روند)
             val best = valid.maxWithOrNull(
