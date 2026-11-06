@@ -403,6 +403,39 @@ object RiskAndCalendarEngine {
     }
 
 
+    /**
+     * Suggests default SL and TP around a live entry price for quick one-tap prefill.
+     */
+    fun suggestSlTp(
+        symbolInput: String,
+        entryPrice: Double,
+        action: SignalAction = SignalAction.BUY,
+        rewardRatio: Double = 2.0,
+        triggerInterval: com.aurum.edge.domain.Interval = com.aurum.edge.domain.Interval.M15,
+    ): Pair<Double, Double>? {
+        if (!entryPrice.isFinite() || entryPrice <= 0.0) return null
+        val symbol = V1Universe.normalize(symbolInput)
+        val bounds = TradePlanGuard.boundsFor(symbol, triggerInterval)
+        // مرکز دالان نوسان همان تایم‌فریم (نه یک درصد ثابت برای همهٔ نمادها)
+        val stopDist = maxOf(
+            entryPrice * bounds.minStopPct * 1.15,
+            VenueSpecs.minStopDistance(symbol, entryPrice) * 3.0,
+            entryPrice * bounds.maxStopPct * 0.45,
+        )
+        val plan = TradePlanGuard.sanitizePlan(
+            symbol = symbol,
+            action = action,
+            entryPrice = entryPrice,
+            candidateStopLoss = if (action == SignalAction.BUY) entryPrice - stopDist else entryPrice + stopDist,
+            candidateTakeProfit = null,
+            desiredRiskReward = rewardRatio,
+            referenceAtr = 0.0,
+            triggerInterval = triggerInterval,
+        )
+        if (!plan.isUsable) return null
+        return plan.stopLoss to plan.takeProfit
+    }
+
     /** داوری یک پلن دستی/گزارش برای نمایش در ماشین‌حساب و کارت استراتژی. */
     fun auditTradePlan(
         symbolInput: String,
