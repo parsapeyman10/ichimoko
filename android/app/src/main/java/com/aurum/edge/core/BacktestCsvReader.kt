@@ -175,8 +175,12 @@ object BacktestCsvReader {
         require(byTime.isNotEmpty()) { "هیچ ردیف معتبری خوانده نشد؛ فایل یا خراب است یا ستون‌ها جابه‌جا شده‌اند." }
 
         val ordered = byTime.values.sortedBy { it.time }
-        val flatCount = if (dropFlatBars) ordered.count { it.volume <= 0.0 } else 0
-        val kept = if (dropFlatBars) ordered.filter { it.volume > 0.0 }.ifEmpty { ordered } else ordered
+        // اگر فایل ستون volume ندارد (پیش‌فرض CLI داکاس‌کپی)، «حجم صفر» یعنی «نامعلوم» است،
+        // نه «کندل مرده». دور ریختن چنین ردیف‌هایی کل فایل را پاک می‌کرد.
+        val hasVolumeColumn = columnIndex.containsKey("volume")
+        val canDetectFlats = dropFlatBars && hasVolumeColumn
+        val flatCount = if (canDetectFlats) ordered.count { it.volume <= 0.0 } else 0
+        val kept = if (canDetectFlats) ordered.filter { it.volume > 0.0 }.ifEmpty { ordered } else ordered
 
         val step = dominantStepMs(kept)
         val inferred = intervalFromFileName(fileName)

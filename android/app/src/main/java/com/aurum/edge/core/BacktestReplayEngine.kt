@@ -144,6 +144,10 @@ object BacktestReplayEngine {
         val skippedWarmupSteps: Int,
         /** گزارش استراتژی در لحظهٔ ورود هر معامله؛ خالی مگر `captureEntryReports` روشن باشد. */
         val entryReports: Map<Long, StrategyEvaluationReport> = emptyMap(),
+        /** بیشترین شرطی که در یک کندل پاس شد؛ سقف واقعی همان بازه. */
+        val maxConditionsPassed: Int = 0,
+        /** شرط‌هایی که بیشترین بار رد شدند (عنوان فارسی → تعداد)، بیشترین اول. */
+        val topBlockers: List<Pair<String, Int>> = emptyList(),
     ) {
         val totals: Stats? = stats.firstOrNull { it.strategyId == "__ALL__" } ?: stats.firstOrNull()
         val finalEquityUsd: Double get() = equityCurve.lastOrNull()?.second ?: config.startEquityUsd
@@ -188,6 +192,10 @@ object BacktestReplayEngine {
 
         val states = models.associateWith { StrategyRunState(it) }
         val entryReports = LinkedHashMap<Long, StrategyEvaluationReport>()
+        // اگر در کل بازه هیچ ورودی ساخته نشد، کاربر باید بداند کدام شرط سد راه بوده،
+        // نه این‌که با یک «۰ معامله» بی‌توضیح روبه‌رو شود.
+        val conditionFailCounts = LinkedHashMap<String, Int>()
+        var maxConditionsPassed = 0
         val allTrades = ArrayList<Trade>(256)
         val equityPoints = ArrayList<Pair<Long, Double>>(1024)
         var equity = config.startEquityUsd
@@ -259,6 +267,10 @@ object BacktestReplayEngine {
                     nowMillis = now,
                     symbolInput = config.symbol,
                 )
+                maxConditionsPassed = maxOf(maxConditionsPassed, report.conditions.count { it.passed })
+                report.conditions.filterNot { it.passed }.forEach { cond ->
+                    conditionFailCounts[cond.titleFa] = (conditionFailCounts[cond.titleFa] ?: 0) + 1
+                }
                 val decision = entryDecision(report, bar.close)
                 if (decision != null) {
                     state.openTrade = decision
@@ -311,6 +323,8 @@ object BacktestReplayEngine {
             evaluatedSteps = evaluated,
             skippedWarmupSteps = skipped,
             entryReports = entryReports,
+            maxConditionsPassed = maxConditionsPassed,
+            topBlockers = conditionFailCounts.entries.sortedByDescending { it.value }.take(6).map { it.toPair() },
         )
     }
 
@@ -347,7 +361,7 @@ object BacktestReplayEngine {
 
     // ─────────────────────── مدیریت معاملهٔ باز ───────────────────────
 
-    private fun manageOpenTrade(
+    internal fun manageOpenTrade(
         open: OpenTrade,
         bar: Candle,
         now: Long,
@@ -427,7 +441,7 @@ object BacktestReplayEngine {
         return null
     }
 
-    private fun closeAt(
+    internal fun closeAt(
         open: OpenTrade,
         price: Double,
         time: Long,
@@ -473,7 +487,7 @@ object BacktestReplayEngine {
         var openTrade: OpenTrade? = null
     }
 
-    private class OpenTrade(
+    internal class OpenTrade(
         val strategyId: String,
         val strategyTitleFa: String,
         val action: SignalAction,

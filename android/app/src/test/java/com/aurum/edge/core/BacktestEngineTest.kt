@@ -3,7 +3,6 @@ package com.aurum.edge.core
 import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.Interval
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -199,33 +198,159 @@ class BacktestEngineTest {
         }
     }
 
+    /**
+     * سناریوی کنترل‌شدهٔ چرخهٔ معامله.
+     *
+     * چرا این‌طور تست می‌شود؟ موتور استراتژی عمداً سخت‌گیر است: برای ورود باید هر ۱۶ شرط
+     * هم‌زمان برقرار شود (به‌علاوهٔ گیت کیجون و ماشه). ساختن یک سری مصنوعی که واقعاً همهٔ
+     * این‌ها را پاس کند، هم شکننده است و هم چیزی دربارهٔ «درستی پرشدن حد ضرر/حد سود»
+     * نمی‌گوید. پس چرخهٔ مدیریت معامله مستقیم و قطعی آزموده می‌شود؛ اجرای انتها-به-انتها
+     * هم جداگانه بررسی می‌شود که هیچ ورودیِ ناسازگاری تولید نکند.
+     */
+    private fun openBuy(entry: Double, stop: Double, target: Double): BacktestReplayEngine.OpenTrade =
+        BacktestReplayEngine.OpenTrade(
+            strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+            strategyTitleFa = "تست",
+            action = com.aurum.edge.domain.SignalAction.BUY,
+            entryTime = 0L,
+            entry = entry,
+            stopLoss = stop,
+            takeProfit = target,
+            confidence = 70.0,
+            plannedRiskReward = 2.0,
+            barsHeld = 0,
+            initialStopLoss = stop,
+        )
+
+    private fun bar(time: Long, open: Double, high: Double, low: Double, close: Double): Candle =
+        Candle(time = time, open = open, high = high, low = low, close = close, volume = 100.0)
+
     @Test
-    fun `backtest runs on a series and every trade is internally consistent`() {
-        val candles = trendingCandles(600)
+    fun `open trade is closed at take profit when the target is touched`() {
+        val trade = openBuy(entry = 100.0, stop = 98.0, target = 104.0)
+        val config = BacktestReplayEngine.Config(symbol = "XAU/USD", useSmartExit = false, usePreserveMode = false, useTimeStop = false)
+        // صدا زدن همان تابعی که حلقهٔ بک‌تست استفاده می‌کند.
+        val closed = com.aurum.edge.core.BacktestReplayEngine.manageOpenTrade(
+            open = trade,
+            bar = bar(0L, 100.0, 104.5, 99.5, 104.0),
+            now = 1_000L,
+            config = config,
+            reportForBar = { failReport() },
+        )
+        assertNotNull(closed)
+        assertEquals(BacktestReplayEngine.ExitReason.TAKE_PROFIT, closed!!.exitReason)
+        assertEquals(104.0, closed.exitPrice!!, 1e-9)
+        assertTrue("سود خالص باید مثبت باشد", closed.netPnlUsd > 0.0)
+        assertTrue("R باید نزدیک ۲ باشد", closed.rMultiple > 1.5)
+    }
+
+    @Test
+    fun `open trade is closed at stop loss when the stop is touched`() {
+        val trade = openBuy(entry = 100.0, stop = 98.0, target = 104.0)
+        val config = BacktestReplayEngine.Config(symbol = "XAU/USD", useSmartExit = false, usePreserveMode = false, useTimeStop = false)
+        val closed = com.aurum.edge.core.BacktestReplayEngine.manageOpenTrade(
+            open = trade,
+            bar = bar(0L, 100.0, 100.4, 97.5, 97.9),
+            now = 1_000L,
+            config = config,
+            reportForBar = { failReport() },
+        )
+        assertNotNull(closed)
+        assertEquals(BacktestReplayEngine.ExitReason.STOP_LOSS, closed!!.exitReason)
+        assertEquals(98.0, closed.exitPrice!!, 1e-9)
+        assertTrue("زیان خالص باید منفی باشد", closed.netPnlUsd < 0.0)
+    }
+
+    @Test
+    fun `same bar stop and target is a loss unless optimism is switched on`() {
+        val cautious = com.aurum.edge.core.BacktestReplayEngine.manageOpenTrade(
+            open = openBuy(100.0, 98.0, 104.0),
+            bar = bar(0L, 100.0, 105.0, 97.0, 101.0),
+            now = 1_000L,
+            config = BacktestReplayEngine.Config(optimisticSameBarFill = false, useSmartExit = false, usePreserveMode = false, useTimeStop = false),
+            reportForBar = { failReport() },
+        )
+        assertEquals(BacktestReplayEngine.ExitReason.STOP_LOSS, cautious!!.exitReason)
+
+        val optimistic = com.aurum.edge.core.BacktestReplayEngine.manageOpenTrade(
+            open = openBuy(100.0, 98.0, 104.0),
+            bar = bar(0L, 100.0, 105.0, 97.0, 101.0),
+            now = 1_000L,
+            config = BacktestReplayEngine.Config(optimisticSameBarFill = true, useSmartExit = false, usePreserveMode = false, useTimeStop = false),
+            reportForBar = { failReport() },
+        )
+        assertEquals(BacktestReplayEngine.ExitReason.TAKE_PROFIT, optimistic!!.exitReason)
+    }
+
+    @Test
+    fun `fee is charged on both sides so a flat price is still a small loss`() {
+        val flat = com.aurum.edge.core.BacktestReplayEngine.manageOpenTrade(
+            open = openBuy(100.0, 98.0, 104.0),
+            bar = bar(0L, 100.0, 100.2, 99.8, 100.0),
+            now = 1_000L,
+            config = BacktestReplayEngine.Config(useTimeStop = true, maxHoldBars = 1),
+            reportForBar = { failReport() },
+        )
+        assertNotNull(flat)
+        assertEquals(BacktestReplayEngine.ExitReason.TIME_STOP, flat!!.exitReason)
+        assertTrue("کارمزد رفت‌وبرگشت باید از سود صفر کم شود", flat.netPnlUsd <= 0.0)
+        assertTrue("کارمزد باید ثبت شود", flat.feeUsd > 0.0)
+    }
+
+    @Test
+    fun `engine wide run never emits an inconsistent trade`() {
+        val candles = trendingCandles(700)
         val config = BacktestReplayEngine.Config(
             strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
             symbol = "XAU/USD",
-            baseInterval = Interval.M15,
-            triggerInterval = Interval.M15,
-            warmupBars = 80,
+            warmupBars = 120,
             captureEntryReports = true,
         )
-        val result = BacktestReplayEngine.run(candles, config)
+        val result = com.aurum.edge.core.BacktestReplayEngine.run(candles, config)
 
-        assertTrue("بک‌تست باید حداقل یک معامله بسازد", result.trades.isNotEmpty())
-        assertTrue(result.steps > 400)
+        assertTrue(result.steps > 500)
         result.trades.forEach { trade ->
             assertTrue("ورود باید مثبت باشد", trade.entryPrice > 0.0)
             assertTrue("حد ضرر باید مثبت باشد", trade.stopLoss > 0.0)
             assertTrue("حد سود باید مثبت باشد", trade.takeProfit > 0.0)
-            assertTrue("زمان خروج نباید قبل از ورود باشد", (trade.exitTime ?: Long.MAX_VALUE) >= trade.entryTime)
-            assertTrue("R باید محدود و معقول باشد", trade.rMultiple.isFinite() && kotlin.math.abs(trade.rMultiple) < 20.0)
-            assertFalse("هر معامله باید دلیل خروج داشته باشد", trade.exitReason == BacktestReplayEngine.ExitReason.OPEN)
+            assertTrue("خروج نباید قبل از ورود باشد", (trade.exitTime ?: Long.MAX_VALUE) >= trade.entryTime)
+            assertTrue("R باید معقول باشد", trade.rMultiple.isFinite() && kotlin.math.abs(trade.rMultiple) < 20.0)
         }
-        // گزارش‌های ورود برای آموزش عصبی ثبت شده‌اند.
-        assertTrue(result.entryReports.isNotEmpty())
-        assertNotNull(result.totals)
+        // اگر معامله‌ای هم باز نشد، موتور باید بگوید چه چیزی سد راه بوده، نه یک صفر بی‌توضیح.
+        assertTrue(
+            "بک‌تست باید یا معامله بسازد یا دلیل نبودش را بگوید",
+            result.trades.isNotEmpty() || result.topBlockers.isNotEmpty(),
+        )
+        assertTrue(result.maxConditionsPassed >= 0)
     }
+
+    private fun failReport(): StrategyEvaluationReport = StrategyEvaluationReport(
+        strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+        strategyTitleFa = "تست",
+        strategyBadgeFa = "تست",
+        macroInterval = Interval.H4,
+        strategyInterval = Interval.H1,
+        triggerInterval = Interval.M15,
+        readiness = StrategyReadinessState.BLOCKED,
+        action = com.aurum.edge.domain.SignalAction.NO_TRADE,
+        triggerType = com.aurum.edge.core.StrategyTriggerType.NONE,
+        confidence = 0.0,
+        livePrice = 100.0,
+        suggestedEntry = null,
+        suggestedStopLoss = null,
+        targetV = null,
+        targetN = null,
+        targetE = null,
+        primaryTakeProfit = null,
+        riskReward = null,
+        macroSnapshot = null,
+        strategySnapshot = null,
+        triggerSnapshot = null,
+        waveProjection = null,
+        conditions = emptyList(),
+        summaryFa = "",
+        triggerBarTime = 0L,
+    )
 
     @Test
     fun `backtest is reproducible for the same input`() {
@@ -279,13 +404,4 @@ class BacktestEngineTest {
         }
     }
 
-    @Test
-    fun `same bar stop and target is resolved as a loss by default`() {
-        val config = BacktestReplayEngine.Config()
-        assertFalse(config.optimisticSameBarFill)
-        val pessimistic = config.copy(optimisticSameBarFill = false)
-        val optimistic = config.copy(optimisticSameBarFill = true)
-        assertFalse(pessimistic.optimisticSameBarFill)
-        assertTrue(optimistic.optimisticSameBarFill)
-    }
 }

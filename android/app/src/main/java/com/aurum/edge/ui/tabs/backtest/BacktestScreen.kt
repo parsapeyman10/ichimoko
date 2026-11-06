@@ -435,13 +435,30 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     }
                 }
                 if (res.trades.isEmpty()) {
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(8.dp))
                     Text(
-                        "این استراتژی در این بازه هیچ ورودی معتبری نداشت. یا بازه را بلندتر کنید " +
-                            "(بازهٔ بیشتری از CSV بگیرید) یا استراتژی دیگری انتخاب کنید.",
+                        "این استراتژی در این بازه هیچ ورودی معتبری نداشت. بیشترین شرطی که هم‌زمان پاس شد: " +
+                            "${res.maxConditionsPassed} از ۱۶. سدهای اصلی همین بازه:",
                         color = AurumColors.Orange,
                         fontSize = 11.sp,
                         lineHeight = 15.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    res.topBlockers.forEach { (title, count) ->
+                        Text(
+                            "• $title — $count بار رد شد",
+                            color = AurumColors.TextMuted,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "راه‌حل: بازهٔ بزرگ‌تری از CSV بگیرید (چند ماه)، تایم‌فریم پایه را با استراتژی " +
+                            "هم‌خوان کنید، یا «همهٔ استراتژی‌ها» را روشن کنید تا استراتژی دیگری شانس داشته باشد.",
+                        color = AurumColors.TextSecondary,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
                     )
                 }
             }
