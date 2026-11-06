@@ -50,6 +50,12 @@ object AiTraderEngine {
     /** حداکثر نسبت اصلاح برای هر بار (۲۰٪) تا سیستم پرش نکند. */
     const val MAX_STEP_FACTOR: Double = 0.20
 
+    /** آستانهٔ هشدار شوک خبری (قدرت مطلق شوک) برای اضافه‌شدن هشدار به پیش‌بینی نماد. */
+    const val NEWS_SHOCK_WARN: Double = 0.35
+
+    /** آستانهٔ احساس خبری نماد که «جهت‌دهنده» شمرده می‌شود. */
+    const val NEWS_SENTIMENT_WARN: Double = 0.25
+
     /** اگر یک شرط در بیش از این سهم از معاملات باخته رد شده باشد، «گلوگاه سیستماتیک» است. */
     const val BOTTLENECK_SHARE: Double = 0.55
 
@@ -89,6 +95,10 @@ object AiTraderEngine {
         reportsBySymbol: Map<String, List<StrategyEvaluationReport>>,
         maxSymbols: Int = 15,
         nowMillis: Long = System.currentTimeMillis(),
+        /** وضعیت خبری/ماکرو اخیر؛ اگر خالی باشد رفتار دقیقاً مثل قبل است. */
+        newsSnapshot: NeuralMacroNewsSnapshot? = null,
+        /** انتساب علیّ بازار برای هر نماد (خروجی موتور عصبی). */
+        attributions: List<NeuralMarketCausalAttribution> = emptyList(),
     ): List<SymbolConditionsForecast> {
         val out = ArrayList<SymbolConditionsForecast>()
         for ((symbol, reports) in reportsBySymbol) {
@@ -106,7 +116,7 @@ object AiTraderEngine {
             val proximity = round((passed.toDouble() / total.toDouble()) * 100.0 * 10.0) / 10.0
 
             val blockers = failed.take(3).map { "${it.titleFa} — ${it.detailFa}" }
-            val emerging = buildList {
+            val technicalLines = buildList {
                 if (best.riskReward != null && best.riskReward >= MIN_RR) {
                     add(
                         String.format(
@@ -147,6 +157,48 @@ object AiTraderEngine {
                     add("ماشه فعال است: ${best.triggerType.titleFa}")
                 }
             }
+
+            // اخبار به‌صورت فهرست جدا ساخته می‌شوند تا اگر هیچ خبری نبود، خروجی تکنیکال
+            // دست‌نخورده و بدون هیچ خط اضافه‌ای بماند.
+            val newsLines = ArrayList<String>()
+            // ── لایهٔ خبری: شرایط نماد **پیش از** معامله باید از خبر هم اثر بگیرد ──
+            // تا اینجا پیش‌بینی فقط تکنیکال بود. کاربر خواست «شرایط هر نماد بر اساس هوش خبری
+            // پیش از نزدیک شدن معامله ساخته شود». هرچه اینجا اضافه می‌شود متن اندازه‌گیری‌شدهٔ
+            // موتور عصبی است، نه حدس: اگر خبری نباشد، هیچ خطی اضافه نمی‌شود.
+            newsSnapshot?.let { snap ->
+                val attribution = attributions.firstOrNull { V1Universe.normalize(it.symbol) == V1Universe.normalize(symbol) }
+                if (snap.isHighImpactNewsWindow) {
+                    newsLines += "📰 پنجرهٔ خبری پراثر فعال است — نوسان ناگهانی و گپ ممکن است پلن را بشکند"
+                }
+                if (abs(snap.shockIntensity) >= NEWS_SHOCK_WARN) {
+                    newsLines += String.format(
+                        java.util.Locale.US,
+                        "🌊 شدت شوک خبری %.2f (آستانهٔ هشدار %.2f) — اندازهٔ پوزیشن باید محافظه‌کارانه باشد",
+                        snap.shockIntensity,
+                        NEWS_SHOCK_WARN,
+                    )
+                }
+                if (snap.activeMacroCatalystFa.isNotBlank() &&
+                    !snap.activeMacroCatalystFa.contains("بدون شوک")
+                ) {
+                    newsLines += "🗞️ کاتالیز فعال: ${snap.activeMacroCatalystFa}"
+                }
+                attribution?.let { attr ->
+                    if (abs(attr.newsSentimentScore) >= NEWS_SENTIMENT_WARN) {
+                        val dirFa = if (attr.newsSentimentScore > 0) "مثبت" else "منفی"
+                        newsLines += String.format(
+                            java.util.Locale.US,
+                            "📊 احساس خبری %s %.2f برای همین نماد — %s",
+                            dirFa,
+                            abs(attr.newsSentimentScore),
+                            if (attr.recommendedTacticalActionFa.isNotBlank()) attr.recommendedTacticalActionFa
+                            else "جهت خبر با جهت تکنیکال سنجیده شود",
+                        )
+                    }
+                }
+            }
+            // خبر بعد از شواهد تکنیکال می‌آید تا ترتیب «چه می‌بینم → چه خبری هست» حفظ شود.
+            val emerging = technicalLines + newsLines
 
             // گام بعدی معامله‌گر بر پایهٔ آمادگی
             val action = when {

@@ -1448,9 +1448,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             _dualSymbolStrategyReports.value.mapValues { (_, dual) ->
                 dual.reports15mByStrategy.values.toList() + dual.reports5mByStrategy.values.toList()
             }
+        // وضعیت خبری/ماکرو و انتساب علیّ از همان موتور عصبی می‌آید؛ پیش‌بینی نمادها باید از خبر
+        // هم اثر بگیرد، نه فقط از تکنیکال. اگر خبری نباشد، این ورودی‌ها خالی‌اند و رفتار خنثی است.
+        val neuralSummaryNow = container.neuralEngine.state.value
         val forecasts = AiTraderEngine.forecastEmergingConditions(
             reportsBySymbol = reportsBySymbol,
             nowMillis = now,
+            newsSnapshot = neuralSummaryNow.latestNewsSnapshot,
+            attributions = neuralSummaryNow.liveMarketAttributions,
         )
         _aiTraderForecasts.value = forecasts
 
@@ -1485,7 +1490,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
 
         // ── ۳. ماتریس برتری و توزیع بودجهٔ ریسک ──
-        val summary = container.neuralEngine.state.value
+        val summary = neuralSummaryNow
         val matrix = AiTraderEngine.buildEdgeMatrix(summary.strategyEdgeMatrix)
         _aiTraderMatrix.value = matrix
 
