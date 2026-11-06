@@ -220,7 +220,7 @@ object BacktestReplayEngine {
             // ۱. مدیریت معاملهٔ باز پیش از تصمیم جدید — با قیمت‌های همین کندل.
             for (state in states.values) {
                 val open = state.openTrade ?: continue
-                state.openTrade = manageOpenTrade(
+                val closed = manageOpenTrade(
                     open = open,
                     bar = bar,
                     now = now,
@@ -237,7 +237,9 @@ object BacktestReplayEngine {
                             symbolInput = config.symbol,
                         )
                     },
-                )?.also { closed ->
+                )
+                if (closed != null) {
+                    state.openTrade = null
                     allTrades += closed
                     equity += closed.netPnlUsd
                     equityPoints += ((closed.exitTime ?: now) to equity)

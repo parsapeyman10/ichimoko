@@ -80,9 +80,8 @@ internal fun BacktestCandleChart(
     val startIndex = (safeEnd - safeCount).coerceAtLeast(0)
     val slice = candles.subList(startIndex, safeEnd)
 
-    val ichimoku = remember(slice, showIchimoku) {
-        if (!showIchimoku || slice.size < 60) emptyList()
-        else buildIchimokuLines(slice)
+    val ichimoku: IchimokuLines? = remember(slice, showIchimoku) {
+        if (!showIchimoku || slice.size < 60) null else buildIchimokuLines(slice)
     }
 
     Canvas(
@@ -181,7 +180,7 @@ private object BasePeriods {
 private fun DrawScope.drawChart(
     slice: List<Candle>,
     startIndex: Int,
-    ichimoku: List<IchimokuLines>,
+    ichimoku: IchimokuLines?,
     trades: List<BacktestReplayEngine.Trade>,
     textMeasurer: TextMeasurer,
     highlightIndex: Int,
@@ -197,7 +196,7 @@ private fun DrawScope.drawChart(
     // محدودهٔ قیمت: کندل‌ها + ابر آینده تا از کادر بیرون نزند.
     var minPrice = slice.minOf { it.low }
     var maxPrice = slice.maxOf { it.high }
-    ichimoku.firstOrNull()?.let { lines ->
+    ichimoku?.let { lines ->
         lines.spanA.forEach { v -> if (v != null) { if (v < minPrice) minPrice = v; if (v > maxPrice) maxPrice = v } }
         lines.spanB.forEach { v -> if (v != null) { if (v < minPrice) minPrice = v; if (v > maxPrice) maxPrice = v } }
     }
@@ -235,7 +234,7 @@ private fun DrawScope.drawChart(
     }
 
     // ابر کومو
-    ichimoku.firstOrNull()?.let { lines ->
+    ichimoku?.let { lines ->
         val cloudPath = Path()
         var started = false
         for (i in slice.indices) {

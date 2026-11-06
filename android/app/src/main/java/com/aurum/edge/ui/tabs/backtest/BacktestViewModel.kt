@@ -70,7 +70,7 @@ class BacktestViewModel(
     val statusFa: StateFlow<String> = _statusFa.asStateFlow()
 
     private val _toast = MutableSharedFlow<String>(extraBufferCapacity = 4)
-    val toast: MutableSharedFlow<String> = _toast.asSharedFlow()
+    val toast: kotlinx.coroutines.flow.SharedFlow<String> = _toast.asSharedFlow()
 
     /** تنظیمات اجرای بک‌تست (همه در حافظه؛ هیچ‌کدام در تنظیمات برنامه نوشته نمی‌شود). */
     data class Settings(

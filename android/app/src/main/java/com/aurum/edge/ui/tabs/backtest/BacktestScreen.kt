@@ -622,7 +622,7 @@ private fun StatsGrid(stats: BacktestReplayEngine.Stats, startEquity: Double) {
 }
 
 @Composable
-private fun MiniStat(label: String, value: String, color: Color) {
+private fun androidx.compose.foundation.layout.RowScope.MiniStat(label: String, value: String, color: Color) {
     Column(
         modifier = Modifier
             .weight(1f)
