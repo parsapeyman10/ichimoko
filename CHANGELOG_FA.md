@@ -17,6 +17,10 @@
   `forcePublish`/`trackedKeys`، `formatTime`/`relativeTime`/`ConfluenceRow` و شش عملیات بی‌استفادهٔ
   `AurumViewModel` (شامل بقایای آرشیو تصویری).
 - **فایل مرده:** `data/HistorySourceSelection.kt` (نه ثبت می‌شد، نه خوانده می‌شد) حذف شد.
+- **`core/AppResourceGovernor.kt` هم رفت:** تنها مصرف‌کنندهٔ واقعی‌اش مسیر تصویری بود که وجود ندارد؛
+  بعد از حذف آن، تنها «مصرف‌کننده» یک تستِ خودارزیاب بود. سه فیلد رندر (`maxConcurrentRenders`،
+  `renderScale`، `archiveBatch`) و دو تست مربوط هم پاک شدند — تستی که فقط ثابت می‌کند یک کد
+  بی‌مصرف درست کار می‌کند، خودش بیکار است.
 - **قراردادهای دادهٔ بی‌مصرف:** `Signal`، `ConfluenceItem`، `ConfluenceStatus` (هر سه فقط
   نوشته/تعریف می‌شدند و هیچ‌جا خوانده نمی‌شدند)؛ فیلدهای `bid`/`ask`/`evaluationError`/
   `sourceIntegrityRevision`/`historyProvider`/`lastTradePrice` در `MarketState`؛
