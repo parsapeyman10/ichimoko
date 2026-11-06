@@ -284,10 +284,11 @@ class BacktestEngineTest {
 
     @Test
     fun `fee is charged on both sides so a flat price is still a small loss`() {
+        // توقف زمانی با «گذشت کندل» کار می‌کند، پس زمان باید یک تایم‌فریم جلو رفته باشد.
         val flat = com.aurum.edge.core.BacktestReplayEngine.manageOpenTrade(
             open = openBuy(100.0, 98.0, 104.0),
-            bar = bar(0L, 100.0, 100.2, 99.8, 100.0),
-            now = 1_000L,
+            bar = bar(Interval.M15.millis, 100.0, 100.2, 99.8, 100.0),
+            now = Interval.M15.millis + Interval.M15.millis,
             config = BacktestReplayEngine.Config(useTimeStop = true, maxHoldBars = 1),
             reportForBar = { failReport() },
         )
