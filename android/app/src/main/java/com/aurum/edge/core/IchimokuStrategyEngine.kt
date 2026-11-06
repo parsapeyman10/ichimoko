@@ -271,6 +271,27 @@ enum class BitcoinStrategyModel(
         baseOptimalRr = 2.15,
         requiresExplicitOptIn = true,
         neuralLearningEnabled = false,
+    ),
+    HIDDEN_CROSS(
+        id = "HIDDEN_CROSS",
+        titleFa = "هیدن کراس · کراس برابری، تاج و ابر مخفی",
+        badgeFa = "هیدن کراس · ابر مخفی + تاج",
+        authorRefFa = "روش مستقل هیدن کراس · ابر مخفی تنکان/کیجون، کراس برابری و تاج نصف‌اندازه",
+        summaryFa = "دو مفهوم کمترشناخته‌شدهٔ ایچیموکو در یک روش: ۱) «ابر مخفی» یعنی نوارِ بین تنکان و کیجون؛ " +
+            "این نوار وقتی باریک شود، مرز واقعی تعادل است و جایگاه قیمت نسبت به آن جهت معامله را می‌سازد. " +
+            "۲) «کراس برابری» یعنی جایی که تنکان و کیجون دست‌کم چند کندل روی هم می‌افتند؛ اندازهٔ همین هم‌پوشانی " +
+            "نصف می‌شود و از سطح کراس در جهت شکست امتداد می‌یابد و سطح «تاج» را می‌سازد که هدف اول است. " +
+            "۳) ابر مخفی جهت را می‌دهد و کراس برابری هدف را؛ اگر جهت با ابر مخفی روشن نشود هیچ ورودی صادر نمی‌شود. " +
+            "۴) برای ابر مخفی، جست‌وجوی آنالوگ تاریخی انجام می‌شود: هندسهٔ نوارِ فعلی با نمونه‌های گذشته مقایسه و " +
+            "رفتار نمونه‌ها (تعداد نمونه، میانگین حرکت بر حسب ATR و سهم هم‌جهت) گزارش می‌شود؛ اگر نمونهٔ کافی نباشد " +
+            "هیچ احتمالی اعلام نمی‌شود. ۵) حد ضرر زیر/بالای نوار ابر مخفی و حد سود روی تاج یا سطح برابری قفل می‌شود.",
+        hasPatel = false,
+        hasTuttle = false,
+        hasHosoda = false,
+        hasPeloille = false,
+        baseOptimalRr = 2.00,
+        requiresExplicitOptIn = true,
+        neuralLearningEnabled = false,
     );
 
     val isDrivePdfStrategy: Boolean
@@ -405,6 +426,40 @@ fun BitcoinStrategyModel.driveBookPlaybook(): DriveBookPlaybookSpec = when (this
         specialEdgeAdvantageFa = "شرط ۱۸+ کندلی SSB، چرخش Senkou A و کراس TK همگی لازم‌اند؛ روش از یادگیری، گیت و تیونینگ عصبی مستثناست.",
     )
 
+    BitcoinStrategyModel.HIDDEN_CROSS -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "هیدن کراس · کراس برابری، سطح تاج و ابر مخفی",
+        authorAndEdition = "قواعد اختصاصی هیدن کراس · Ichimoku 9/26/52 + نرمال‌سازی ATR",
+        ichimokuSettingsFa = "ایچیموکوی استاندارد (9, 26, 52). بُردارِ محاسبه، نوارِ بین تنکان و کیجون است " +
+            "(«ابر مخفی») و آستانهٔ برابری ۰٫۰۶ ATR برای هر کندل. عبور از آستانه با میانگین واقعی ATR(14) " +
+            "همان کندل سنجیده می‌شود تا در تایم‌فریم‌های پرسروصداتر خودبه‌خود بازتر شود.",
+        auxiliaryIndicatorsFa = "ضخامت و شیب نوار تنکان/کیجون بر حسب ATR، طول و اندازهٔ «کراس برابری»، " +
+            "سطح «تاج» (نصف اندازهٔ کراس)، و جست‌وجوی آنالوگ تاریخی: بردار شکل ۸ کندلی نوار " +
+            "با نمونه‌های گذشته مقایسه و رفتار ۱۰ کندل بعدِ نزدیک‌ترین نمونه‌ها شمرده می‌شود.",
+        entryChecklistStepsFa = listOf(
+            "۱. جهت با ابر مخفی: قیمت باید بیرون از نوار تنکان/کیجون و هم‌جهت با ترتیب تنکان/کیجون باشد " +
+                "(بالای نوار + تنکان بالای کیجون = خرید). قیمتِ داخل نوار یعنی بی‌تصمیمی؛ ورود ممنوع.",
+            "۲. نوار باید «باریک» باشد (ضخامت ≤ ۰٫۵۵ ATR) و شیبش خلاف جهت معامله نباشد؛ نوارِ بازشده دیگر ابر مخفی نیست.",
+            "۳. کراس برابری: دست‌کم ۳ کندل هم‌پوشانی تنکان/کیجون با فاصلهٔ ≤ ۰٫۰۶ ATR باید وجود داشته باشد و " +
+                "کراس در ۳۰ کندل اخیر تمام شده باشد (کراس کهنه ارزش ماشه ندارد).",
+            "۴. هم‌جهتی: جهت شکست کراس برابری و سمت قیمت نسبت به سطح برابری باید با جهت ابر مخفی یکی باشد.",
+            "۵. تأیید آماری: اگر نمونهٔ آنالوگ کافی باشد (≥ ۶ نمونه)، میانگین حرکت نمونه‌ها و سهم هم‌جهت " +
+                "(≥ ۵۵٪) باید جهت ابر مخفی را تأیید کند؛ در نبود نمونه، ادعای احتمالی مطرح نمی‌شود و تصمیم " +
+                "فقط بر پایهٔ ابر مخفی و کراس می‌ماند.",
+            "۶. هدف روی «تاج» یا سطح برابری در مسیر قیمت قفل می‌شود و R:R باید در دالان ۱٫۵ تا ۳٫۰ بماند؛ " +
+                "در غیر این صورت فقط انتظار.",
+        ),
+        stopLossFormulaFa = "پشت نوار ابر مخفی (پایین نوار برای خرید، بالای نوار برای فروش) با بافر ATR؛ " +
+            "اگر این سنگر به ورود چسبیده باشد، روی ساختار اخیرِ ۵ کندلی سقوط می‌کند و در پایان " +
+            "اعتبارسنجی اجباری TradePlanGuard اجرا می‌شود.",
+        takeProfitAndExitRulesFa = "هدف اول سطح «تاج» (سطح کراس + نصف اندازهٔ کراس در جهت شکست) یا " +
+            "سطح برابری نزدیک‌تر در مسیر؛ اگر تاجی در دالان ۱٫۵R..۳٫۰R نبود، هدف موج هوسودا با همان قید R:R. " +
+            "خروج هوشمند فقط پس از عبور سود باز از ۲R.",
+        specialEdgeAdvantageFa = "جهت از ابر مخفی و هدف از کراس برابری می‌آید — دو مفهوم متفاوت که " +
+            "معمولاً با هم اشتباه می‌شوند. جست‌وجوی آنالوگ، خروجی را از «حس» به «اندازه‌گیری» می‌برد: " +
+            "تعداد نمونه و سهم هم‌جهت همیشه گزارش می‌شوند و روش از یادگیری عصبی مستثناست.",
+    )
+
     BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> DriveBookPlaybookSpec(
         strategyId = id,
         bookFileTitle = "Elliott Wave + NeoWave Geometry — استراتژی پیمان (نسخهٔ الیوت)",
@@ -468,6 +523,27 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
             trigSnap.compressionRatio26,
             if (if (isLong) trigSnap.chikouBullishOpenSpace else trigSnap.chikouBearishOpenSpace) "آزاد" else "درگیر",
         )
+        BitcoinStrategyModel.HIDDEN_CROSS -> String.format(
+            Locale.US,
+            "ابر مخفی: %.2f..%.2f (%.2f ATR) · شیب=%+.2f ATR/کندل · کراس برابری=%s · تاج=%s · آنالوگ=%s",
+            trigSnap.hiddenCloudBottom,
+            trigSnap.hiddenCloudTop,
+            trigSnap.hiddenCloudThicknessAtr,
+            trigSnap.hiddenCloudSlopeAtrPerBar,
+            if (trigSnap.equalCrossLevel > 0.0) {
+                String.format(Locale.US, "%.2f (%d کندل)", trigSnap.equalCrossLevel, trigSnap.equalCrossBars)
+            } else "شکل نگرفته",
+            if (trigSnap.crownLevel > 0.0) IchimokuStrategyEngine.round2(trigSnap.crownLevel).toString() else "—",
+            if (trigSnap.hiddenCloudAnalogueSamples > 0) {
+                String.format(
+                    Locale.US,
+                    "%d نمونه · %+.2f ATR · هم‌جهت %.0f%%",
+                    trigSnap.hiddenCloudAnalogueSamples,
+                    trigSnap.hiddenCloudAnalogueForwardAtr,
+                    trigSnap.hiddenCloudAnalogueAgreement * 100.0,
+                )
+            } else "نمونهٔ کافی نیست",
+        )
         BitcoinStrategyModel.PARSA_52_LINE_TURN -> String.format(
             Locale.US,
             "SSB فلت=%d کندل · شیب SSA=%+.2f ATR · کراس TK=%s · فاصله TK=%.2f ATR · Chikou=%s",
@@ -504,7 +580,14 @@ data class PerStrategyConfigOverride(
     val minVolumeRatio20: Double = 0.60,
     val maxAdverseWickRatio: Double = 0.45,
     val minFutureKumoThicknessAtr: Double = 0.05,
+    /**
+     * حداقل فاصله برای «مسلح شدن» نقطه‌زنی (معنای اصلی پارامتر).
+     * توجه: تا پیش از این، همین مقدار به‌عنوان **سقف** در شرط ۱۶ استفاده می‌شد و
+     * «نقطه‌زنی میلی‌متری» را تا ۰٫۶۵ ATR شل می‌کرد. سقف واقعی اکنون [maxSniperDistanceAtr] است.
+     */
     val minSniperDistanceAtr: Double = 0.65,
+    /** سقف فاصلهٔ مجاز ورود از نقطهٔ بهینه (شرط ۱۶ · Sniper Pocket). */
+    val maxSniperDistanceAtr: Double = 0.35,
     val minDriveBooksConsensus: Int = 6,
 )
 
@@ -555,6 +638,12 @@ data class BaseStrategyConfig(
     val maxAdverseWickRatio: Double = 0.45,
     val minFutureKumoThicknessAtr: Double = 0.05,
     val minSniperDistanceAtr: Double = 0.65,
+    /**
+     * سقف فاصلهٔ مجاز ورود از نقطهٔ بهینه (شرط ۱۶ · Sniper Pocket).
+     * قبلاً همین پارامتر «حداقل» به‌اشتباه به‌عنوان سقف استفاده می‌شد و ورود تا ۰٫۶۷ ATR دور را
+     * «نقطه‌زنی میلی‌متری» می‌شمرد؛ اکنون سقف جدا و سخت‌گیرانه است.
+     */
+    val maxSniperDistanceAtr: Double = 0.35,
     val minDriveBooksConsensus: Int = 6,
     /** لایهٔ اختیاری نئوویو (NeoWave). پیش‌فرض خاموش ⇒ خروجی موتور بدون تغییر. */
     val neoWaveEnabled: Boolean = false,
@@ -695,6 +784,15 @@ data class CustomStrategySlot(
 /**
  * خروجی محاسبه دقیق ۵ خط ایچیموکو + اندیکاتورهای ۹ لایهٔ تحلیلی روی یک تایم‌فریم مشخص.
  */
+/** کراس برابری داخلی که هنگام ساخت snapshot استخراج می‌شود. */
+private data class HiddenEqualCrossRaw(
+    val level: Double,
+    val bars: Int,
+    val sizeAtr: Double,
+    val barsSinceEnd: Int,
+    val bullishBreakout: Boolean,
+)
+
 data class IchimokuBarSnapshot(
     val time: Long,
     val open: Double,
@@ -798,6 +896,39 @@ data class IchimokuBarSnapshot(
     val hasBearishCandlestickPattern: Boolean = close <= open,
     val kellySignalCount: Int = 4,
     val kellyWinProbabilityPercent: Int = 69,
+    // ── لایهٔ «هیدن کراس / ابر مخفی» (نوار تنکان-کیجون، کراس برابری و تاج) ──
+    /** سقف نوار ابر مخفی = بیشترِ تنکان و کیجون. */
+    val hiddenCloudTop: Double = max(tenkan, kijun),
+    /** کف نوار ابر مخفی = کمترِ تنکان و کیجون. */
+    val hiddenCloudBottom: Double = min(tenkan, kijun),
+    /** ضخامت نوار بر حسب ATR14. */
+    val hiddenCloudThicknessAtr: Double = if (atr14 > 0.0) abs(tenkan - kijun) / atr14 else 0.0,
+    /** شیب میانهٔ نوار بر حسب ATR در هر کندل (مقایسه با ۳ کندل قبل). */
+    val hiddenCloudSlopeAtrPerBar: Double = 0.0,
+    /** آیا ضخامت نوار در محدودهٔ «تعادل» است (≤ ۰٫۵۵ ATR) و ابر مخفی معتبر می‌شود. */
+    val isHiddenCloudBalanced: Boolean = false,
+    /** سطح «کراس برابری» فعال (تنکان ≈ کیجون برای چند کندل)؛ صفر یعنی شکل نگرفته است. */
+    val equalCrossLevel: Double = 0.0,
+    /** تعداد کندل هم‌پوشانی کراس برابری فعال. */
+    val equalCrossBars: Int = 0,
+    /** اندازهٔ کراس برابری فعال (بیشترین فاصلهٔ تنکان/کیجون در پنجره) بر حسب ATR. */
+    val equalCrossSizeAtr: Double = 0.0,
+    /** چند کندل از پایان هم‌پوشانی گذشته است. */
+    val equalCrossBarsSinceEnd: Int = 0,
+    /** سطح «تاج» حاصل از کراس برابری (نصف اندازهٔ کراس، امتداد در جهت شکست). */
+    val crownLevel: Double = 0.0,
+    /** نزدیک‌ترین تاج در مسیر معامله (فقط سطوح روبروی قیمت)؛ صفر یعنی مانعی در مسیر نیست. */
+    val nearestCrownLevel: Double = 0.0,
+    /** فاصلهٔ نزدیک‌ترین تاج بر حسب ATR. */
+    val nearestCrownDistanceAtr: Double = 0.0,
+    /** شمار «کراس‌های برابری» یافت‌شده در پنجرهٔ تاریخی ارزیابی. */
+    val equalCrossCount: Int = 0,
+    /** شمار نمونه‌های آنالوگ تاریخی هم‌شکل با ابر مخفی فعلی. */
+    val hiddenCloudAnalogueSamples: Int = 0,
+    /** میانگین حرکت نمونه‌های آنالوگ در افق آینده بر حسب ATR (علامت = جهت). */
+    val hiddenCloudAnalogueForwardAtr: Double = 0.0,
+    /** سهم نمونه‌های آنالوگ هم‌جهت (۰..۱). */
+    val hiddenCloudAnalogueAgreement: Double = 0.0,
 ) {
     val kumoTop: Double get() = max(currentSpanA, currentSpanB)
     val kumoBottom: Double get() = min(currentSpanA, currentSpanB)
@@ -883,6 +1014,7 @@ enum class StrategyTriggerType(val titleFa: String) {
     SANYAKU_TK_CONTINUATION("ماشه ۳: ادامه موج سوم سانیاکو با تایید ۳ کندلی کارن پلویل"),
     BTC_52_STRUCTURE_BREAK("شکست/بازآزمایی ساختار ۵۲ کندلی بیت‌کوین"),
     PARSA_52_LINE_TURN("چرخش Senkou A پس از فلت ۱۸+ کندلی SSB و کراس Tenkan/Kijun"),
+    HIDDEN_CROSS("کراس برابری تنکان/کیجون هم‌جهت با ابر مخفی و شکست سطح تاج"),
     NONE("در انتظار ماشهٔ بسته‌شده"),
 }
 
@@ -961,23 +1093,6 @@ object Smart15mSyncPlanner {
         val period = triggerInterval.millis
         val currentBucket = currentCandleBucket(nowMillis, triggerInterval)
         return (currentBucket + 1L) * period + CANDLE_SETTLE_DELAY_MS
-    }
-
-    /**
-     * زمان چک میان‌کندلی (دقیقه ۷:۳۰ برای کندل ۱۵ دقیقه) جهت نمادهایی که ۴ یا ۵ شرط از ۶ شرط را دارند.
-     */
-    fun nextMidBarOrBoundaryCheckMillis(
-        nowMillis: Long,
-        triggerInterval: Interval = Interval.M15,
-    ): Long {
-        val period = triggerInterval.millis
-        val bucketStart = currentCandleBucket(nowMillis, triggerInterval) * period
-        val midPoint = bucketStart + (period / 2L) + CANDLE_SETTLE_DELAY_MS
-        return if (nowMillis < midPoint) {
-            midPoint
-        } else {
-            nextTriggerBoundaryCheckMillis(nowMillis, triggerInterval)
-        }
     }
 
     /**
@@ -1082,6 +1197,12 @@ data class PreserveModeEvaluation(
     val lockedRMultiple: Double = 0.0,
     val shouldCloseImmediatelyInProfit: Boolean = false,
     val closePrice: Double? = null,
+    /** حد ضرر جدیدی که باید روی معاملهٔ باز نوشته شود (ریسک‌فری/تریل). `null` = بدون تغییر. */
+    val updatedStopLoss: Double? = null,
+    /** حد سود بازنویسی‌شده (اگر فاصلهٔ هدف با حد ضرر جدید جابه‌جا شود). `null` = بدون تغییر. */
+    val updatedTakeProfit: Double? = null,
+    /** برچسب کوتاه مرحله: `BE` (ریسک‌فری) یا `TRAIL` (تریل). */
+    val stopStageTag: String = "",
 )
 
 enum class OpenTradeTrendState(val badgeFa: String, val summaryFa: String) {
@@ -1773,6 +1894,148 @@ object IchimokuStrategyEngine {
             else -> 76
         }
 
+        // ── ۸. لایهٔ هیدن کراس: ابر مخفی (نوار تنکان/کیجون)، کراس برابری و سطح تاج ──
+        // هندسهٔ نوار برای هر کندل نرمال می‌شود تا آستانه‌ها در تایم‌فریم‌های مختلف یکسان بمانند.
+        val hiddenCloudTop = max(tenkan, kijun)
+        val hiddenCloudBottom = min(tenkan, kijun)
+        val hiddenCloudMid = (hiddenCloudTop + hiddenCloudBottom) / 2.0
+        val hiddenCloudThicknessAtr = (hiddenCloudTop - hiddenCloudBottom) / atr14
+        val hiddenCloudPrevIdx = (lastIdx - 3).coerceAtLeast(0)
+        val hiddenCloudPrevMid = (max(tenkanAt(hiddenCloudPrevIdx), kijunAt(hiddenCloudPrevIdx)) +
+            min(tenkanAt(hiddenCloudPrevIdx), kijunAt(hiddenCloudPrevIdx))) / 2.0
+        val hiddenCloudSlopeAtrPerBar = (hiddenCloudMid - hiddenCloudPrevMid) /
+            (3.0 * atr14.coerceAtLeast(1e-8))
+        val isHiddenCloudBalanced = hiddenCloudThicknessAtr <= HiddenCrossEngine.HIDDEN_CLOUD_MAX_THICKNESS_ATR
+
+        fun atrAt(idx: Int): Double {
+            // ATR محلی همان کندل برای آستانهٔ برابری؛ با میانگین TR کوتاه محاسبه می‌شود.
+            var sum = 0.0
+            var count = 0
+            for (k in (idx - atrPeriod + 1).coerceAtLeast(0)..idx) {
+                val b = closedBars[k]
+                val pc = closedBars[(k - 1).coerceAtLeast(0)].close
+                sum += maxOf(b.high - b.low, abs(b.high - pc), abs(b.low - pc))
+                count++
+            }
+            return (sum / count.coerceAtLeast(1)).coerceAtLeast(closedBars[idx].close * 0.0005)
+        }
+
+        fun equalTolerance(idx: Int): Double =
+            atrAt(idx) * HiddenCrossEngine.EQUAL_CROSS_TOLERANCE_ATR *
+                (config.kijunPeriod.toDouble() / 26.0).coerceIn(0.75, 1.35)
+
+        // پیمایش کامل پنجره برای یافتن «کراس‌های برابری» (هم‌پوشانی تنکان/کیجون).
+        val rawEqualCrosses = ArrayList<HiddenEqualCrossRaw>()
+        var scanIdx = 0
+        while (scanIdx <= lastIdx) {
+            if (abs(tenkanAt(scanIdx) - kijunAt(scanIdx)) > equalTolerance(scanIdx)) {
+                scanIdx++
+                continue
+            }
+            var endIdx = scanIdx
+            var maxGap = abs(tenkanAt(scanIdx) - kijunAt(scanIdx))
+            var levelSum = 0.0
+            var levelCount = 0
+            while (endIdx <= lastIdx && abs(tenkanAt(endIdx) - kijunAt(endIdx)) <= equalTolerance(endIdx)) {
+                maxGap = max(maxGap, abs(tenkanAt(endIdx) - kijunAt(endIdx)))
+                levelSum += (tenkanAt(endIdx) + kijunAt(endIdx)) / 2.0
+                levelCount++
+                endIdx++
+            }
+            val length = endIdx - scanIdx
+            if (length >= HiddenCrossEngine.MIN_EQUAL_CROSS_BARS) {
+                val level = levelSum / levelCount.coerceAtLeast(1)
+                val sizeAtr = maxGap / atrAt(scanIdx)
+                var bullish = closeNow >= level
+                for (k in endIdx..lastIdx) {
+                    if (closedBars[k].close > level && tenkanAt(k) > kijunAt(k)) {
+                        bullish = true
+                        break
+                    }
+                    if (closedBars[k].close < level && tenkanAt(k) < kijunAt(k)) {
+                        bullish = false
+                        break
+                    }
+                }
+                rawEqualCrosses += HiddenEqualCrossRaw(
+                    level = level,
+                    bars = length,
+                    sizeAtr = sizeAtr,
+                    barsSinceEnd = lastIdx - (endIdx - 1),
+                    bullishBreakout = bullish,
+                )
+            }
+            scanIdx = max(endIdx, scanIdx + 1)
+        }
+        val activeEqualCross = rawEqualCrosses.lastOrNull()
+        val crownPriceOfActive = activeEqualCross?.let { cross ->
+            val extension = atrAt((lastIdx - cross.barsSinceEnd).coerceIn(0, lastIdx)) *
+                cross.sizeAtr * HiddenCrossEngine.CROWN_EXTENSION_RATIO
+            if (cross.bullishBreakout) cross.level + extension else (cross.level - extension).coerceAtLeast(0.0)
+        } ?: 0.0
+        // نزدیک‌ترین «تاج» روبروی قیمت (در جهت معامله) به‌عنوان هدف اول.
+        val isLongBias = closeNow >= kijun
+        val crownCandidates = rawEqualCrosses.takeLast(6).flatMap { cross ->
+            val extension = atrAt((lastIdx - cross.barsSinceEnd).coerceIn(0, lastIdx)) *
+                cross.sizeAtr * HiddenCrossEngine.CROWN_EXTENSION_RATIO
+            val crown = if (cross.bullishBreakout) cross.level + extension else (cross.level - extension).coerceAtLeast(0.0)
+            listOf(cross.level, crown)
+        }.filter { it.isFinite() && it > 0.0 }
+            .filter { level -> if (isLongBias) level > closeNow + atr14 * 0.05 else level < closeNow - atr14 * 0.05 }
+        val nearestCrownLevel = crownCandidates.minByOrNull { abs(it - closeNow) } ?: 0.0
+        val nearestCrownDistanceAtr = if (nearestCrownLevel > 0.0) abs(nearestCrownLevel - closeNow) / atr14 else 0.0
+
+        // ── جست‌وجوی آنالوگ تاریخی برای ابر مخفی ──
+        // بردار شکل: برای هر کندلِ پنجره، (کلوز − میانهٔ نوار)/ATR و ضخامت نوار/ATR.
+        val analogueWindow = HiddenCrossEngine.ANALOGUE_WINDOW
+        val analogueHorizon = HiddenCrossEngine.ANALOGUE_HORIZON
+        var analogueSamples = 0
+        var analogueForwardAtr = 0.0
+        var analogueAgreement = 0.0
+        if (lastIdx >= analogueWindow + analogueHorizon + 5) {
+            val currentShape = DoubleArray(analogueWindow * 2)
+            for (k in 0 until analogueWindow) {
+                val idx = lastIdx - analogueWindow + 1 + k
+                val a = atrAt(idx)
+                val topAt = max(tenkanAt(idx), kijunAt(idx))
+                val botAt = min(tenkanAt(idx), kijunAt(idx))
+                currentShape[k * 2] = (closedBars[idx].close - (topAt + botAt) / 2.0) / a
+                currentShape[k * 2 + 1] = (topAt - botAt) / a
+            }
+            val distances = ArrayList<Pair<Double, Int>>()
+            val oldestEnd = max(analogueWindow, lastIdx - HiddenCrossEngine.ANALOGUE_LOOKBACK)
+            for (endPointer in oldestEnd..(lastIdx - analogueHorizon - 1)) {
+                var distance = 0.0
+                var validShape = true
+                for (k in 0 until analogueWindow) {
+                    val idx = endPointer - analogueWindow + 1 + k
+                    val a = atrAt(idx)
+                    val topAt = max(tenkanAt(idx), kijunAt(idx))
+                    val botAt = min(tenkanAt(idx), kijunAt(idx))
+                    val d1 = (closedBars[idx].close - (topAt + botAt) / 2.0) / a - currentShape[k * 2]
+                    val d2 = (topAt - botAt) / a - currentShape[k * 2 + 1]
+                    distance += d1 * d1 + d2 * d2
+                    if (!distance.isFinite()) {
+                        validShape = false
+                        break
+                    }
+                }
+                if (validShape) distances += distance to endPointer
+            }
+            val nearest = distances.sortedBy { it.first }.take(HiddenCrossEngine.ANALOGUE_MIN_SAMPLES * 2)
+            if (nearest.isNotEmpty()) {
+                val forwards = nearest.map { (_, idx) ->
+                    (closedBars[idx + analogueHorizon].close - closedBars[idx].close) / atrAt(idx)
+                }
+                val meanForward = forwards.average()
+                analogueSamples = nearest.size
+                analogueForwardAtr = meanForward
+                analogueAgreement = forwards.count {
+                    if (meanForward >= 0.0) it > 0.0 else it < 0.0
+                }.toDouble() / nearest.size.toDouble()
+            }
+        }
+
         return IchimokuBarSnapshot(
             time = cur.time,
             open = cur.open,
@@ -1871,6 +2134,22 @@ object IchimokuStrategyEngine {
             hasBearishCandlestickPattern = hasBearCandlePattern,
             kellySignalCount = clampedKellySignals,
             kellyWinProbabilityPercent = kellyWinProb,
+            hiddenCloudTop = round2(hiddenCloudTop),
+            hiddenCloudBottom = round2(hiddenCloudBottom),
+            hiddenCloudThicknessAtr = round2(hiddenCloudThicknessAtr),
+            hiddenCloudSlopeAtrPerBar = round2(hiddenCloudSlopeAtrPerBar),
+            isHiddenCloudBalanced = isHiddenCloudBalanced,
+            equalCrossLevel = round2(activeEqualCross?.level ?: 0.0),
+            equalCrossBars = activeEqualCross?.bars ?: 0,
+            equalCrossSizeAtr = round2(activeEqualCross?.sizeAtr ?: 0.0),
+            equalCrossBarsSinceEnd = activeEqualCross?.barsSinceEnd ?: 0,
+            crownLevel = round2(crownPriceOfActive),
+            nearestCrownLevel = round2(nearestCrownLevel),
+            nearestCrownDistanceAtr = round2(nearestCrownDistanceAtr),
+            equalCrossCount = rawEqualCrosses.size,
+            hiddenCloudAnalogueSamples = analogueSamples,
+            hiddenCloudAnalogueForwardAtr = round2(analogueForwardAtr),
+            hiddenCloudAnalogueAgreement = round2(analogueAgreement),
         )
     }
 
@@ -2951,6 +3230,7 @@ object IchimokuStrategyEngine {
 
         val isBtc52Model = activeModel == BitcoinStrategyModel.BTC_52_CANDLE_REGIME
         val isParsaModel = activeModel == BitcoinStrategyModel.PARSA_52_LINE_TURN
+        val isHiddenCrossModel = activeModel == BitcoinStrategyModel.HIDDEN_CROSS
         val long52Context = trigSnap.regressionSlope52AtrPerBar >= 0.025 &&
             trigSnap.closeChange52Atr >= 1.0 && trigSnap.close >= (trigSnap.prior52High + trigSnap.prior52Low) / 2.0
         val short52Context = trigSnap.regressionSlope52AtrPerBar <= -0.025 &&
@@ -2964,6 +3244,11 @@ object IchimokuStrategyEngine {
             isBtc52Model && short52Context -> SignalAction.SELL
             isParsaModel && parsaBullishStructure -> SignalAction.BUY
             isParsaModel && parsaBearishStructure -> SignalAction.SELL
+            // هیدن کراس: جهت فقط از هندسهٔ ابر مخفی می‌آید.
+            isHiddenCrossModel && trigSnap.close > trigSnap.hiddenCloudTop &&
+                trigSnap.tenkan > trigSnap.kijun -> SignalAction.BUY
+            isHiddenCrossModel && trigSnap.close < trigSnap.hiddenCloudBottom &&
+                trigSnap.tenkan < trigSnap.kijun -> SignalAction.SELL
             bullishBias && !bearishBias -> SignalAction.BUY
             bearishBias && !bullishBias -> SignalAction.SELL
             stratSnap.tenkan >= stratSnap.kijun -> SignalAction.BUY
@@ -3093,10 +3378,33 @@ object IchimokuStrategyEngine {
         } else {
             trigSnap.close <= trigSnap.kumoBottom - reqGravityClearance
         }
-        val cond9Detail = if (trigSnap.isCurrentSpanBFlat || stratSnap.isCurrentSpanBFlat) {
-            "SSB فلت شناسایی شد؛ عبور با بافر امن انجام شد"
+        // لایهٔ هیدن کراس در شرط ۹: دیوار «تاج» هم مثل SSB فلت جاذبه دارد.
+        val hiddenCrossWallClearance = if (trigSnap.nearestCrownLevel > 0.0) {
+            val wallDist = abs(trigSnap.nearestCrownLevel - trigSnap.close)
+            val wallAhead = if (isLong) {
+                trigSnap.nearestCrownLevel > trigSnap.close
+            } else {
+                trigSnap.nearestCrownLevel < trigSnap.close
+            }
+            !wallAhead || wallDist >= trigSnap.atr14 * effectiveConfig.breakoutBufferAtr
         } else {
-            "بدون تله جاذبه SSB فلت (${if (trigSnap.isKatanaEquilibrium) "هم‌پوشانی کاتانا" else "تفکیک استاندارد TK"})"
+            true
+        }
+        val cond9Detail = buildString {
+            if (trigSnap.isCurrentSpanBFlat || stratSnap.isCurrentSpanBFlat) {
+                append("SSB فلت شناسایی شد؛ عبور با بافر امن انجام شد")
+            } else {
+                append("بدون تله جاذبه SSB فلت (${if (trigSnap.isKatanaEquilibrium) "هم‌پوشانی کاتانا" else "تفکیک استاندارد TK"})")
+            }
+            if (trigSnap.nearestCrownLevel > 0.0) {
+                append(String.format(
+                    Locale.US,
+                    " · دیوار تاج هیدن کراس=%.2f (%.2f ATR) %s",
+                    trigSnap.nearestCrownLevel,
+                    trigSnap.nearestCrownDistanceAtr,
+                    if (hiddenCrossWallClearance) "پاک" else "درگیر",
+                ))
+            }
         }
 
         // سه کندل پایانی برای این دو روش الگوی تصمیم نیستند؛ منطقشان صرفاً از پنجرهٔ بلند و بسته می‌آید.
@@ -3172,10 +3480,89 @@ object IchimokuStrategyEngine {
         val parsaReady = parsaFlatOk && parsaSpanATurnOk && parsaCrossAge <= 8 &&
             parsaSlopeOk && parsaLineSpacingOk && parsaChikouOk && parsaSharpMoveOk && parsaCloudOk
 
+        // ── روش مستقل «هیدن کراس»: ابر مخفی جهت می‌دهد، کراس برابری هدف می‌سازد ──
+        // دادهٔ لازم از لایهٔ snapshot می‌آید تا محاسبات یک‌بار و مشترک انجام شوند.
+        val hcCloud = trigSnap
+        val hcTkBullish = hcCloud.tenkan > hcCloud.kijun
+        val hcPriceAboveCloud = hcCloud.close > hcCloud.hiddenCloudTop
+        val hcPriceBelowCloud = hcCloud.close < hcCloud.hiddenCloudBottom
+        // شرط ۱: جهت از ابر مخفی — قیمت بیرون از نوار و ترتیب TK هم‌جهت
+        val hcDirectionOk = if (isDirectionalLong) {
+            hcPriceAboveCloud && hcTkBullish && hcCloud.hiddenCloudSlopeAtrPerBar >= -0.01
+        } else {
+            hcPriceBelowCloud && !hcTkBullish && hcCloud.hiddenCloudSlopeAtrPerBar <= 0.01
+        }
+        // شرط ۲: نوار باید باریک و «تعادل‌مانند» باشد (ابر مخفی واقعی)
+        val hcCloudBalancedOk = hcCloud.isHiddenCloudBalanced &&
+            hcCloud.hiddenCloudThicknessAtr >= 0.01
+        // شرط ۳: کراس برابری موجود و تازه
+        val hcCrossExistsOk = hcCloud.equalCrossLevel > 0.0 &&
+            hcCloud.equalCrossBars >= HiddenCrossEngine.MIN_EQUAL_CROSS_BARS
+        val hcCrossFreshOk = hcCrossExistsOk &&
+            hcCloud.equalCrossBarsSinceEnd <= HiddenCrossEngine.MAX_EQUAL_CROSS_AGE_BARS
+        // شرط ۴: سطح برابری در سمت درست قیمت باشد (قیمت از ناحیهٔ برابری بیرون زده)
+        val hcCrossSideOk = hcCrossExistsOk && if (isDirectionalLong) {
+            hcCloud.close > hcCloud.equalCrossLevel
+        } else {
+            hcCloud.close < hcCloud.equalCrossLevel
+        }
+        // شرط ۵: تأیید آماری آنالوگ — اگر نمونهٔ کافی نبود، ادعایی مطرح نمی‌شود
+        val hcAnalogueMeasured = hcCloud.hiddenCloudAnalogueSamples >= HiddenCrossEngine.ANALOGUE_MIN_SAMPLES
+        val hcAnalogueOk = if (!hcAnalogueMeasured) {
+            true
+        } else {
+            val agrees = if (isDirectionalLong) {
+                hcCloud.hiddenCloudAnalogueForwardAtr > 0.0
+            } else {
+                hcCloud.hiddenCloudAnalogueForwardAtr < 0.0
+            }
+            agrees && hcCloud.hiddenCloudAnalogueAgreement >= HiddenCrossEngine.ANALOGUE_MIN_AGREEMENT
+        }
+        // شرط ۶: هدف تاج در مسیر و در دالان R:R
+        val hcRrRefStop = max(
+            abs(hcCloud.close - if (isDirectionalLong) hcCloud.hiddenCloudBottom else hcCloud.hiddenCloudTop),
+            hcCloud.atr14 * 0.80,
+        ).coerceAtLeast(1e-8)
+        val hcCrownDistanceR = if (hcCloud.crownLevel > 0.0) {
+            abs(hcCloud.crownLevel - hcCloud.close) / hcRrRefStop
+        } else 0.0
+        val hcCrownAheadOk = hcCloud.crownLevel > 0.0 && if (isDirectionalLong) {
+            hcCloud.crownLevel > hcCloud.close
+        } else {
+            hcCloud.crownLevel < hcCloud.close
+        }
+        val hcTargetRoomOk = hcCrownAheadOk && hcCrownDistanceR >= HiddenCrossEngine.HIDDEN_CROSS_MIN_TARGET_R
+        // شرط ۷: کیفیت کندل ماشه و نبود کشیدگی از نوار
+        val hcImpulseOk = hcCloud.candleBodyRatio >= 0.32 &&
+            (if (isDirectionalLong) hcCloud.closeLocationValue >= 0.52 else hcCloud.closeLocationValue <= 0.48)
+        val hcNotOverextended = max(hcCloud.distanceToKijunAtr, hcCloud.hiddenCloudThicknessAtr) <= 1.85
+        // شرط ۸: اجازهٔ تایم‌فریم بالاتر (اگر وجود داشته باشد)
+        val hcMtfOk = macroSnap == null || if (isDirectionalLong) {
+            !macroSnap.isPriceBelowKumo
+        } else {
+            !macroSnap.isPriceAboveKumo
+        }
+        // شرط ۹: آزادی چیکو در مسیر معامله
+        val hcChikouOk = if (isDirectionalLong) {
+            hcCloud.chikouBullishOpenSpace
+        } else {
+            hcCloud.chikouBearishOpenSpace
+        }
+        // شرط ۱۰: همسویی خطوط (تنکان/کیجون) با جهت
+        val hcSlopeOk = if (isDirectionalLong) {
+            hcCloud.tenkanSlopeAtrPerBar > 0.0 && hcCloud.kijunSlopeAtrPerBar >= -0.06
+        } else {
+            hcCloud.tenkanSlopeAtrPerBar < 0.0 && hcCloud.kijunSlopeAtrPerBar <= 0.06
+        }
+        val hiddenCrossReady = hcDirectionOk && hcCloudBalancedOk && hcCrossFreshOk &&
+            hcCrossSideOk && hcAnalogueOk && hcTargetRoomOk && hcImpulseOk &&
+            hcNotOverextended && hcMtfOk && hcChikouOk && hcSlopeOk
+
         val triggerType = when {
             isBtc52Model && btc52Ready -> StrategyTriggerType.BTC_52_STRUCTURE_BREAK
             isParsaModel && parsaReady -> StrategyTriggerType.PARSA_52_LINE_TURN
-            isBtc52Model || isParsaModel -> StrategyTriggerType.NONE
+            isHiddenCrossModel && hiddenCrossReady -> StrategyTriggerType.HIDDEN_CROSS
+            isBtc52Model || isParsaModel || isHiddenCrossModel -> StrategyTriggerType.NONE
             else -> detectEntryTrigger(
                 direction = candidateDirection,
                 bars = closedTriggerBars,
@@ -3240,6 +3627,16 @@ object IchimokuStrategyEngine {
         val specialStopAnchor = when {
             isBtc52Model && isLong -> trigSnap.prior52Low - trigSnap.atr14 * effectiveConfig.slBufferAtr
             isBtc52Model -> trigSnap.prior52High + trigSnap.atr14 * effectiveConfig.slBufferAtr
+            // هیدن کراس: ۱R پشت خودِ نوار ابر مخفی قفل می‌شود؛ اگر به ورود چسبیده باشد،
+            // سنگر ساختاری ۵ کندلی جای آن را می‌گیرد (بدون تورم مصنوعی ۱R).
+            isHiddenCrossModel && isLong -> min(
+                trigSnap.hiddenCloudBottom - trigSnap.atr14 * effectiveConfig.slBufferAtr,
+                trigSnap.low - trigSnap.atr14 * effectiveConfig.slBufferAtr,
+            )
+            isHiddenCrossModel -> max(
+                trigSnap.hiddenCloudTop + trigSnap.atr14 * effectiveConfig.slBufferAtr,
+                trigSnap.high + trigSnap.atr14 * effectiveConfig.slBufferAtr,
+            )
             isParsaModel && isLong && trigSnap.currentSpanB < referenceEntryForSl ->
                 trigSnap.currentSpanB - trigSnap.atr14 * effectiveConfig.slBufferAtr
             isParsaModel && !isLong && trigSnap.currentSpanB > referenceEntryForSl ->
@@ -3370,9 +3767,20 @@ object IchimokuStrategyEngine {
 
         val btc52TargetDistance = (trigSnap.range52Atr * trigSnap.atr14 * 0.35)
             .coerceIn(minTpDist, maxTpDist)
+        // هیدن کراس: هدف اول «تاج» است؛ اگر تاج در دالان [۱٫۵R..۳R] نبود، سطح برابری و
+        // در نهایت هدف توزیع‌شدهٔ بهینه به‌کار می‌رود — همیشه داخل همان دالان قفل‌شده.
+        val hiddenCrossCrownPrice = when {
+            trigSnap.crownLevel <= 0.0 -> 0.0
+            isLong && trigSnap.crownLevel <= entryAnchorForTp -> 0.0
+            !isLong && trigSnap.crownLevel >= entryAnchorForTp -> 0.0
+            else -> trigSnap.crownLevel
+        }
+        val hiddenCrossCrownInCorridor = hiddenCrossCrownPrice > 0.0 &&
+            (abs(hiddenCrossCrownPrice - entryAnchorForTp) / stopDist) in requiredMinRr..maxAllowedRr
         val rawPrimaryTp = when {
             isBtc52Model && isLong -> entryAnchorForTp + btc52TargetDistance
             isBtc52Model -> (entryAnchorForTp - btc52TargetDistance).coerceAtLeast(0.00001)
+            isHiddenCrossModel && hiddenCrossCrownInCorridor -> hiddenCrossCrownPrice
             isParsaModel && isLong -> entryAnchorForTp + optTpDist
             isParsaModel -> (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
             chosenWavePair != null -> chosenWavePair.second
@@ -3381,13 +3789,20 @@ object IchimokuStrategyEngine {
         }
         val selectedWaveLabel = when {
             isBtc52Model -> "امتداد دامنهٔ ساختار ۵۲ کندلی"
+            isHiddenCrossModel && hiddenCrossCrownInCorridor -> "تاج کراس برابری (نصف اندازهٔ کراس)"
+            isHiddenCrossModel -> "هدف بهینه پس از کراس برابری"
             isParsaModel -> "هدف حرکتی پس از چرخش Senkou A"
             chosenWavePair != null -> chosenWavePair.first
             else -> String.format(Locale.US, "موج بهینه هوسودا (%.2fR)", computedOptimalRr)
         }
 
         // Check nearest HTF horizontal plateau (Karen Péloille's Flat SSB/Kijun wall)
-        val allPlateaus = ((macroSnap?.flatEquilibriumLevels ?: emptyList()) + stratSnap.flatEquilibriumLevels).distinct().sorted()
+        // لایهٔ «هیدن کراس» به‌صورت پیش‌فرض وارد استراتژی پایه هم شده است: سطح تاجی که از
+        // کراس برابری تنکان/کیجون ساخته می‌شود، یک دیوار افقی واقعی است و باید مثل پلاتوی
+        // فلت پلویل دیده شود. اگر تاجی در مسیر نباشد، رفتار دقیقاً مثل قبل می‌ماند.
+        val hiddenCrossWall = if (trigSnap.nearestCrownLevel > 0.0) listOf(trigSnap.nearestCrownLevel) else emptyList()
+        val allPlateaus = ((macroSnap?.flatEquilibriumLevels ?: emptyList()) +
+            stratSnap.flatEquilibriumLevels + hiddenCrossWall).distinct().sorted()
         val nearestObstacle = if (isLong) {
             allPlateaus.firstOrNull { it > livePrice + trigSnap.atr14 * 0.4 }
         } else {
@@ -3548,7 +3963,7 @@ object IchimokuStrategyEngine {
 
         // ── Check 16: Sniper Entry Precision & Anti-Chase Pocket ──────────────
         val distFromTenkanAtr = abs(trigSnap.close - activeTenkanRef) / trigSnap.atr14.coerceAtLeast(1e-8)
-        val maxSniperDist = effectiveConfig.minSniperDistanceAtr
+        val maxSniperDist = effectiveConfig.maxSniperDistanceAtr.coerceIn(0.20, 0.55)
         val cond16Passed = distToSniperAtr <= maxSniperDist && distFromTenkanAtr <= (maxSniperDist + 0.50)
         val cond16Detail = String.format(
             Locale.US,
@@ -3568,7 +3983,12 @@ object IchimokuStrategyEngine {
             StrategyConditionCheck(6, "۶. رهایی سه‌بعدی Chikou Span در ۲۶ دوره قبل", chikouOk, cond6Detail),
             StrategyConditionCheck(7, "۷. شکست سقف/کف ساختاری چیکو (فیلتر تاتل)", chikouPeakClear, cond7Detail),
             StrategyConditionCheck(8, "۸. قانون کش لاستیکی کیجون و نبود C-Clamp", notOverextended, cond8Detail),
-            StrategyConditionCheck(9, "۹. فیلتر جاذبه فلت SSB و تعادل کاتانا", flatSsbGravityCleared, cond9Detail),
+            StrategyConditionCheck(
+                9,
+                "۹. فیلتر جاذبه فلت SSB، دیوار تاج هیدن کراس و تعادل کاتانا",
+                flatSsbGravityCleared && hiddenCrossWallClearance,
+                cond9Detail,
+            ),
             StrategyConditionCheck(10, "۱۰. هندسه موج N هوسودا، نقطه S و چرخه زمانی", cond10Passed, cond10Detail),
             StrategyConditionCheck(11, "۱۱. قدرت پرایس‌اکشن کندل ماشه و حجم (CLV/Vol)", cond11Passed, cond11Detail),
             StrategyConditionCheck(12, "۱۲. فرمول و عدد مناسب R:R (حداقل ۱:۱.۵) و فضای باز فلت", cond12Passed, cond12Detail),
@@ -3601,9 +4021,108 @@ object IchimokuStrategyEngine {
             StrategyConditionCheck(8, "۸. سمت قیمت و نبود تضاد تایم‌فریم بالاتر", parsaCloudOk, "قیمت نسبت به Kijun و تایم‌فریم بالاتر با جهت معامله سنجیده شد."),
             StrategyConditionCheck(9, "۹. پلن نهایی و R:R حداقل ۱:۱٫۵", cond12Passed && guardedPlan.isUsable, cond12Detail),
         )
+        val hiddenCrossConditions = listOf(
+            StrategyConditionCheck(
+                1,
+                "۱. جهت از ابر مخفی (قیمت بیرون از نوار تنکان/کیجون و ترتیب TK هم‌جهت)",
+                hcDirectionOk,
+                String.format(
+                    Locale.US,
+                    "نوار=%.2f..%.2f · کلوز=%.2f · TK=%s · شیب نوار=%+.2f ATR/کندل",
+                    hcCloud.hiddenCloudBottom,
+                    hcCloud.hiddenCloudTop,
+                    hcCloud.close,
+                    if (hcTkBullish) "تنکان بالای کیجون" else "تنکان زیر کیجون",
+                    hcCloud.hiddenCloudSlopeAtrPerBar,
+                ),
+            ),
+            StrategyConditionCheck(
+                2,
+                "۲. ابر مخفی معتبر (ضخامت نوار ≤ ۰٫۵۵ ATR و باز نشده)",
+                hcCloudBalancedOk,
+                String.format(Locale.US, "ضخامت نوار=%.2f ATR · سقف مجاز %.2f ATR", hcCloud.hiddenCloudThicknessAtr, HiddenCrossEngine.HIDDEN_CLOUD_MAX_THICKNESS_ATR),
+            ),
+            StrategyConditionCheck(
+                3,
+                "۳. کراس برابری شکل گرفته (دست‌کم ۳ کندل هم‌پوشانی تنکان/کیجون)",
+                hcCrossExistsOk,
+                if (hcCrossExistsOk) {
+                    String.format(Locale.US, "سطح برابری=%.2f · %d کندل هم‌پوشانی · اندازه=%.2f ATR", hcCloud.equalCrossLevel, hcCloud.equalCrossBars, hcCloud.equalCrossSizeAtr)
+                } else {
+                    "هم‌پوشانی کافی تنکان/کیجون یافت نشد (در پنجره: ${hcCloud.equalCrossCount} مورد)."
+                },
+            ),
+            StrategyConditionCheck(
+                4,
+                "۴. تازگی کراس برابری (حداکثر ۳۰ کندل پس از پایان هم‌پوشانی)",
+                hcCrossFreshOk,
+                if (hcCrossExistsOk) {
+                    "${hcCloud.equalCrossBarsSinceEnd} کندل از پایان هم‌پوشانی گذشته؛ سقف مجاز ${HiddenCrossEngine.MAX_EQUAL_CROSS_AGE_BARS} کندل."
+                } else {
+                    "کراس برابری برای سنجش تازگی وجود ندارد."
+                },
+            ),
+            StrategyConditionCheck(
+                5,
+                "۵. هم‌جهتی قیمت با سطح برابری (بیرون‌زدن از ناحیهٔ تعادل)",
+                hcCrossSideOk,
+                if (hcCrossExistsOk) {
+                    String.format(Locale.US, "کلوز %.2f در برابر سطح برابری %.2f", hcCloud.close, hcCloud.equalCrossLevel)
+                } else {
+                    "سطح برابری هنوز تعیین نشده است."
+                },
+            ),
+            StrategyConditionCheck(
+                6,
+                "۶. تأیید آماری آنالوگ ابر مخفی (نمونهٔ هم‌شکل تاریخی)",
+                hcAnalogueOk,
+                if (hcAnalogueMeasured) {
+                    String.format(
+                        Locale.US,
+                        "%d نمونهٔ هم‌شکل · میانگین حرکت %+.2f ATR · هم‌جهت %.0f%% (حد لازم %.0f%%)",
+                        hcCloud.hiddenCloudAnalogueSamples,
+                        hcCloud.hiddenCloudAnalogueForwardAtr,
+                        hcCloud.hiddenCloudAnalogueAgreement * 100.0,
+                        HiddenCrossEngine.ANALOGUE_MIN_AGREEMENT * 100.0,
+                    )
+                } else {
+                    "نمونهٔ کافی نیست (${hcCloud.hiddenCloudAnalogueSamples}/${HiddenCrossEngine.ANALOGUE_MIN_SAMPLES})؛ تصمیم فقط بر پایهٔ ابر مخفی و کراس می‌ماند."
+                },
+            ),
+            StrategyConditionCheck(
+                7,
+                "۷. هدف «تاج» در مسیر و در دالان R:R (≥ ۱٫۵R)",
+                hcTargetRoomOk,
+                if (hcCrownAheadOk) {
+                    String.format(Locale.US, "تاج=%.2f · فاصله=%.2fR (حد لازم %.2fR)", hcCloud.crownLevel, hcCrownDistanceR, HiddenCrossEngine.HIDDEN_CROSS_MIN_TARGET_R)
+                } else {
+                    "تاجی در مسیر معامله وجود ندارد؛ سطح برابری یا هدف بهینه جانشین می‌شود."
+                },
+            ),
+            StrategyConditionCheck(
+                8,
+                "۸. کیفیت کندل ماشه (بدنه/محل کلوز) و نبود کشیدگی از نوار",
+                hcImpulseOk && hcNotOverextended,
+                String.format(Locale.US, "بدنه=%.0f%% · CLV=%.0f%% · فاصله از کیجون=%.2f ATR", hcCloud.candleBodyRatio * 100.0, hcCloud.closeLocationValue * 100.0, hcCloud.distanceToKijunAtr),
+            ),
+            StrategyConditionCheck(
+                9,
+                "۹. همسویی تایم‌فریم بالاتر و شیب خطوط",
+                hcMtfOk && hcSlopeOk,
+                String.format(Locale.US, "شیب تنکان=%+.2f · کیجون=%+.2f ATR/کندل · ابر تایم بالاتر=%s", hcCloud.tenkanSlopeAtrPerBar, hcCloud.kijunSlopeAtrPerBar, if (macroSnap == null) "بدون داده" else if (macroSnap.isPriceBelowKumo) "قیمت زیر ابر" else if (macroSnap.isPriceAboveKumo) "قیمت بالای ابر" else "داخل ابر"),
+            ),
+            StrategyConditionCheck(
+                10,
+                "۱۰. آزادی Chikou و پلن نهایی با R:R حداقل ۱:۱٫۵",
+                hcChikouOk && cond12Passed && guardedPlan.isUsable,
+                "$cond12Detail · چیکو ${if (hcChikouOk) "آزاد" else "درگیر"}",
+            ),
+        )
+
         val conditions = when {
             isBtc52Model -> btc52Conditions
             isParsaModel -> parsaConditions
+            isHiddenCrossModel -> hiddenCrossConditions
             activeModel.isDrivePdfStrategy -> buildElliottWaveConditions(
                 isLong = isLong,
                 wave = wave,
@@ -3624,6 +4143,7 @@ object IchimokuStrategyEngine {
         val requiredIndicesForModel: Set<Int> = when {
             isBtc52Model -> btc52Conditions.indices.map { it + 1 }.toSet()
             isParsaModel -> parsaConditions.indices.map { it + 1 }.toSet()
+            isHiddenCrossModel -> hiddenCrossConditions.indices.map { it + 1 }.toSet()
             else -> (1..16).toSet()
         }
         val modelCoreConditions = conditions.filter { it.index in requiredIndicesForModel }
@@ -3712,16 +4232,19 @@ object IchimokuStrategyEngine {
         val customWatchSetup = when {
             isBtc52Model -> closedTriggerBars.size >= 53 && (long52Context || short52Context)
             isParsaModel -> parsaFlatOk && (parsaSpanATurnOk || parsaCrossAge <= 8)
+            isHiddenCrossModel -> hcDirectionOk && hcCrossExistsOk
             else -> false
         }
-        val sniperArmedPendingRetest = !isBtc52Model && !isParsaModel && firstFifteenPassed && triggerFired && !cond16Passed
+        val sniperArmedPendingRetest = !isBtc52Model && !isParsaModel && !isHiddenCrossModel &&
+            firstFifteenPassed && triggerFired && !cond16Passed
 
         val baseReadiness = when {
             neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) -> StrategyReadinessState.BLOCKED
             allSixteenPassed && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
             allSixteenPassed && kijunGatePassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
             allSixteenPassed && !kijunGatePassed -> StrategyReadinessState.BLOCKED
-            customWatchSetup || sniperArmedPendingRetest || (!isBtc52Model && !isParsaModel && passedCount >= 11) -> StrategyReadinessState.WATCH_SETUP
+            customWatchSetup || sniperArmedPendingRetest ||
+                (!isBtc52Model && !isParsaModel && !isHiddenCrossModel && passedCount >= 11) -> StrategyReadinessState.WATCH_SETUP
             else -> StrategyReadinessState.BLOCKED
         }
 
@@ -3775,11 +4298,13 @@ object IchimokuStrategyEngine {
             readiness == StrategyReadinessState.SIGNAL_BUY -> when {
                 isBtc52Model -> "$tfTag 🟠 خرید BTC بر پایهٔ شکست/بازآزمایی ۵۲ کندلی · بدون الگوی سه کندل آخر · R:R=1:${round2(rr)}"
                 isParsaModel -> "$tfTag 🟢 خرید پارسا · فلت SSB ${trigSnap.senkouSpanBFlatBars} کندل + چرخش Senkou A + کراس TK · R:R=1:${round2(rr)}"
+                isHiddenCrossModel -> "$tfTag 🟢 خرید هیدن کراس · ابر مخفی ${trigSnap.hiddenCloudBottom}..${trigSnap.hiddenCloudTop} + کراس برابری ${trigSnap.equalCrossLevel} · تاج ${trigSnap.crownLevel} · R:R=1:${round2(rr)}"
                 else -> "$tfTag 🎯 خرید نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
             }
             readiness == StrategyReadinessState.SIGNAL_SELL -> when {
                 isBtc52Model -> "$tfTag 🟠 فروش BTC بر پایهٔ شکست/بازآزمایی ۵۲ کندلی · بدون الگوی سه کندل آخر · R:R=1:${round2(rr)}"
                 isParsaModel -> "$tfTag 🔴 فروش پارسا · فلت SSB ${trigSnap.senkouSpanBFlatBars} کندل + چرخش Senkou A + کراس TK · R:R=1:${round2(rr)}"
+                isHiddenCrossModel -> "$tfTag 🔴 فروش هیدن کراس · ابر مخفی ${trigSnap.hiddenCloudBottom}..${trigSnap.hiddenCloudTop} + کراس برابری ${trigSnap.equalCrossLevel} · تاج ${trigSnap.crownLevel} · R:R=1:${round2(rr)}"
                 else -> "$tfTag 🎯 فروش نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
             }
             sniperArmedPendingRetest ->
@@ -3787,6 +4312,7 @@ object IchimokuStrategyEngine {
             readiness == StrategyReadinessState.WATCH_SETUP -> when {
                 isBtc52Model -> "$tfTag ⏳ ساختار ۵۲ کندلی هم‌جهت است؛ منتظر شکست بسته‌شده/بازآزمایی و تأیید حجم/چیکو (${passedCount}/${conditions.size})"
                 isParsaModel -> "$tfTag ⏳ SSB ${trigSnap.senkouSpanBFlatBars} کندل تخت؛ منتظر چرخش Senkou A، کراس TK و تأیید شارپ (${passedCount}/${conditions.size})"
+                isHiddenCrossModel -> "$tfTag ⏳ ابر مخفی ${trigSnap.hiddenCloudThicknessAtr} ATR؛ منتظر کراس برابری تازه، هم‌جهتی و تأیید آنالوگ (${passedCount}/${conditions.size})"
                 else -> "$tfTag ⏳ $passedCount/${conditions.size} شرط (${trendPhase.badgeFa})؛ منتظر ماشه در ${config.triggerInterval.label}"
             }
             readiness == StrategyReadinessState.BLOCKED -> {
@@ -3820,6 +4346,9 @@ object IchimokuStrategyEngine {
         val entryPathFa = when {
             isBtc52Model -> "روش مستقل بیت‌کوین با زمینهٔ ۵۲ کندل بسته؛ سه کندل آخر الگوی تصمیم نیستند؛ یادگیری عصبی خاموش"
             isParsaModel -> "پارسا: SSB/خط دورهٔ ۵۲ تخت ≥۱۸ کندل + چرخش Senkou A + کراس TK؛ شیب/فاصله، چیکو و حرکت شارپ سنجیده شد؛ یادگیری عصبی خاموش"
+            isHiddenCrossModel -> "هیدن کراس: جهت از ابر مخفی (نوار تنکان/کیجون) و هدف از کراس برابری (تاج نصف‌اندازه)؛ " +
+                "جست‌وجوی آنالوگ تاریخی با ${trigSnap.hiddenCloudAnalogueSamples} نمونه و هم‌جهتی " +
+                "${(trigSnap.hiddenCloudAnalogueAgreement * 100).toInt()}٪؛ یادگیری عصبی خاموش"
             cryptoNeoWaveEntry -> "🌊 مسیر نئوویو (کریپتو): ${cryptoEntryDecision.reasonFa}"
             neoWaveOn && isCryptoClass && neoWaveVerdict != null ->
                 "🌊 کریپتو: ${cryptoEntryDecision.reasonFa}"
@@ -4451,7 +4980,14 @@ object IchimokuStrategyEngine {
 
         // ── ۲. بستن کامل و قطعی معامله در رسیدن به حد سود اولیه (یا سقف ۳R برای معاملات با R:R اولیه ≤ ۳) با حفظ حد ضرر ثابت ──
         val reachedTp = if (isBuy) livePrice >= trade.takeProfit else livePrice <= trade.takeProfit
-        val reached3RCeilingForStandardTrade = trade.riskReward <= 3.0001 && currentRMultiple >= 3.0
+        // سقف ۳R فقط برای معامله‌ای است که حد ضررش دست‌نخورده مانده. وقتی حد ضرر در سود قفل
+        // شده (ریسک‌فری/تریل) دیگر ریسکی وجود ندارد که سقف ۳R بخواهد آن را مهار کند.
+        val hasLockedInProfit =
+            trade.note.contains(BE_TAG_MARK) ||
+                trade.note.contains(TRAIL_TAG_MARK) ||
+                fixedStopLoss != (trade.initialStopLoss ?: fixedStopLoss)
+        val reached3RCeilingForStandardTrade =
+            trade.riskReward <= 3.0001 && currentRMultiple >= 3.0 && !hasLockedInProfit
         if (reachedTp || reached3RCeilingForStandardTrade) {
             val exitTargetPrice = if (reachedTp) round2(trade.takeProfit) else round2(livePrice)
             return PreserveModeEvaluation(
@@ -4470,8 +5006,128 @@ object IchimokuStrategyEngine {
             )
         }
 
+        // ── ۳. ریسک‌فری در +۱R و تریل در +۲R (Preserve Mode واقعی) ───────────────
+        // پیش از این، حد ضرر «تحت هیچ شرایطی» جابه‌جا نمی‌شد و هر معامله‌ای که به +۱R می‌رسید
+        // تا −۱R برمی‌گشت. اکنون حد ضرر پله‌ای در سود قفل می‌شود و حد سود جابه‌جا نمی‌شود تا
+        // هندسهٔ اولیهٔ R:R دست‌نخورده بماند.
+        if (config.enablePreserveMode) {
+            val hasMovedToBe = trade.note.contains(BE_TAG_MARK) || fixedStopLoss == trade.entry
+            if (currentRMultiple >= 1.0 && !hasMovedToBe) {
+                return PreserveModeEvaluation(
+                    tradeId = trade.id,
+                    newStopLoss = round2(trade.entry),
+                    stageTitleFa = "🛡️ ریسک‌فری در +${round2(currentRMultiple)}R (حد ضرر روی نقطهٔ ورود)",
+                    reasonFa = String.format(
+                        Locale.US,
+                        "سود باز به %.2fR رسید؛ حد ضرر به نقطهٔ ورود (%.2f) منتقل شد تا معامله بدون ریسک ادامه یابد",
+                        currentRMultiple,
+                        trade.entry,
+                    ),
+                    lockedRMultiple = round2(currentRMultiple),
+                    updatedStopLoss = round2(trade.entry),
+                    stopStageTag = "BE",
+                )
+            }
+            val trailAnchor = trigSnap.tenkan
+            // در خرید: حد ضرر روی تنکان (یا ۰٫۳۵ ATR عقب‌تر از قیمت، هرکدام نزدیک‌تر) قفل می‌شود.
+            val trailCandidate = if (isBuy) {
+                maxOf(trigSnap.tenkan, livePrice - trigSnap.atr14 * 0.35)
+            } else {
+                minOf(trigSnap.tenkan, livePrice + trigSnap.atr14 * 0.35)
+            }
+            val trailImproves = if (isBuy) {
+                trailCandidate > fixedStopLoss && trailCandidate < livePrice
+            } else {
+                trailCandidate < fixedStopLoss && trailCandidate > livePrice
+            }
+            if (currentRMultiple >= 2.0 && trailImproves) {
+                return PreserveModeEvaluation(
+                    tradeId = trade.id,
+                    newStopLoss = round2(trailCandidate),
+                    stageTitleFa = "🔒 قفل سود در +${round2(currentRMultiple)}R روی تنکان (${round2(trailAnchor)})",
+                    reasonFa = String.format(
+                        Locale.US,
+                        "سود باز به %.2fR رسید؛ حد ضرر روی تنکان (%.2f) با بافر %.2f ATR قفل شد",
+                        currentRMultiple,
+                        trailAnchor,
+                        trigSnap.atr14,
+                    ),
+                    lockedRMultiple = round2(currentRMultiple),
+                    updatedStopLoss = round2(trailCandidate),
+                    stopStageTag = "TRAIL",
+                )
+            }
+        }
+
         return null
     }
+
+    /**
+     * سقف زمانی نگه‌داری معاملهٔ خودکار، بر حسب کندل تایم‌فریم ورود.
+     *
+     * ۲۰ کندل ۵ دقیقه‌ای = ۱ ساعت و ۴۰ دقیقه؛ ۲۰ کندل ۱۵ دقیقه‌ای = ۵ ساعت. ماشه‌ای
+     * (`PULLBACK_BOUNCE` و هم‌خانواده‌هایش) که در این پنجره به هدف نرسیده، دیگر «پولبک
+     * در روند» نیست؛ تبدیل به معاملهٔ بلاتکلیف شده که فقط کارمزد و ریسک گپ می‌خرد.
+     */
+    const val DEFAULT_MAX_HOLD_BARS: Int = 20
+
+    /** اگر معامله در پایان پنجرهٔ زمانی حتی به این مقدار R نرسیده باشد، خروج اجباری است. */
+    const val MIN_R_AT_TIME_STOP: Double = 0.5
+
+    data class TimeStopEvaluation(
+        val shouldClose: Boolean,
+        val barsHeld: Int,
+        val currentRMultiple: Double,
+        val reasonFa: String,
+    )
+
+    /**
+     * ترمز پنجرهٔ زمانی (Time Stop).
+     *
+     * حد ضرر و حد سود فقط دو بُعد معامله را می‌بینند؛ بُعد سوم — **زمان** — هیچ‌جا سنجیده
+     * نمی‌شد. نتیجه: پوزیشن‌هایی که ۲۰ کندل بی‌حرکت مانده بودند هم باز می‌ماندند و هم در
+     * آمار به‌صورت «معاملهٔ زیان‌ده» ثبت می‌شدند، در حالی که بهتر بود اصلاً ادامه پیدا نکنند.
+     *
+     * @param livePrice آخرین قیمت معتبر؛ `null` یعنی قضاوت انجام نمی‌شود.
+     */
+    fun evaluateTimeStop(
+        trade: PaperTrade,
+        livePrice: Double?,
+        now: Long = System.currentTimeMillis(),
+        maxHoldBars: Int = DEFAULT_MAX_HOLD_BARS,
+    ): TimeStopEvaluation {
+        if (!trade.isOpen) return TimeStopEvaluation(false, 0, 0.0, "")
+        val price = livePrice?.takeIf { it.isFinite() && it > 0.0 }
+            ?: return TimeStopEvaluation(false, 0, 0.0, "")
+        val barMs = trade.interval.millis.coerceAtLeast(60_000L)
+        val heldMs = (now - trade.openedAt).coerceAtLeast(0L)
+        val barsHeld = (heldMs / barMs).toInt()
+        if (barsHeld < maxHoldBars) return TimeStopEvaluation(false, barsHeld, 0.0, "")
+
+        val fixedStop = trade.initialStopLoss ?: trade.stopLoss
+        val oneR = abs(trade.entry - fixedStop).coerceAtLeast(1e-9)
+        val isBuy = trade.action == SignalAction.BUY
+        val currentR = ((if (isBuy) price - trade.entry else trade.entry - price) / oneR)
+        val reachedTp = if (isBuy) price >= trade.takeProfit else price <= trade.takeProfit
+        if (reachedTp || currentR >= MIN_R_AT_TIME_STOP) {
+            return TimeStopEvaluation(false, barsHeld, round2(currentR), "")
+        }
+        val reason = String.format(
+            Locale.US,
+            "⏱️ خروج زمانی: %d کندل %s گذشت و معامله فقط %+.2fR پیشرفت کرد (کمینهٔ لازم %+.2fR) — روند مورد انتظار شکل نگرفت",
+            barsHeld,
+            trade.interval.label,
+            currentR,
+            MIN_R_AT_TIME_STOP,
+        )
+        return TimeStopEvaluation(true, barsHeld, round2(currentR), reason)
+    }
+
+    /** نشانهٔ متنی مرحلهٔ ریسک‌فری در یادداشت معامله. */
+    const val BE_TAG_MARK: String = "🛡️ BE"
+
+    /** نشانهٔ متنی مرحلهٔ تریل در یادداشت معامله. */
+    const val TRAIL_TAG_MARK: String = "🔒 TRAIL"
 
     private fun mergeNearbyLevels(levels: List<Double>, tolerance: Double): List<Double> {
         if (levels.isEmpty()) return emptyList()

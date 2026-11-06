@@ -132,16 +132,6 @@ object SessionExitPlanner {
         )
     }
 
-    /**
-     * آیا این پوزیشن از سشن قبل باز مانده است؟
-     *
-     * «بازمانده» یعنی بازار همین حالا بسته است و پوزیشن هم باز است. چنین پوزیشنی نه با قیمت
-     * کهنه بسته می‌شود و نه لحظهٔ بازگشایی به‌صورت کورکورانه؛ با **اولین تیک معتبر** پس از
-     * بازگشایی و با قیمت واقعی بازار بسته می‌شود.
-     */
-    fun survivedClosure(symbol: String, now: Long = System.currentTimeMillis()): Boolean =
-        MarketHours.closedFor(symbol, now)
-
     /** متن دلیل خروج، آماده برای ثبت در ژورنال. */
     fun exitReasonFa(plan: Plan, exitPrice: Double): String = String.format(
         java.util.Locale.US,

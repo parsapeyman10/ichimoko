@@ -103,6 +103,7 @@ fun BitcoinIchimokuStrategyCard(
         ?: when (selectedId) {
             BitcoinStrategyModel.BTC_52_CANDLE_REGIME.id -> 10
             BitcoinStrategyModel.PARSA_52_LINE_TURN.id -> 9
+            BitcoinStrategyModel.HIDDEN_CROSS.id -> 10
             else -> 16
         }
     val executionEnabled = settings.autoPaperTrading
@@ -528,6 +529,7 @@ private fun Live12ConditionChecklistPage(
             val expectedChecklistCount = when (selectedStrategyId) {
                 BitcoinStrategyModel.BTC_52_CANDLE_REGIME.id -> 10
                 BitcoinStrategyModel.PARSA_52_LINE_TURN.id -> 9
+                BitcoinStrategyModel.HIDDEN_CROSS.id -> 10
                 else -> 16
             }
             Text(
@@ -1213,7 +1215,10 @@ internal fun BaseStrategyRefinementPanel(
         RuleToggleRow("شیب و ضخامت ابر آینده (Future Kumo)", requireFutureKumo) { requireFutureKumo = it }
         RuleToggleRow("ماشه ۱: پولبک کیجون/تنکان/S-Point", enablePullback) { enablePullback = it }
         RuleToggleRow("ماشه ۲: شکست کومو و سقف چیکو", enableBreakout) { enableBreakout = it }
-        RuleToggleRow("سیو سود خودکار (Preserve Mode)", enablePreserve) { enablePreserve = it }
+        RuleToggleRow(
+            "سیو سود خودکار (ریسک‌فری در +۱R · قفل سود روی تنکان در +۲R)",
+            enablePreserve,
+        ) { enablePreserve = it }
 
         Button(
             onClick = {

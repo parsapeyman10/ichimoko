@@ -404,16 +404,6 @@ object RiskAndCalendarEngine {
 
 
     /**
-     * دیگر در عبور از `1:3` (`3R`) حد ضرر بالا برده نمی‌شود و `TP` امتداد نمی‌یابد؛
-     * معامله به محض رسیدن به `TP` یا سقف `3R` کاملاً بسته و تسویه می‌شود.
-     */
-    @Suppress("UNUSED_PARAMETER")
-    fun evaluateLiveTickTrendRunner(
-        trade: PaperTrade,
-        tick: PriceTick,
-    ): PreserveModeEvaluation? = null
-
-    /**
      * Suggests default SL and TP around a live entry price for quick one-tap prefill.
      */
     fun suggestSlTp(

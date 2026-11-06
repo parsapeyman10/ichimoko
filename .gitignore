@@ -21,3 +21,6 @@ tick-archive/.env
 tick-archive/.venv/
 __pycache__/
 *.py[cod]
+
+# اسکرین‌شات‌های محلی آموزش (منبع استخراج قواعد، نه بخشی از اپ)
+google_drive/

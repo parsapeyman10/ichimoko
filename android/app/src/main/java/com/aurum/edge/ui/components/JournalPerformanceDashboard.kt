@@ -248,11 +248,6 @@ fun JournalPerformanceDashboard(
                 color = AurumColors.Cyan,
                 modifier = Modifier.clickable { onOpenExport() },
             )
-            Pill(
-                text = "📸 آرشیو تصویری",
-                color = AurumColors.Gold,
-                modifier = Modifier.clickable { onOpenArchive() },
-            )
         }
     }
 }

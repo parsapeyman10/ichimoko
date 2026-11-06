@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -418,12 +417,13 @@ fun SettingsScreen(
                                     .background(if (selected) AurumColors.Gold.copy(alpha = 0.22f) else AurumColors.SurfaceAlt)
                                     .border(1.dp, if (selected) AurumColors.Gold else AurumColors.Line, RoundedCornerShape(8.dp))
                                     .clickable {
+                                        // انتخاب «ریسک ثابت دلاری» نباید ترمزهای ریسک را پاک کند.
                                         viewModel.saveRiskAndCapitalSettings(
                                             accountBalance = settings.accountBalance,
                                             initialCapital = settings.initialCapital,
                                             riskPercent = settings.riskPercent,
-                                            dailyLossLimitPercent = 100.0,
-                                            maxDrawdownLimitPercent = 100.0,
+                                            dailyLossLimitPercent = settings.dailyLossLimitPercent,
+                                            maxDrawdownLimitPercent = settings.maxDrawdownLimitPercent,
                                             targetCapital = settings.targetCapital,
                                             useFixedDollarRisk = true,
                                             fixedRiskUsd = usd,
@@ -443,12 +443,15 @@ fun SettingsScreen(
 
                     Button(
                         onClick = {
+                            // این دکمه فقط موجودی و ریسک ثابت را تنظیم می‌کند؛ سقف ضرر روزانه و
+                            // افت سرمایه که کاربر انتخاب کرده دست‌نخورده می‌مانند (قبلاً صریحاً
+                            // ۱۰۰٪ = خاموش نوشته می‌شد).
                             viewModel.saveRiskAndCapitalSettings(
                                 accountBalance = 100_000.0,
                                 initialCapital = 100_000.0,
                                 riskPercent = 0.5,
-                                dailyLossLimitPercent = 100.0,
-                                maxDrawdownLimitPercent = 100.0,
+                                dailyLossLimitPercent = settings.dailyLossLimitPercent,
+                                maxDrawdownLimitPercent = settings.maxDrawdownLimitPercent,
                                 targetCapital = 100_000.0,
                                 useFixedDollarRisk = true,
                                 fixedRiskUsd = 5.0,
@@ -470,7 +473,7 @@ fun SettingsScreen(
                 CapitalAndRiskLimitsCard(
                     settings = settings,
                     riskLimits = riskLimits,
-                    onSaveSettings = { bal, initCap, riskPct, dailyLim, maxDd ->
+                    onSaveSettings = { bal, initCap, riskPct, dailyLim, maxDd, maxOpen, maxPerSymbol ->
                         viewModel.saveRiskAndCapitalSettings(
                             accountBalance = bal,
                             initialCapital = initCap,
@@ -480,6 +483,8 @@ fun SettingsScreen(
                             targetCapital = settings.targetCapital,
                             useFixedDollarRisk = settings.useFixedDollarRisk,
                             fixedRiskUsd = settings.fixedRiskUsd,
+                            maxOpenTrades = maxOpen,
+                            maxOpenTradesPerSymbol = maxPerSymbol,
                         )
                     },
                 )

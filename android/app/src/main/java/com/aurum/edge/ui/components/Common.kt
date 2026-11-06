@@ -32,8 +32,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aurum.edge.core.ConfluenceItem
-import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.domain.SignalAction
@@ -72,25 +70,9 @@ fun formatPriceFor(symbol: String, value: Double?): String =
     if (value == null) "—"
     else bidiIsolated(String.format(Locale.US, "%,.${com.aurum.edge.data.CryptoCatalog.digitsFor(symbol)}f", value))
 
-fun formatTime(millis: Long?): String {
-    if (millis == null || millis <= 0) return "—"
-    return SimpleDateFormat("HH:mm", Locale.US).format(Date(millis))
-}
-
 fun formatDateTime(millis: Long?): String {
     if (millis == null || millis <= 0) return "—"
     return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(millis))
-}
-
-fun relativeTime(millis: Long?, now: Long = System.currentTimeMillis()): String {
-    if (millis == null || millis <= 0) return "—"
-    val diff = (now - millis) / 1000
-    return when {
-        diff < 60 -> "${diff} ثانیه پیش"
-        diff < 3600 -> "${diff / 60} دقیقه پیش"
-        diff < 86_400 -> "${diff / 3600} ساعت پیش"
-        else -> "${diff / 86_400} روز پیش"
-    }
 }
 
 @Composable
@@ -554,44 +536,6 @@ fun TradingViewPositionBox(
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextSecondary,
         )
-    }
-}
-
-@Composable
-fun ConfluenceRow(item: ConfluenceItem) {
-    val tone = when (item.status) {
-        ConfluenceStatus.CONFIRMED -> AurumColors.Green
-        ConfluenceStatus.UNKNOWN, ConfluenceStatus.PARTIAL -> AurumColors.Orange
-        ConfluenceStatus.CONFLICT -> AurumColors.Red
-    }
-    val label = when (item.status) {
-        ConfluenceStatus.CONFIRMED -> "برقرار"
-        ConfluenceStatus.PARTIAL -> "امتیاز جزئی"
-        ConfluenceStatus.UNKNOWN -> "نامعلوم"
-        ConfluenceStatus.CONFLICT -> "دور"
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = tone, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 10.dp))
-        Column(Modifier.weight(1f)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(item.name, style = MaterialTheme.typography.bodySmall, color = tone)
-                item.scorePercent?.let { score ->
-                    Text("امتیاز: $score/۲۵", style = MaterialTheme.typography.labelSmall, color = if (item.ok) tone else AurumColors.TextMuted)
-                }
-            }
-            if (item.detail.isNotBlank()) {
-                Text(item.detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            }
-        }
     }
 }
 

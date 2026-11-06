@@ -106,9 +106,6 @@ object SessionExitLearningStore {
             )
         }
 
-    /** تعداد خروج‌های معلقِ منتظر بازگشایی بازار. */
-    fun pendingCount(): Int = state.pending.size
-
     /**
      * ثبت «پیش از سشن بستم» — تا بازگشایی بازار، پاداش واقعی معلوم نیست.
      */

@@ -115,13 +115,30 @@ class NeuralLearningLedgerTest {
     }
 
     @Test
-    fun `gate needs both the 10_000 milestone and the explicit user activation`() {
+    fun `gate activates from the first learned sample and still obeys user consent`() {
+        // سیاست پیش‌رونده: با «هر عددی» ≥ ۱ نمونه و فعال‌سازی صریح کاربر، گیت وارد مدار می‌شود.
+        val firstSample = NeuralLearningLedger.gateState(
+            learnedTotal = 1,
+            target = 10_000,
+            userActivationEnabled = true,
+        )
+        assertTrue("گیت باید از همان اولین نمونه فعال شود", firstSample.isGateActive)
+        assertFalse(firstSample.volumeConditionMet)
+        assertTrue(firstSample.summaryFa.contains("فعال"))
+
+        val noSample = NeuralLearningLedger.gateState(
+            learnedTotal = 0,
+            target = 10_000,
+            userActivationEnabled = true,
+        )
+        assertFalse("بدون هیچ نمونه‌ای گیت نباید فعال شود", noSample.isGateActive)
+
         val beforeMilestone = NeuralLearningLedger.gateState(
             learnedTotal = 9_999,
             target = 10_000,
             userActivationEnabled = true,
         )
-        assertFalse(beforeMilestone.isGateActive)
+        assertTrue(beforeMilestone.isGateActive)
         assertFalse(beforeMilestone.volumeConditionMet)
 
         val milestoneOnly = NeuralLearningLedger.gateState(
@@ -131,7 +148,7 @@ class NeuralLearningLedgerTest {
         )
         assertTrue(milestoneOnly.volumeConditionMet)
         assertFalse(milestoneOnly.isGateActive)
-        assertTrue(milestoneOnly.summaryFa.contains("شرط ۱"))
+        assertTrue(milestoneOnly.summaryFa.contains("فعال‌سازی"))
 
         val bothConditions = NeuralLearningLedger.gateState(
             learnedTotal = 10_000,
