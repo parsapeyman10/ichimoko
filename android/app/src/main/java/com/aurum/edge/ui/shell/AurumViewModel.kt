@@ -554,6 +554,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     )
                 }
 
+                // ۵. چرخهٔ معامله‌گر: خودش را بازبینی و اصلاح می‌کند (حداکثر هر ۱۵ دقیقه).
+                //    این حلقه همان چیزی است که «دستیار» را به «مدیر» تبدیل می‌کند: بدون آن، نکات
+                //    و ماتریس برتری فقط وقتی باز کردن تب هوش دستی صدا زده می‌شد ساخته می‌شدند.
+                runCatching { runAiTraderCycle(force = false) }
+
                 // «سبک‌سازی»: وقتی پوزیشن بازی نیست و معاملهٔ خودکار هم خاموش است، حلقهٔ پایش
                 // با فاصلهٔ بیشتری اجرا می‌شود تا پردازنده/باتری و رشتهٔ اصلی آزاد بمانند.
                 val idleLight = openSymbolSet.isEmpty() && !settings.value.autoPaperTrading
@@ -762,7 +767,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                             }
                             lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
                             val tfLabel = armedReport.triggerInterval.label
-                            val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] · [${armedReport.strategyTitleFa}] · (R:R 1:${calc.riskReward} · ${armedReport.trendPhase.badgeFa})"
+                            val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] · [${armedReport.strategyTitleFa}] · (R:R 1:${calc.riskReward} · ${armedReport.trendPhase.badgeFa})" +
+                                traderBudgetNote(armedReport.strategyId, calc)
                             openAutoTrackedTrade(
                                 calc = calc,
                                 note = sniperNote,
@@ -1032,6 +1038,33 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val phoneDailyBackups: StateFlow<List<com.aurum.edge.data.PhoneDailyBackupMeta>> =
         com.aurum.edge.data.PhoneStorageVaultManager.dailyBackups
+
+    /**
+     * بودجهٔ ریسکِ «معامله‌گر» برای یک استراتژی، به‌صورت یادداشت خوانا روی معامله.
+     *
+     * ماتریس برتری می‌گوید هر استراتژی چه سهمی از بودجهٔ ریسک را باید بگیرد؛ اگر سهم استراتژی
+     * از سهم مساوی همه کمتر باشد (لبهٔ ضعیف‌تر اندازه‌گیری‌شده)، همین‌جا در یادداشت معامله گفته
+     * می‌شود تا معلوم باشد تصمیم از کجا آمده است. هیچ معامله‌ای به‌خاطر این متن رد نمی‌شود —
+     * ردکردن با [EntrySafetyGate] است که سقف‌ها را می‌سنجد.
+     */
+    private fun traderBudgetNote(
+        strategyId: String,
+        calc: RiskCalculationResult,
+    ): String {
+        val matrix = _aiTraderMatrix.value
+        if (matrix.isEmpty()) return ""
+        val row = matrix.firstOrNull { it.strategyId == strategyId } ?: return ""
+        val evenShare = 1.0 / matrix.size.toDouble()
+        val verdict = when {
+            row.tradesCount == 0 -> "بدون نمونه — سهم آزمایشی"
+            row.allocationShare <= 0.0 -> "لبهٔ منفی — سهم صفر"
+            row.allocationShare > evenShare -> "لبهٔ بالاتر از میانگین — سهم کامل"
+            else -> "لبهٔ زیر میانگین — سهم محدود"
+        }
+        val sharePct = String.format(Locale.US, "%.1f%%", row.allocationShare * 100.0)
+        return "\n🧮 بودجهٔ معامله‌گر: $sharePct از بودجهٔ کل · $verdict · ${row.tradesCount} نمونه · ریسک این معامله " +
+            "${String.format(Locale.US, "%.2f$", calc.riskBudgetUsd)}"
+    }
 
     private fun executeOpenTradeNow(
         calc: RiskCalculationResult,
