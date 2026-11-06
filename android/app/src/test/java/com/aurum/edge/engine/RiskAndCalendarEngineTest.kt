@@ -941,8 +941,24 @@ class RiskAndCalendarEngineTest {
         assertEquals("Latch", defaultSettings.slAlarmSoundName)
 
         // آرشیو تصویری حذف شد: نه فایل تصویری ساخته می‌شود، نه متادیتا داخل تصویر جاسازی می‌شود.
-        // فقط تنظیمات پیش‌فرض زنگ هشدار سنجیده می‌شود (بخشی از این تست که مستقل از آرشیو است).
+        // معاملهٔ نمونه برای تست‌های PDF و شمارهٔ نمایشی لازم است.
         assertTrue(BitcoinStrategyModel.HIDDEN_CROSS.id.isNotBlank())
+
+        val sampleTrade = com.aurum.edge.core.PaperTrade(
+            id = "SNAP_TEST_1",
+            symbol = "XAU/USD",
+            action = SignalAction.BUY,
+            interval = Interval.M15,
+            entry = 2_745.0,
+            stopLoss = 2_738.0,
+            takeProfit = 2_762.5,
+            riskReward = 2.5,
+            confidence = 91.0,
+            openedAt = 1_760_200_000_000L,
+            fixedRiskUsd = 5.0,
+            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+            strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
+        )
 
         // Verify all 9 Drive PDF strategies have complete DriveBookPlaybookSpec + live telemetry + dedicated 16 conditions
         BitcoinStrategyModel.drivePdfStrategies.forEach { driveModel ->
@@ -1106,6 +1122,17 @@ class RiskAndCalendarEngineTest {
 
         // Verify v3.9.24 features:
         // «آرشیو تصویری» حذف شد؛ فقط خروجی PDF ژورنال باقی می‌ماند و باید فایل معتبر بسازد.
+        val closedForArchive = sampleTrade.copy(
+            id = "PDF_ARCH_1",
+            tradeNumber = 21,
+            stopLoss = 2_738.0,
+            initialStopLoss = 2_738.0,
+            takeProfit = 2_766.0,
+            riskReward = 4.0, // > 3.0 initial R:R preserved with fixed SL
+            closedAt = sampleTrade.openedAt + 1_800_000L,
+            exitPrice = 2_766.0,
+            pnlUsd = 20.0,
+        )
         val tearSheetForPdf = com.aurum.edge.data.JournalExportEngine.buildInstitutionalTearSheet(
             trades = listOf(sampleTrade, closedForArchive),
             initialCapital = 100_000.0,
