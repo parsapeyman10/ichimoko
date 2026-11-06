@@ -202,11 +202,11 @@ android {
         // 3.9.49 adds explicit SAF export for the private trade-snapshot archive: the user chooses
         // Google Drive or another document provider, original images remain app-private, and no
         // Drive token, storage permission, or automatic Gallery copy is introduced.
-        // 3.9.54: پاک‌سازی کد و دادهٔ بیکار — ۴۰ تابع بدون فراخوانی، فایل مردهٔ HistorySourceSelection،
-        // قراردادهای بی‌مصرف داده (Signal/ConfluenceItem) و سندهای کهنه حذف شدند تا تصمیم‌گیری بعدی
-        // روی کد واقعی انجام شود، نه روی خاطرات نسخه‌های گذشته.
-        versionCode = 763
-        versionName = "3.9.54"
+        // 3.9.55: «آزمایشگاه بک‌تست» — خواندن CSV داکاس‌کپی (dukascopy-node)، چارت کندلی با
+        // پیمایش قدم‌به‌قدم، اجرای هر استراتژی روی همان بازه و آموزش شبکهٔ عصبی در اتاق تمرین
+        // جدا (ژورنال، حساب کاغذی و پارامترهای معاملات واقعی دست نمی‌خورند).
+        versionCode = 764
+        versionName = "3.9.55"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

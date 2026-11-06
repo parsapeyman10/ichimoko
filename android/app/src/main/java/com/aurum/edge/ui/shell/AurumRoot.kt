@@ -127,6 +127,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                             onSelectTicker = { chartTicker = it },
                             viewModel = viewModel,
                         )
+                        AurumTab.Backtest -> BacktestScreen(container = viewModel.container)
                         AurumTab.Journal -> JournalRiskScreen(
                             viewModel = viewModel,
                             onChartSymbol = ::openChartFor,

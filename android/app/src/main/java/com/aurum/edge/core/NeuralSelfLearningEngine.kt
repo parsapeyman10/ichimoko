@@ -2021,6 +2021,29 @@ class NeuralSelfLearningEngine(
      * عبور رو به جلو (Forward Pass) در معماری `FT-Attention + SwiGLU Residual + LayerNorm`:
      * با اعمال ضریب تیونینگ و وزن یادگرفته‌شده اختصاصی هر استراتژی روی هر ۱۶ ویژگی (`PerStrategyNeuralFeatureTuning`).
      */
+    /**
+     * پیش‌بینی احتمال برد برای یک بردار ویژگی — فقط خواندن، هیچ آموزشی.
+     *
+     * برای «اتاق تمرین بک‌تست» لازم شد: آنجا باید بشود پرسید «شبکه بعد از دیدن این
+     * معاملات، این شرایط را چقدر می‌پسندد؟» بدون آن‌که چیزی به حالت اضافه شود.
+     *
+     * @return احتمال برد در بازهٔ ۰..۱ (۰٫۵ = بی‌نظر).
+     */
+    fun predictWinProbability(
+        features: List<Double>,
+        strategyId: String? = null,
+        symbol: String? = null,
+    ): Double = forwardPass(features, persistedState, strategyId, symbol).first.coerceIn(0.0, 1.0)
+
+    /**
+     * وزن خالص یادگرفته‌شدهٔ یک ویژگی (ایندکس ۰..۱۵) در لایهٔ خروجی.
+     * مثبت = «این ویژگی در معاملات برنده حاضر بود»، منفی = «علامت هشدار».
+     */
+    fun featureHeadWeight(featureIndex: Int): Double {
+        if (featureIndex !in 0 until INPUT_DIM) return 0.0
+        return persistedState.headWinWeights.getOrElse(featureIndex) { 0.0 }
+    }
+
     private fun forwardPass(
         features: List<Double>,
         cur: NeuralNetworkPersistedState = persistedState,

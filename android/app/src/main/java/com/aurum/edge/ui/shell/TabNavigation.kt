@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.TrackChanges
@@ -41,6 +42,7 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     Home("خانه", Icons.Filled.Home),
     Strategy("رادار", Icons.Filled.TrackChanges),
     Chart("چارت", Icons.Filled.ShowChart),
+    Backtest("بک‌تست", Icons.Filled.Science),
     Journal("ژورنال", Icons.Filled.ReceiptLong),
     Neural("هوش عصبی", Icons.Filled.Psychology),
     Settings("تنظیمات", Icons.Filled.Settings),
@@ -51,6 +53,7 @@ internal val primaryTabs = listOf(
     AurumTab.Home,
     AurumTab.Strategy,
     AurumTab.Chart,
+    AurumTab.Backtest,
     AurumTab.Journal,
     AurumTab.Neural,
     AurumTab.Settings,
@@ -98,7 +101,7 @@ internal fun AurumBottomBar(
                         imageVector = entry.icon,
                         contentDescription = entry.label,
                         tint = if (isSelected) AurumColors.Gold else AurumColors.TextMuted,
-                        modifier = Modifier.size(19.dp),
+                        modifier = Modifier.size(17.dp),
                     )
                     if (showBadge) {
                         Box(
@@ -121,7 +124,7 @@ internal fun AurumBottomBar(
                 }
                 Text(
                     text = entry.label,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                     color = if (isSelected) AurumColors.Gold else AurumColors.TextSecondary,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     // برچسب‌های دو کلمه‌ای («هوش عصبی»، «تنظیمات») در ۷ تب پایین صفحه

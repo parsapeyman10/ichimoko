@@ -65,7 +65,7 @@ import com.aurum.edge.core.CrashReporter
  * وضعیت کارت «بکاپ اسکرین‌شات‌ها» در تب آپدیت.
  */
 
-class AurumViewModel(private val container: AppContainer) : ViewModel() {
+class AurumViewModel(internal val container: AppContainer) : ViewModel() {
 
     companion object {
         /** هر چند وقت یک‌بار معامله‌گر خودش را بازبینی و اصلاح کند. */
