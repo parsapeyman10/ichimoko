@@ -28,6 +28,16 @@ import kotlin.math.round
  */
 object BacktestReplayEngine {
 
+    /**
+     * کف و سقف ریسک هر معامله.
+     *
+     * کف ۰٫۰۵٪ جلوی این را می‌گیرد که حجم پوزیشن به صفر گرد شود و بک‌تست معامله‌ای با
+     * سود/زیانِ اندازه‌ناپذیر بسازد؛ سقف ۵٪ جلوی یک معاملهٔ تک‌ضربه‌ای می‌ایستد که کل
+     * منحنی سرمایه را بی‌معنا کند.
+     */
+    const val MIN_RISK_PERCENT: Double = 0.05
+    const val MAX_RISK_PERCENT: Double = 5.0
+
     /** پیکربندی اجرای بک‌تست. هیچ‌کدام از این‌ها روی تنظیمات زندهٔ برنامه اثر ندارد. */
     data class Config(
         val strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
@@ -38,7 +48,7 @@ object BacktestReplayEngine {
         val triggerInterval: Interval = Interval.M15,
         /** سرمایهٔ شروع برای محاسبهٔ درصد و افت سرمایه. */
         val startEquityUsd: Double = 1_000.0,
-        /** ریسک هر معامله بر حسب درصد سرمایه. */
+        /** ریسک هر معامله بر حسب درصد سرمایه (۰٫۰۵ تا ۵٪؛ بیرون از این بازه محدود می‌شود). */
         val riskPercent: Double = 0.5,
         /** همهٔ استراتژی‌های روشن به‌جای یک استراتژی. */
         val runAllStrategies: Boolean = false,
@@ -347,7 +357,7 @@ object BacktestReplayEngine {
         // حجم پوزیشن از «ریسک درصدی سرمایه» می‌آید، نه از یک عدد ثابت. این همان چیزی است که
         // افت سرمایه و منحنی سرمایه را معنادار می‌کند: با ۰٫۵٪ ریسک، هر ۱R تقریباً ۰٫۵٪
         // سرمایه است، مستقل از این‌که قیمت نماد ۱٫۱ باشد یا ۲۴۰۰.
-        val riskUsd = equityUsd * (riskPercent.coerceIn(0.05, 5.0) / 100.0)
+        val riskUsd = equityUsd * (riskPercent.coerceIn(MIN_RISK_PERCENT, MAX_RISK_PERCENT) / 100.0)
         val units = (riskUsd / oneR).coerceAtLeast(1e-8)
         return OpenTrade(
             strategyId = report.strategyId,
