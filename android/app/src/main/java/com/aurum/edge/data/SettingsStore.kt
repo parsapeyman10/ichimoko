@@ -2,7 +2,6 @@ package com.aurum.edge.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.BaseStrategyConfig
@@ -288,36 +287,6 @@ class SettingsStore(context: Context) {
         return false
     }
 
-    /** Market-only archive on the user's own HTTPS host. Never send journal/account data.
-     * The bearer token stays in app-private preferences, not in AppSettings/Compose state.
-     */
-    fun tickArchiveConfig(): Pair<String, String>? {
-        val url = prefs.getString(KEY_TICK_ARCHIVE_URL, null)?.trim().orEmpty()
-        val token = prefs.getString(KEY_TICK_ARCHIVE_TOKEN, null).orEmpty()
-        val parsed = url.toHttpUrlOrNull() ?: return null
-        if (parsed.scheme != "https" || parsed.username.isNotEmpty() || parsed.password.isNotEmpty() ||
-            parsed.query != null || parsed.fragment != null || parsed.encodedPath != "/" || token.length < 32)
-            return null
-        return url.trimEnd('/') to token
-    }
-
-    fun tickArchiveUrl(): String = prefs.getString(KEY_TICK_ARCHIVE_URL, null).orEmpty()
-    fun hasTickArchive(): Boolean = tickArchiveConfig() != null
-
-    @Synchronized
-    fun saveTickArchive(urlInput: String, tokenInput: String): Boolean {
-        val url = urlInput.trim().trimEnd('/')
-        if (url.isBlank()) return prefs.edit().remove(KEY_TICK_ARCHIVE_URL)
-            .remove(KEY_TICK_ARCHIVE_TOKEN).commit()
-        val parsed = url.toHttpUrlOrNull() ?: return false
-        if (parsed.scheme != "https" || parsed.username.isNotEmpty() || parsed.password.isNotEmpty() ||
-            parsed.query != null || parsed.fragment != null || parsed.encodedPath != "/") return false
-        val token = tokenInput.trim().ifEmpty { prefs.getString(KEY_TICK_ARCHIVE_TOKEN, null).orEmpty() }
-        if (token.length < 32 || token.any { it.isWhitespace() }) return false
-        return prefs.edit().putString(KEY_TICK_ARCHIVE_URL, url)
-            .putString(KEY_TICK_ARCHIVE_TOKEN, token).commit()
-    }
-
     /**
      * Real-time continuous balance adjustment upon settled paper trade (profit or loss).
      * Ensures position sizing and compounding dynamically track actual account equity.
@@ -571,8 +540,6 @@ class SettingsStore(context: Context) {
         private const val KEY_SL_ALARM_SOUND_NAME = "sl_alarm_sound_name_v3913"
         private const val KEY_MAX_LEVERAGE_CAP = "max_leverage_cap_v3913"
         private const val KEY_NEWS_URL = "news_base_url"
-        private const val KEY_TICK_ARCHIVE_URL = "tick_archive_url"
-        private const val KEY_TICK_ARCHIVE_TOKEN = "tick_archive_token"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
         // Historical preference key must not be renamed: an existing opt-in survives an upgrade.
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"

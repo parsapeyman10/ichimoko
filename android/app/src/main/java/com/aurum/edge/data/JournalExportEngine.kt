@@ -1176,7 +1176,7 @@ function filterRows() {
                 doc.finishPage(page)
             }
 
-            // صفحه‌های «آرشیو تصویری» از PDF حذف شدند (درخواست کاربر)؛ PDF فقط داده و جدول عددی دارد.
+            // فقط داده و جدول عددی؛ هیچ صفحهٔ تصویری در PDF نیست.
 
             outputFile.parentFile?.mkdirs()
             FileOutputStream(outputFile).use { out ->

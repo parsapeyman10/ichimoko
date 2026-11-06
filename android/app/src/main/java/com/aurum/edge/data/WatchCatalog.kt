@@ -159,9 +159,6 @@ object WatchCatalog {
 
     val scannerSymbols: List<String> = symbols.map { it.id }
 
-    fun scanUniverse(activeWatchlist: List<String>): List<String> =
-        (activeWatchlist + scannerSymbols).filter(com.aurum.edge.core.V1Universe::valid).distinct()
-
     fun find(id: String): WatchSymbol? {
         val normalized = com.aurum.edge.core.V1Universe.normalize(id)
         return symbols.firstOrNull { it.id == normalized }

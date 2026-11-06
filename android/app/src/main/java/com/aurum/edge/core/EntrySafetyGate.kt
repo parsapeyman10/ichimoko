@@ -47,12 +47,11 @@ object EntrySafetyGate {
     val LOW_TIMEFRAMES: Set<Interval> = setOf(Interval.M1, Interval.M3, Interval.M5, Interval.M15)
 
     /**
-     * سشن‌های مسدود: **خالی، و عمداً خالی.**
+     * ساعتِ روز هرگز به‌تنهایی مانع ورود نیست.
      *
-     * در نسخهٔ ۳.۹.۵۰ ساعت‌های ۰۰:۰۰–۰۷:۰۰ UTC («آسیا») از ورود خودکار منع می‌شدند. این منع حذف شد:
-     * کاربر خواسته «زمان‌بندی سشن‌ها اصلاً در یادگیری نباشد» و ساعتِ روز نباید به‌تنهایی مانع
-     * معامله شود. تنها چیزی که می‌ماند این است که **با معاملهٔ باز داخل بازارِ بسته نرویم** —
-     * و آن با [MarketHours.closedFor] سنجیده می‌شود، نه با ساعت UTC.
+     * تنها قید زمانی این است که **با معاملهٔ باز داخل بازارِ بسته نرویم**؛ آن با
+     * [MarketHours.closedFor] سنجیده می‌شود، نه با ساعت UTC. این مجموعه برای سازگاری با
+     * فراخوانی‌های موجود نگه داشته شده و همیشه خالی است.
      */
     val DEFAULT_BLOCKED_SESSIONS_UTC_HOURS: Set<Int> = emptySet()
 
@@ -95,7 +94,7 @@ object EntrySafetyGate {
         val maxPositionsPerSymbol: Int = DEFAULT_MAX_POSITIONS_PER_SYMBOL,
         val maxSignalAgeBars: Int = DEFAULT_MAX_SIGNAL_AGE_BARS,
         val maxFeeToRiskRatio: Double = DEFAULT_MAX_FEE_TO_RISK_RATIO,
-        /** @deprecated خالی است. ممنوعیت ساعتِ روز حذف شد؛ فقط بازارِ بسته جلوی ورود را می‌گیرد. */
+        /** خالی است؛ فقط بازارِ بسته جلوی ورود را می‌گیرد، نه ساعتِ روز. */
         val blockedSessionsUtcHours: Set<Int> = DEFAULT_BLOCKED_SESSIONS_UTC_HOURS,
         val restrictedSymbolsLowTimeframe: Boolean = true,
     )

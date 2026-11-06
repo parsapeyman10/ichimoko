@@ -41,7 +41,7 @@ fun UpdateScreen(viewModel: AurumViewModel) {
     // package manager on every recomposition would be wasteful and could show a half-written value.
     val signing = remember { viewModel.updateSigningSummary }
     val crashReports by viewModel.crashReports.collectAsStateWithLifecycle()
-    // «بکاپ اسکرین‌شات» به‌طور کامل حذف شد: نه تصویری گرفته می‌شود، نه ZIP بکاپ ساخته/بازخوانی
+    // صفحهٔ آپدیت فقط به‌روزرسانی و گزارش کرش را نشان می‌دهد: نه تصویری گرفته می‌شود، نه ZIP بکاپ ساخته/بازخوانی
     // می‌شود و نه در بارگذاری/صادرکردن جایی خوانده می‌شود.
     LaunchedEffect(Unit) {
         viewModel.refreshCrashReports()

@@ -4,6 +4,37 @@
 
 ---
 
+## ۳.۹.۵۴ — کد ۷۶۳ · **منتشرشده** (۲۰۲۶-۱۱-۰۶)
+
+> انگیزه: **کد و داده‌ای که هیچ‌جا استفاده نمی‌شود باید برود** — نه فقط برای حجم، بلکه چون هر
+> تابع بی‌فراخوان و هر سند کهنه، در تصمیم بعدی «شاهدِ قلابی» می‌سازد.
+
+- **۴۰ تابع بدون هیچ فراخوانی حذف شد** (با اعتبارسنجی ماشینی روی کل درخت کد، نه حدس): از جمله
+  `bestCandidate`/`tightestUsable*`/`sanitize*` در مشاور نئوویو، `evaluateLiveTickTrendRunner`،
+  `knowledgeBundleJson`/`knowledgeManifestFa`/`describeBundleFa`، `sharpeOfR`، `feePriceOffsetPerUnit`،
+  `riskBudgetFor`، `nearestCrownWithin`، `nextMidBarOrBoundaryCheckMillis`، `isNearClose`،
+  `paperable`، `assetClassOf`، `survivedClosure`، `hasIndexName`، `scanUniverse`، `restoreArchivedTradeIfMissing`،
+  `forcePublish`/`trackedKeys`، `formatTime`/`relativeTime`/`ConfluenceRow` و شش عملیات بی‌استفادهٔ
+  `AurumViewModel` (شامل بقایای آرشیو تصویری).
+- **فایل مرده:** `data/HistorySourceSelection.kt` (نه ثبت می‌شد، نه خوانده می‌شد) حذف شد.
+- **قراردادهای دادهٔ بی‌مصرف:** `Signal`، `ConfluenceItem`، `ConfluenceStatus` (هر سه فقط
+  نوشته/تعریف می‌شدند و هیچ‌جا خوانده نمی‌شدند)؛ فیلدهای `bid`/`ask`/`evaluationError`/
+  `sourceIntegrityRevision`/`historyProvider`/`lastTradePrice` در `MarketState`؛
+  `sourceNote`/`sourceConfirmations`/`trailExtreme`/`rewardPerOz` در `PaperTrade`؛
+  `watchlistSeed`/`ids` در `CryptoCatalog`؛ دو شمارندهٔ بی‌مصرف در مدیر آلارم.
+- **تنظیمات بیکار:** کل مسیر «آپلود آرشیو تیک به میزبان شخصی» (`tickArchiveConfig`/`saveTickArchive`
+  و دو کلید `SharedPreferences`) حذف شد؛ هیچ UI یا کارگری به آن وصل نبود.
+- **۱۷ ایمپورت بی‌مصرف** و ۱۸ کامنت «فلان چیز حذف شد» پاک شدند؛ این کامنت‌ها باعث می‌شد کد فعلی
+  با گذشته اشتباه گرفته شود.
+- **سندهای کهنه حذف شدند:** `SCREENSHOT_BACKUP_FA.md`، `SESSION_TIMING_LEARNING_FA.md`،
+  `RELEASE_3_0_FA.md`، `SIGNING_AUDIT_FA.md`، `PERFORMANCE_SCORECARD_FA.md`. جای همهٔ آن‌ها یک
+  مرجع واحد و به‌روز آمد: **`docs/CURRENT_CONTRACT_FA.md`** — قواعد فعلی، آستانه‌های مرجع،
+  «چه چیزی عمداً وجود ندارد» و «چه چیزی نباید دست بخورد».
+- **ابزار:** `tools/kotlin_remove_decl.py` (حذف اعلان کو틀ین با تطبیق آکولاد و KDoc، فقط وقتی
+  دقیقاً یک اعلان با آن نام وجود دارد) برای پاک‌سازی‌های بعدی اضافه شد.
+- **بدون تغییر رفتار:** هیچ آستانه، فرمول، دالان R:R، امضا یا مسیر آپدیت تغییر نکرد. ۱۵۷ تست
+  سبز ماند.
+
 ## ۳.۹.۵۳ — کد ۷۶۲ · **منتشرشده** (۲۰۲۶-۱۱-۰۶)
 
 > انگیزهٔ این نسخه، دقیق‌کردن همان خواستهٔ «معامله‌گر، نه دستیار» است: پیش‌بینی نماد باید **پیش از** معامله از خبر اثر بگیرد، اصلاح‌ها باید برگشت‌پذیر باشند، و چرخهٔ تصمیم باید خودش بچرخد نه با باز کردن یک تب.

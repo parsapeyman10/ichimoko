@@ -1253,10 +1253,4 @@ object NeoWaveEngine {
         }
     }
 
-    /** خلاصهٔ فارسی وضعیت نئوویو برای نمایش در پنل (بدون تحلیل تازه). */
-    fun statusLineFa(verdict: NeoWaveVerdict?): String = when {
-        verdict == null -> "🌊 نئوویو: کندل کافی برای شمارش معتبر موجود نیست."
-        verdict.pattern == NeoWavePattern.UNKNOWN -> "🌊 نئوویو: ساختار فعلی هیچ الگوی معتبری از قواعد نیلی را پاس نمی‌کند."
-        else -> verdict.summaryFa
-    }
 }

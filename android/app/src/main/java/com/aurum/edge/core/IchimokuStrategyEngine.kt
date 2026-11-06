@@ -1096,23 +1096,6 @@ object Smart15mSyncPlanner {
     }
 
     /**
-     * زمان چک میان‌کندلی (دقیقه ۷:۳۰ برای کندل ۱۵ دقیقه) جهت نمادهایی که ۴ یا ۵ شرط از ۶ شرط را دارند.
-     */
-    fun nextMidBarOrBoundaryCheckMillis(
-        nowMillis: Long,
-        triggerInterval: Interval = Interval.M15,
-    ): Long {
-        val period = triggerInterval.millis
-        val bucketStart = currentCandleBucket(nowMillis, triggerInterval) * period
-        val midPoint = bucketStart + (period / 2L) + CANDLE_SETTLE_DELAY_MS
-        return if (nowMillis < midPoint) {
-            midPoint
-        } else {
-            nextTriggerBoundaryCheckMillis(nowMillis, triggerInterval)
-        }
-    }
-
-    /**
      * ثانیه‌های باقی‌مانده تا بسته شدن کندل ۱۵ دقیقه‌ای بعدی.
      */
     fun secondsUntilNextBoundary(

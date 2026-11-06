@@ -423,12 +423,6 @@ object NeuralLearningLedger {
         return sb.toString()
     }
 
-    /** ساخت خلاصهٔ یک‌خطی فارسی از یک تحویل (import/export). */
-    fun describeBundleFa(bundle: KnowledgeBundle): String =
-        "بستهٔ دانش ${bundle.appVersionName.ifBlank { "?" }} (کد ${bundle.appVersionCode}) · " +
-            "${bundle.learnedTotal} معاملهٔ آموخته‌شده · نسل تیونینگ ${bundle.tuningGeneration} · " +
-            "${bundle.changeLog.size} رویداد اصلاحی"
-
     private fun formatJalaliLike(epochMs: Long): String {
         if (epochMs <= 0L) return "—"
         return java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)

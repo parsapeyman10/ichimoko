@@ -209,8 +209,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             runCatching { com.aurum.edge.data.PhoneStorageVaultManager.attachContext(container.appContext) }
             runCatching { com.aurum.edge.data.SessionExitLearningStore.init(container.appContext) }
             yield()
-            // «آرشیو تصویری معاملات» کاملاً حذف شد (درخواست کاربر: نه فایل سنگین، نه دیتای مناسب).
-            // نه ساخت تصویر، نه بازخوانی فهرست، نه بودجهٔ حافظه — هیچ‌کدام در راه‌اندازی اجرا نمی‌شوند.
+            // راه‌اندازی فقط دادهٔ متنی و کندل را آماده می‌کند؛ هیچ کار تصویری در این مسیر نیست.
             runCatching { com.aurum.edge.core.MasterIchimokuTradingAssistant.init(container.appContext) }
 
             // فرصت دادن به اولین فریم و اولین تیک قیمت تا کارهای سنگین با نمایش اولیه رقابت نکنند.
@@ -1254,17 +1253,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /**
-     * «آرشیو تصویری» حذف شد.
-     *
-     * این تابع قبلاً یک WebP از چارت هر معامله می‌ساخت و در حافظهٔ خصوصی اپ نگه می‌داشت. کاربر
-     * صریحاً گفت نه فایل سنگین می‌خواهد و نه آن تصاویر دیتای مناسبی می‌دهند، پس مسیر ساخت/ثبت
-     * تصویر کامل برداشته شد. دادهٔ لازم برای یادگیری همان کندل‌ها و گزارش‌های ژورنال است.
-     * امضای این تابع نگه داشته شده تا فراخوانی‌های موجود نشکنند.
-     */
-    @Suppress("UNUSED_PARAMETER")
-    fun captureOrRefreshTradeSnapshot(trade: PaperTrade) = Unit
-
     fun restoreAllDataAndSnapshotsFromPhone() {
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val shardTrades = com.aurum.edge.data.PhoneStorageVaultManager.loadAllTradesFromPhoneShards(container.appContext)
@@ -1284,12 +1272,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 if (restoredBrain) append(" + شبکه عصبی")
             }
         }
-    }
-
-    /** بازگردانی «تصویر آرشیو» از گوشی حذف شد؛ متادیتای معامله از خود ژورنال می‌آید. */
-    @Suppress("UNUSED_PARAMETER")
-    fun importSnapshotFromPhoneUri(uri: android.net.Uri) {
-        _toast.value = "ℹ️ آرشیو تصویری از این نسخه حذف شده است؛ معاملات از ژورنال و شاردهای روزانه بازیابی می‌شوند"
     }
 
     /** ذخیرهٔ حافظهٔ شبکهٔ عصبی روی گوشی (بکاپ). مستقل از آرشیو تصویری است و باقی می‌ماند. */
@@ -1328,10 +1310,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         container.journalStore.deleteTrade(tradeId)
         _toast.value = "معامله از ژورنال حذف شد"
     }
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // «بکاپ اسکرین‌شات» حذف شد (درخواست کاربر: هم گرفتنش نه، هم در بارگذاری نادیده گرفته شود)
-    // ─────────────────────────────────────────────────────────────────────────────
 
     // ─────────────────────────────────────────────────────────────────────────────
     // عیب‌یابی: گزارش کرش‌های ثبت‌شده داخل اپ
@@ -1387,13 +1365,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     // ─────────────────────────────────────────────────────────────────────────────
     // بکاپ اسکرین‌شات: حذف کامل (گرفتن، ذخیره، اشتراک، بازگردانی و آمار تعداد/حجم)
     // ─────────────────────────────────────────────────────────────────────────────
-
-    /** اندازهٔ خوانا برای گزارش‌های فارسی (کیلوبایت/مگابایت). */
-    private fun humanKbFa(bytes: Long): String = when {
-        bytes >= 1_048_576L -> String.format(Locale.US, "%.1f", bytes / 1_048_576.0) + " مگابایت"
-        bytes >= 1_024L -> String.format(Locale.US, "%.0f", bytes / 1_024.0) + " کیلوبایت"
-        else -> bytes.toString() + " بایت"
-    }
 
     fun clearAllJournalTrades() {
         container.journalStore.clear()
@@ -1631,8 +1602,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         syncAllOpenAndActiveSymbolsGap(notifyOnSuccess = false)
         startLiveMonitor()
     }
-
-    fun pauseInvisibleForexFeed() = Unit
 
     fun checkForAppUpdate(autoDownload: Boolean = settings.value.autoDownloadUpdates, force: Boolean = true) {
         viewModelScope.launch {
@@ -2265,12 +2234,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         container.settingsStore.update { it.copy(alarmVolumePercent = safePct) }
     }
 
-    fun setAlarmTonePreset(presetId: String) {
-        val preset = com.aurum.edge.notify.AlarmTonePreset.fromId(presetId)
-        container.settingsStore.update { it.copy(alarmTonePreset = preset.id) }
-        _toast.value = "🎼 الگوی صدای آلارم: ${preset.titleFa}"
-    }
-
     fun setAlarmVibrationEnabled(enabled: Boolean) {
         container.settingsStore.update { it.copy(alarmVibrationEnabled = enabled) }
         _toast.value = if (enabled) "📳 ویبره اختصاصی آلارم‌ها فعال شد" else "📴 ویبره آلارم‌ها غیرفعال شد"
@@ -2351,8 +2314,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 "🧠 گیت شبکه عصبی غیرفعال شد؛ شبکه فقط یاد می‌گیرد و هشدار می‌دهد"
         }
     }
-
-    fun setNeuralForceActiveBeforeWarmup(enabled: Boolean) = setNeuralGateUserActivation(enabled)
 
     /** بازبینی دستی دفتر یادگیری و تطبیق عدد یادگیری با معامله‌های واقعی ژورنال. */
     fun auditNeuralLearningLedgerNow() {
@@ -2598,8 +2559,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /**
      * خروجی PDF از کل ژورنال.
      *
-     * نام این تابع از دوره‌ای مانده که «آرشیو تصویری» هم ساخته می‌شد؛ آن بخش حذف شده و اکنون
-     * فقط PDF ساخته و اشتراک گذاشته می‌شود. نام تابع برای سازگاری با فراخوانی‌های موجود حفظ شد.
+     * فقط PDF ساخته و اشتراک گذاشته می‌شود (نام تابع تاریخی است و فراخوانی‌اش در ژورنال است).
      */
     fun recordAllTradesWithArchiveSnapshotsAndExportPdf() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {

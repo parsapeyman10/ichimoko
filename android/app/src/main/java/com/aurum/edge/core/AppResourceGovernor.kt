@@ -1,7 +1,6 @@
 package com.aurum.edge.core
 
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -88,11 +87,5 @@ object AppResourceGovernor {
         return kept
     }
 
-    /** چند رکورد را در هر دستهٔ پردازش برداریم تا حافظه بین دسته‌ها آزاد شود. */
-    fun chunkSize(budget: Budget): Int = max(4, min(budget.archiveBatch, 32))
-
-    /** درصد استفاده از بودجهٔ آرشیو (برای نمایش هشدار در UI). */
-    fun usagePercent(usedBytes: Long, budget: Budget): Int =
-        if (budget.archiveBudgetBytes <= 0L) 0
         else ((usedBytes.toDouble() / budget.archiveBudgetBytes) * 100).roundToInt().coerceIn(0, 999)
 }

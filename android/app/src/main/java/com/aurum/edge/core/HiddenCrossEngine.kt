@@ -268,27 +268,6 @@ object HiddenCrossEngine {
             .sortedBy { it.distanceAtr }
     }
 
-    /**
-     * نزدیک‌ترین تاجِ روبروی قیمت، اگر داخل دالان [minR .. maxR] بر حسب فاصله از حد ضرر باشد.
-     *
-     * @param stopDistance فاصلهٔ ۱R (ورود تا حد ضرر).
-     */
-    fun nearestCrownWithin(
-        crowns: List<CrownLevel>,
-        price: Double,
-        atr: Double,
-        stopDistance: Double,
-        minR: Double,
-        maxR: Double,
-    ): CrownLevel? {
-        if (stopDistance <= 0.0 || atr <= 0.0) return null
-        return crowns.firstOrNull { crown ->
-            val dist = abs(crown.price - price)
-            val r = dist / stopDistance
-            r in minR..maxR
-        }
-    }
-
     // ─────────────────────────── شناسایی کراس برابری ───────────────────────────
 
     /**

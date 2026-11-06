@@ -30,17 +30,9 @@ class UiUpdateCoalescer(
         return true
     }
 
-    /** انتشار اجباری (مثلاً وقتی مقدار به‌شدت تغییر کرده یا معامله بسته شده). */
-    @Synchronized
-    fun forcePublish(key: String, now: Long = System.currentTimeMillis()) {
-        lastPublishedAt[key] = now
-    }
-
     @Synchronized
     fun reset() {
         lastPublishedAt.clear()
     }
 
-    @Synchronized
-    fun trackedKeys(): Int = lastPublishedAt.size
 }

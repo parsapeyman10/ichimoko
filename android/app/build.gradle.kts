@@ -202,10 +202,11 @@ android {
         // 3.9.49 adds explicit SAF export for the private trade-snapshot archive: the user chooses
         // Google Drive or another document provider, original images remain app-private, and no
         // Drive token, storage permission, or automatic Gallery copy is introduced.
-        // 3.9.53: لایهٔ خبری واقعی در پیش‌بینی شرایط نماد (پیش از معامله)، بازگشت‌پذیری اصلاح‌ها
-        // از UI، اجرای خودکار چرخهٔ معامله‌گر در حلقهٔ پایش و یادداشت بودجهٔ ریسک روی هر معامله.
-        versionCode = 762
-        versionName = "3.9.53"
+        // 3.9.54: پاک‌سازی کد و دادهٔ بیکار — ۴۰ تابع بدون فراخوانی، فایل مردهٔ HistorySourceSelection،
+        // قراردادهای بی‌مصرف داده (Signal/ConfluenceItem) و سندهای کهنه حذف شدند تا تصمیم‌گیری بعدی
+        // روی کد واقعی انجام شود، نه روی خاطرات نسخه‌های گذشته.
+        versionCode = 763
+        versionName = "3.9.54"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

@@ -245,13 +245,6 @@ class JournalStore(
         applyBalanceDelta(previous, trade)
     }
 
-    @Synchronized
-    fun restoreArchivedTradeIfMissing(trade: PaperTrade): Boolean {
-        if (_trades.value.any { it.id == trade.id }) return false
-        persist(listOf(trade) + _trades.value)
-        return true
-    }
-
     /**
      * قفل حد ضرر ساختاری ثابت (غیرپله‌ای) و حفظ R:R اولیه معامله (`stopLoss = initialStopLoss ?: stopLoss`).
      */

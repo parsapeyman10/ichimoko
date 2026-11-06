@@ -2,7 +2,6 @@ package com.aurum.edge.core
 
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.round
 
 /**
@@ -604,23 +603,6 @@ object AiTraderEngine {
             compareByDescending<EdgeMatrixRow> { it.adjustedEdge }
                 .thenByDescending { it.tradesCount },
         )
-    }
-
-    /**
-     * بودجهٔ ریسک یک استراتژی برای یک معاملهٔ مشخص.
-     *
-     * استراتژی با سهم صفر، بودجهٔ «آزمایشی» کوچک می‌گیرد تا داده جمع شود — بدون آن، استراتژی
-     * هرگز نمی‌تواند خودش را ثابت کند.
-     */
-    fun riskBudgetFor(
-        row: EdgeMatrixRow?,
-        totalRiskBudgetUsd: Double,
-        minTrialShare: Double = 0.05,
-    ): Double {
-        if (totalRiskBudgetUsd <= 0.0) return 0.0
-        val share = row?.allocationShare ?: (1.0 / 19.0)
-        val effective = if (share <= 0.0) minTrialShare else share
-        return round(totalRiskBudgetUsd * effective * 100.0) / 100.0
     }
 
     // ─────────────────────────── خلاصهٔ فارسی ───────────────────────────

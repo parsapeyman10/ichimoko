@@ -72,9 +72,6 @@ object SessionExitLearning {
         else -> code
     }
 
-    fun assetClassOf(code: String): AssetClass? =
-        AssetClass.values().firstOrNull { it.code.equals(code, ignoreCase = true) }
-
     /**
      * تخمین بهترین زمان سربار برای یک دستهٔ دارایی.
      *

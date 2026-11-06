@@ -12,7 +12,6 @@ import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.round
-import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -822,7 +821,7 @@ class NeuralSelfLearningEngine(
             )
         }.sortedWith(compareByDescending<NeuralStrategyTradingEdge> { it.tradesCount }.thenByDescending { it.edgeScore })
 
-        // ── ۲. «زمان‌بندی سشن» حذف شد (درخواست صریح کاربر) ──────────────────────
+        // ── ۲. هیچ لبهٔ سشنی ساخته نمی‌شود: یادگیری بر پایهٔ ساختار است، نه ساعتِ روز ──────
         // آمار سشن (آسیا/لندن/هم‌پوشانی/نیویورک) دیگر نه محاسبه می‌شود، نه در کارنامه می‌آید و
         // هیچ پارامتری از آن تیون نمی‌شود. تنها بازدارندهٔ زمانی، «بازار بسته» است که در
         // `EntrySafetyGate` و `MarketHours` سنجیده می‌شود: با پوزیشن باز داخل بازار تعطیل نمی‌رویم.
@@ -1498,14 +1497,6 @@ class NeuralSelfLearningEngine(
             changeLog = persistedState.knowledgeChangeLog,
         )
     }
-
-    /** خروجی JSON کامل بستهٔ دانش (برای اشتراک‌گذاری یا تست). */
-    fun knowledgeBundleJson(appVersionName: String, appVersionCode: Int): String =
-        NeuralLearningLedger.encodeBundle(buildKnowledgeBundle(appVersionName, appVersionCode))
-
-    /** منیفست فارسی خوانا از دانش فعلی. */
-    fun knowledgeManifestFa(appVersionName: String, appVersionCode: Int): String =
-        NeuralLearningLedger.buildManifestFa(buildKnowledgeBundle(appVersionName, appVersionCode))
 
     /**
      * ذخیرهٔ بستهٔ دانش + منیفست فارسی در `Download/AurumEdge/Archive` گوشی.
@@ -2474,10 +2465,6 @@ class NeuralSelfLearningEngine(
         )
     }
 
-    @Deprecated("از setGateUserActivation استفاده کنید؛ فعال‌سازی زودهنگام دیگر شرط ۱۰,۰۰۰ معامله را دور نمی‌زند.")
-    @Synchronized
-    fun setForceActiveBeforeWarmup(enabled: Boolean) = setGateUserActivation(enabled)
-
     private fun learnFromClosedTradeInternal(
         trade: PaperTrade,
         report: StrategyEvaluationReport?,
@@ -3152,15 +3139,6 @@ class NeuralSelfLearningEngine(
         val next = persistedState.copy(autoTunedParameters = tuned)
         persistState(next)
         return tuned
-    }
-
-    @Synchronized
-    fun getStrategyTuningProfile(strategyId: String): PerStrategyNeuralTuningProfile {
-        val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
-        val model = BitcoinStrategyModel.fromId(normId)
-        val ensured = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
-        return ensured.perStrategyProfiles[model.id]
-            ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
     }
 
     /**
