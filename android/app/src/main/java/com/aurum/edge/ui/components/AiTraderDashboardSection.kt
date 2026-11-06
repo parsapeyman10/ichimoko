@@ -20,7 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.ui.shell.AurumViewModel
+import com.aurum.edge.ui.AurumViewModel
 import com.aurum.edge.ui.theme.AurumColors
 import java.util.Locale
 
