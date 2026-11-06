@@ -202,10 +202,10 @@ android {
         // 3.9.49 adds explicit SAF export for the private trade-snapshot archive: the user chooses
         // Google Drive or another document provider, original images remain app-private, and no
         // Drive token, storage permission, or automatic Gallery copy is introduced.
-        // 3.9.52: حذف کامل آرشیو تصویری، حذف زمان‌بندی سشن از یادگیری، «معامله‌گر» به‌جای دستیار
-        // (پیش‌بینی خبری + خودترمیمی + ماتریس برتری با حافظهٔ روی گوشی) و رفع استال تب تقویم ژورنال.
-        versionCode = 761
-        versionName = "3.9.52"
+        // 3.9.53: لایهٔ خبری واقعی در پیش‌بینی شرایط نماد (پیش از معامله)، بازگشت‌پذیری اصلاح‌ها
+        // از UI، اجرای خودکار چرخهٔ معامله‌گر در حلقهٔ پایش و یادداشت بودجهٔ ریسک روی هر معامله.
+        versionCode = 762
+        versionName = "3.9.53"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
