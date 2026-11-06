@@ -1259,6 +1259,43 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _toast.value = "ℹ️ آرشیو تصویری از این نسخه حذف شده است؛ معاملات از ژورنال و شاردهای روزانه بازیابی می‌شوند"
     }
 
+    /** ذخیرهٔ حافظهٔ شبکهٔ عصبی روی گوشی (بکاپ). مستقل از آرشیو تصویری است و باقی می‌ماند. */
+    fun backupNeuralBrainToPhoneNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val ok = container.neuralEngine.saveBrainBackupToPhoneStorage(container.appContext)
+            _toast.value = if (ok) {
+                "💾 حافظه کامل شبکه عصبی در Download/AurumEdge/Archive/AurumNeuralBrain_Backup.json ذخیره شد"
+            } else {
+                "💾 حافظه شبکه عصبی در حافظه داخلی اپ همگام‌سازی شد"
+            }
+        }
+    }
+
+    /** بستن دستی یک معاملهٔ باز با قیمت لحظه‌ای. */
+    fun closeTradeManually(
+        tradeId: String,
+        exitPrice: Double,
+        reason: String = "بستن با قیمت لحظه‌ای",
+    ) {
+        val closed = container.journalStore.closeTradeAtPrice(
+            tradeId = tradeId,
+            exitPrice = exitPrice,
+            reason = reason,
+            now = System.currentTimeMillis(),
+        )
+        if (closed != null) {
+            val pnl = closed.pnlUsd ?: 0.0
+            val pnlStr = String.format(Locale.US, "%s$%.2f", if (pnl >= 0) "+" else "", pnl)
+            _toast.value = "معامله ${closed.symbol} بسته و در تقویم ژورنال ثبت شد ($pnlStr)"
+        }
+    }
+
+    /** حذف یک معامله از ژورنال. */
+    fun deleteJournalTrade(tradeId: String) {
+        container.journalStore.deleteTrade(tradeId)
+        _toast.value = "معامله از ژورنال حذف شد"
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // «بکاپ اسکرین‌شات» حذف شد (درخواست کاربر: هم گرفتنش نه، هم در بارگذاری نادیده گرفته شود)
     // ─────────────────────────────────────────────────────────────────────────────
