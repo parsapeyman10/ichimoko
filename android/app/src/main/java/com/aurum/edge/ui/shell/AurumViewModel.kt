@@ -2500,18 +2500,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /**
-     * «PDF آرشیو تصویری» حذف شد.
-     *
-     * کاربر خواست نه تصویری گرفته شود و نه آن تصاویر جایی بارگذاری/صادر شوند. این تابع برای
-     * سازگاری با دکمه‌های موجود نگه داشته شده و فقط مسیر جایگزین را می‌گوید: گزارش PDF معمولی
-     * ژورنال از تب «کارنامه» ساخته می‌شود.
-     */
-    @Suppress("UNUSED_PARAMETER")
-    fun exportArchiveScreenshotsPdfNow(shareAfterExport: Boolean = true) {
-        _toast.value = "ℹ️ آرشیو تصویری حذف شده است؛ از تب کارنامه «گزارش PDF ژورنال» را بگیرید"
-    }
-
     fun triggerTestTradeAlarm(kind: com.aurum.edge.notify.TradeAlarmKind) {
         val cfg = settings.value
         com.aurum.edge.notify.TradeEventAlarmManager.triggerTestAlarm(

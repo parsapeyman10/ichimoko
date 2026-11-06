@@ -136,7 +136,7 @@ fun NeuralBrainScreen(
             ) {
                 Text(
                     modifier = Modifier.weight(1f).padding(end = 6.dp),
-                    text = "📄 مرکز خروجی PDF کامل هوش مصنوعی و آرشیو اسکرین‌شات",
+                    text = "📄 مرکز خروجی PDF کامل هوش مصنوعی و رگرسیون",
                     style = MaterialTheme.typography.labelMedium,
                     color = AurumColors.Gold,
                     fontWeight = FontWeight.Bold,
@@ -164,19 +164,8 @@ fun NeuralBrainScreen(
                         fontWeight = FontWeight.Bold,
                     )
                 }
-                Button(
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AurumColors.Cyan,
-                        contentColor = Color.Black,
-                    ),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        text = "📸📄 خروجی PDF آرشیو اسکرین‌شات‌ها",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                // «خروجی PDF آرشیو اسکرین‌شات‌ها» حذف شد: آرشیو تصویری دیگر وجود ندارد،
+                // پس دکمه‌ای هم برای خروجی آن نباید بماند (دکمهٔ بی‌عمل، کاربر را گمراه می‌کند).
             }
             // ── کپی تمام توضیحات هوش عصبی در کلیپ‌بورد ──
             Row(
