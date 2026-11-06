@@ -32,8 +32,6 @@ object BacktestReplayEngine {
     data class Config(
         val strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
         val symbol: String = "XAU/USD",
-        /** تایم‌فریم کندل‌های ورودی (همان که فایل با آن ساخته شده). */
-        val baseInterval: Interval = Interval.M15,
         /** تایم‌فریم‌های موتور؛ پیش‌فرض همان چیدمان استاندارد برنامه. */
         val macroInterval: Interval = Interval.H4,
         val strategyInterval: Interval = Interval.H1,
@@ -271,7 +269,7 @@ object BacktestReplayEngine {
                 report.conditions.filterNot { it.passed }.forEach { cond ->
                     conditionFailCounts[cond.titleFa] = (conditionFailCounts[cond.titleFa] ?: 0) + 1
                 }
-                val decision = entryDecision(report, bar.close)
+                val decision = entryDecision(report, bar.close, equity, config.riskPercent)
                 if (decision != null) {
                     state.openTrade = decision
                     if (config.captureEntryReports) entryReports.putIfAbsent(decision.entryTime, report)
@@ -333,6 +331,8 @@ object BacktestReplayEngine {
     private fun entryDecision(
         report: StrategyEvaluationReport,
         fillPrice: Double,
+        equityUsd: Double,
+        riskPercent: Double,
     ): OpenTrade? {
         if (!report.isActionable) return null
         val entry = report.suggestedEntry?.takeIf { it > 0.0 } ?: fillPrice
@@ -344,6 +344,11 @@ object BacktestReplayEngine {
         if (!isBuy && !(stop > entry && target < entry)) return null
         val oneR = abs(entry - stop)
         if (oneR <= 0.0) return null
+        // حجم پوزیشن از «ریسک درصدی سرمایه» می‌آید، نه از یک عدد ثابت. این همان چیزی است که
+        // افت سرمایه و منحنی سرمایه را معنادار می‌کند: با ۰٫۵٪ ریسک، هر ۱R تقریباً ۰٫۵٪
+        // سرمایه است، مستقل از این‌که قیمت نماد ۱٫۱ باشد یا ۲۴۰۰.
+        val riskUsd = equityUsd * (riskPercent.coerceIn(0.05, 5.0) / 100.0)
+        val units = (riskUsd / oneR).coerceAtLeast(1e-8)
         return OpenTrade(
             strategyId = report.strategyId,
             strategyTitleFa = report.strategyTitleFa,
@@ -356,6 +361,7 @@ object BacktestReplayEngine {
             plannedRiskReward = report.riskReward ?: (abs(target - entry) / oneR),
             barsHeld = 0,
             initialStopLoss = stop,
+            positionUnits = units,
         )
     }
 
@@ -452,7 +458,7 @@ object BacktestReplayEngine {
         val safePrice = if (price.isFinite() && price > 0.0) price else open.entry
         val pseudo = open.toPseudoPaperTrade(config)
         val oneR = abs(open.entry - open.initialStopLoss).coerceAtLeast(1e-9)
-        val riskUsd = oneR * pseudo.positionOz
+        val riskUsd = oneR * open.positionUnits
         val rawPnl = if (open.action == SignalAction.BUY) safePrice - open.entry else open.entry - safePrice
         // نسبت حرکت قیمت به ارزش قرارداد (همان منطق PaperTrade برای هر دسته دارایی).
         val grossUsd = PaperOrderRules.quotePnlToUsd(config.symbol, rawPnl * pseudo.positionOz, open.entry)
@@ -499,6 +505,8 @@ object BacktestReplayEngine {
         val plannedRiskReward: Double,
         var barsHeld: Int,
         val initialStopLoss: Double,
+        /** حجم پوزیشن بر پایهٔ ریسک درصدی سرمایه و فاصلهٔ حد ضرر. */
+        val positionUnits: Double,
     ) {
         fun toPseudoPaperTrade(config: Config): PaperTrade = PaperTrade(
             id = "BT-$strategyId-$entryTime",
@@ -511,7 +519,7 @@ object BacktestReplayEngine {
             confidence = confidence,
             riskReward = plannedRiskReward,
             openedAt = entryTime,
-            positionOz = 1.0,
+            positionOz = positionUnits,
             initialStopLoss = initialStopLoss,
             strategyId = strategyId,
             strategyTitleFa = strategyTitleFa,

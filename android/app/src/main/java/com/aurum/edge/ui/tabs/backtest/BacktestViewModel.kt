@@ -218,7 +218,6 @@ class BacktestViewModel(
             val config = BacktestReplayEngine.Config(
                 strategyId = s.strategyId,
                 symbol = s.symbol.ifBlank { set?.symbol ?: "XAU/USD" },
-                baseInterval = set?.interval ?: Interval.M15,
                 triggerInterval = set?.interval ?: Interval.M15,
                 startEquityUsd = s.startEquityUsd,
                 riskPercent = s.riskPercent,

@@ -297,6 +297,24 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     }
                 }
                 Spacer(Modifier.height(10.dp))
+                // ریسک هر معامله: همین عدد حجم پوزیشن و در نتیجه منحنی سرمایه را می‌سازد.
+                Text(
+                    "ریسک هر معامله: ${settings.riskPercent}٪ سرمایه · سرمایهٔ شروع: " +
+                        String.format(java.util.Locale.US, "%.0f$", settings.startEquityUsd),
+                    color = AurumColors.TextSecondary,
+                    fontSize = 10.sp,
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(0.25, 0.5, 1.0, 2.0).forEach { pct ->
+                        Pill(
+                            text = "$pct٪",
+                            color = if (kotlin.math.abs(settings.riskPercent - pct) < 1e-9) AurumColors.Gold else AurumColors.TextMuted,
+                            modifier = Modifier.clickable { vm.updateSettings { s -> s.copy(riskPercent = pct) } },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 ToggleRow("خروج هوشمند (بالای ۲R)", settings.useSmartExit) { on ->
                     vm.updateSettings { s -> s.copy(useSmartExit = on) }
                 }

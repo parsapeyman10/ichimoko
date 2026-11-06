@@ -220,6 +220,8 @@ class BacktestEngineTest {
             plannedRiskReward = 2.0,
             barsHeld = 0,
             initialStopLoss = stop,
+            // ۱٪ ریسک از ۱۰٬۰۰۰ دلار با حد ضرر ۲ دلاری → ۵۰ واحد
+            positionUnits = (10_000.0 * 0.01) / java.lang.Math.abs(entry - stop),
         )
 
     private fun bar(time: Long, open: Double, high: Double, low: Double, close: Double): Candle =
