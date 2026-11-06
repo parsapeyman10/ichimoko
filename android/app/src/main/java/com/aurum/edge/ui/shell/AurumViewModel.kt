@@ -2474,7 +2474,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun exportArchiveScreenshotsPdfNow(shareAfterExport: Boolean = true) {
         _toast.value = "ℹ️ آرشیو تصویری حذف شده است؛ از تب کارنامه «گزارش PDF ژورنال» را بگیرید"
     }
- }
 
     fun triggerTestTradeAlarm(kind: com.aurum.edge.notify.TradeAlarmKind) {
         val cfg = settings.value
