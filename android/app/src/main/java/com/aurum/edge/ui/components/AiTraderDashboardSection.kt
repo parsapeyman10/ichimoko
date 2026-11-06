@@ -238,6 +238,21 @@ fun AiTraderDashboardSection(
             }
         }
 
+        if (healings.isNotEmpty()) {
+            OutlinedButton(
+                onClick = {
+                    val last = healings.maxByOrNull { it.createdAtMs }
+                    if (last != null) viewModel.revertSelfHealing(last)
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) {
+                Text(
+                    text = "↩️ برگرداندن آخرین اصلاح (قرار گرفتن پارامتر به مقدار قبلی)",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+
         // ── ۳. ماتریس برتری ──────────────────────────────────────────────────
         Text(
             text = "📊 ماتریس برتری — توزیع بودجهٔ ریسک",

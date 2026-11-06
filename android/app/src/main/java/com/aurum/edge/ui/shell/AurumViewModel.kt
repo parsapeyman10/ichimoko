@@ -1528,6 +1528,41 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         return out
     }
 
+    /**
+     * برگرداندن یک اصلاح خودترمیم به مقدار قبلی.
+     *
+     * خودترمیمی بی‌بازگشت، همان چیزی است که کاربر از آن می‌ترسد. هر اقدام مقدار `previousValue`
+     * را با خود دارد و [AiTraderEngine.revertActions] می‌تواند پارامتر را دقیقاً به همان عدد
+     * برگرداند؛ این تابع همان مسیر را از UI صدا می‌زند و نتیجه را در حافظهٔ گوشی هم ثبت می‌کند
+     * تا بعد از بستن اپ، «این اصلاح برگشت داده شد» فراموش نشود.
+     */
+    fun revertSelfHealing(action: AiTraderEngine.SelfHealingAction) {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val cfg = settings.value
+                val reverted = AiTraderEngine.revertActions(cfg.baseStrategyConfig, listOf(action))
+                container.settingsStore.update { current -> current.copy(baseStrategyConfig = reverted) }
+                TraderMemoryStore.write { snap ->
+                    snap.copy(
+                        appliedActions = snap.appliedActions.filterNot { it.id == action.id },
+                        activeSignatures = snap.activeSignatures - action.kind.name,
+                        totalHealCount = (snap.totalHealCount - 1).coerceAtLeast(0),
+                        lessonLinesFa = (snap.lessonLinesFa + "↩️ اصلاح ${action.kind.labelFa} برگشت داده شد " +
+                            "(${String.format(Locale.US, "%.2f", action.newValue)} → " +
+                            "${String.format(Locale.US, "%.2f", action.previousValue)})").takeLast(60),
+                    )
+                }
+                _aiTraderHealings.value = _aiTraderHealings.value.filterNot { it.id == action.id }
+                _aiTraderMemory.value = TraderMemoryStore.read(container.appContext)
+                _toast.value = "↩️ ${action.kind.labelFa} به مقدار قبلی برگشت " +
+                    "(${String.format(Locale.US, "%.2f", action.previousValue)})"
+            }.onFailure { err ->
+                CrashReporter.recordNonFatal(container.appContext, "revertSelfHealing", err)
+                _toast.value = "⚠️ برگرداندن اصلاح ناموفق بود: ${err.message}"
+            }
+        }
+    }
+
     /** خروجی دستی: اجرای فوری چرخه (دکمهٔ «همین حالا تحلیل کن»). */
     fun runAiTraderCycleNow() = runAiTraderCycle(force = true)
 
