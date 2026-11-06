@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -56,6 +57,21 @@ class BacktestViewModel(
 
     private val _result = MutableStateFlow<BacktestReplayEngine.Result?>(null)
     val result: StateFlow<BacktestReplayEngine.Result?> = _result.asStateFlow()
+
+    /** نقطه‌ای از چارت که نتیجهٔ فعلی روی آن محاسبه شده است. */
+    private val _resultCursor = MutableStateFlow(0)
+    val resultCursor: StateFlow<Int> = _resultCursor.asStateFlow()
+
+    /**
+     * آیا کاربر بعد از اجرای بک‌تست جلو/عقب رفته است؟
+     *
+     * بدون این پرچم، آمار و نشانگرهای چارت به بازهٔ قبلی تعلق داشتند ولی کنار کندل‌های تازه
+     * دیده می‌شدند — یعنی نمودار دروغ می‌گفت. حالا هر جابه‌جایی، نتیجه را «کهنه» علامت می‌زند
+     * و کاربر می‌داند باید دوباره اجرا کند.
+     */
+    val resultIsStale: StateFlow<Boolean> = kotlinx.coroutines.flow.combine(_result, _resultCursor, _cursor) { res, resCursor, cur ->
+        res != null && resCursor != cur
+    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000L), false)
 
     private val _training = MutableStateFlow<BacktestNeuralTrainer.TrainingReport?>(null)
     val training: StateFlow<BacktestNeuralTrainer.TrainingReport?> = _training.asStateFlow()
@@ -233,6 +249,7 @@ class BacktestViewModel(
                 .onSuccess { res ->
                     withContext(Dispatchers.Main) {
                         _result.value = res
+                        _resultCursor.value = cut.size
                         _progress.value = 1.0
                         _statusFa.value = buildString {
                             append("✅ بک‌تست تمام شد: ${res.trades.size} معامله در ${res.steps} کندل")

@@ -66,6 +66,7 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
     val visibleCount by vm.visibleCount.collectAsStateWithLifecycle()
     val result by vm.result.collectAsStateWithLifecycle()
     val training by vm.training.collectAsStateWithLifecycle()
+    val resultIsStale by vm.resultIsStale.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
     val status by vm.statusFa.collectAsStateWithLifecycle()
@@ -216,7 +217,7 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 BacktestChartLegend(candle = currentCandle, intervalLabel = selectedSet?.intervalLabel ?: "")
                 BacktestCandleChart(
                     candles = candles,
-                    trades = result?.trades.orEmpty(),
+                    trades = if (resultIsStale) emptyList() else result?.trades.orEmpty(),
                     visibleCount = visibleCount,
                     endIndex = endIndex,
                     onVisibleCountChange = vm::setVisibleCount,
@@ -366,6 +367,24 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
         // ── ۴. نتیجه ───────────────────────────────────────────────────────
         result?.let { res ->
             SectionCard(initiallyExpanded = true, title = "📊 نتیجهٔ بک‌تست") {
+                if (resultIsStale) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AurumColors.Orange.copy(alpha = 0.12f))
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "این نتیجه برای نقطهٔ قبلیِ چارت است. برای بازهٔ فعلی دوباره «اجرای بک‌تست» را بزنید.",
+                            color = AurumColors.Orange,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
                 res.totals?.let { totals -> StatsGrid(totals, res.config.startEquityUsd) }
                 Spacer(Modifier.height(8.dp))
                 Text(
