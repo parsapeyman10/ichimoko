@@ -205,8 +205,8 @@ android {
         // 3.9.55: «آزمایشگاه بک‌تست» — خواندن CSV داکاس‌کپی (dukascopy-node)، چارت کندلی با
         // پیمایش قدم‌به‌قدم، اجرای هر استراتژی روی همان بازه و آموزش شبکهٔ عصبی در اتاق تمرین
         // جدا (ژورنال، حساب کاغذی و پارامترهای معاملات واقعی دست نمی‌خورند).
-        versionCode = 764
-        versionName = "3.9.55"
+        versionCode = 765
+        versionName = "3.9.56"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

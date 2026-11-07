@@ -645,6 +645,14 @@ data class BaseStrategyConfig(
      */
     val maxSniperDistanceAtr: Double = 0.35,
     val minDriveBooksConsensus: Int = 6,
+    /**
+     * آیا لایهٔ «هیدن کراس» (ابر مخفی + دیوار تاج) جزء شرایط «استراتژی بیس» باشد.
+     *
+     * پیش‌فرض **روشن** است تا رفتار فعلی هیچ نمادی عوض نشود. خاموش‌کردن آن، بیس را به تعریف
+     * اصلی خودش برمی‌گرداند: فقط چهار مکتب پاتل/تاتل/هوسودا/پلویل. این کلید فقط برای مقایسهٔ
+     * A/B در بک‌تست و تنظیمات استراتژی است.
+     */
+    val includeHiddenCrossLayer: Boolean = true,
     /** لایهٔ اختیاری نئوویو (NeoWave). پیش‌فرض خاموش ⇒ خروجی موتور بدون تغییر. */
     val neoWaveEnabled: Boolean = false,
     /** حداقل قواعد نیلی که باید پاس شود تا شمارش «معتبر» شمرده شود. */
@@ -738,10 +746,18 @@ data class BaseStrategyConfig(
             minFutureKumoThicknessAtr = (ov?.minFutureKumoThicknessAtr ?: minFutureKumoThicknessAtr)
                 .coerceIn(0.02, 0.16),
             minSniperDistanceAtr = (ov?.minSniperDistanceAtr ?: minSniperDistanceAtr).coerceIn(0.35, 1.05),
+            maxSniperDistanceAtr = (ov?.maxSniperDistanceAtr ?: maxSniperDistanceAtr).coerceIn(0.20, 0.55),
             minDriveBooksConsensus = (symOv?.minDriveBooksConsensus ?: ov?.minDriveBooksConsensus
                 ?: minDriveBooksConsensus).coerceIn(4, 9),
         )
     }
+
+    /**
+     * سقف فاصلهٔ مجاز ورود از ناحیهٔ اسنایپر برای همین استراتژی، پس از اعمال پروفایل یادگرفتهٔ
+     * استراتژی و برش سخت در `[0.20 .. 0.55]`. موتور شرط ۱۶ دقیقاً همین عدد را می‌بیند.
+     */
+    fun resolvedMaxSniperDistanceAtr(strategyId: String): Double =
+        resolveForStrategy(strategyId).maxSniperDistanceAtr.coerceIn(0.20, 0.55)
 }
 
 /**
@@ -3216,6 +3232,11 @@ object IchimokuStrategyEngine {
             maxAdverseWickRatio = (stratOverride?.maxAdverseWickRatio ?: modelConfig.maxAdverseWickRatio).coerceIn(0.28, 0.60),
             minFutureKumoThicknessAtr = (stratOverride?.minFutureKumoThicknessAtr ?: modelConfig.minFutureKumoThicknessAtr).coerceIn(0.02, 0.18),
             minSniperDistanceAtr = (stratOverride?.minSniperDistanceAtr ?: modelConfig.minSniperDistanceAtr).coerceIn(0.35, 1.10),
+            // سقف ناحیهٔ اسنایپر تنها از پروفایل استراتژی خوانده می‌شود (شخصیت نماد این فیلد را ندارد)
+            // و از پیش‌تر از سقف سخت ۰.۵۵ شل‌تر نمی‌شود؛ پیش‌تر این فیلد بازنویسی نمی‌شد و تیونینگ
+            // عصبی/پروفایل استراتژی هیچ اثری روی «نقطه‌زنی میلی‌متری» نداشت.
+            maxSniperDistanceAtr = (stratOverride?.maxSniperDistanceAtr ?: modelConfig.maxSniperDistanceAtr)
+                .coerceIn(0.20, 0.55),
             minDriveBooksConsensus = (symbolOverride?.minDriveBooksConsensus
                 ?: stratOverride?.minDriveBooksConsensus ?: modelConfig.minDriveBooksConsensus).coerceIn(4, 9),
         )
@@ -3379,7 +3400,8 @@ object IchimokuStrategyEngine {
             trigSnap.close <= trigSnap.kumoBottom - reqGravityClearance
         }
         // لایهٔ هیدن کراس در شرط ۹: دیوار «تاج» هم مثل SSB فلت جاذبه دارد.
-        val hiddenCrossWallClearance = if (trigSnap.nearestCrownLevel > 0.0) {
+        // این بخش با `includeHiddenCrossLayer` خاموش‌شدنی است تا «بیس خالص چهارگانه» هم قابل ارزیابی باشد.
+        val hiddenCrossWallClearance = if (effectiveConfig.includeHiddenCrossLayer && trigSnap.nearestCrownLevel > 0.0) {
             val wallDist = abs(trigSnap.nearestCrownLevel - trigSnap.close)
             val wallAhead = if (isLong) {
                 trigSnap.nearestCrownLevel > trigSnap.close
@@ -3396,7 +3418,7 @@ object IchimokuStrategyEngine {
             } else {
                 append("بدون تله جاذبه SSB فلت (${if (trigSnap.isKatanaEquilibrium) "هم‌پوشانی کاتانا" else "تفکیک استاندارد TK"})")
             }
-            if (trigSnap.nearestCrownLevel > 0.0) {
+            if (effectiveConfig.includeHiddenCrossLayer && trigSnap.nearestCrownLevel > 0.0) {
                 append(String.format(
                     Locale.US,
                     " · دیوار تاج هیدن کراس=%.2f (%.2f ATR) %s",
@@ -3687,9 +3709,9 @@ object IchimokuStrategyEngine {
             trigSnap.close < trigSnap.open && trigSnap.closeLocationValue <= 0.55 && trigSnap.candleBodyRatio >= 0.22
         }
         val volumeMomentumOk = trigSnap.volumeRatio20 >= effectiveConfig.minVolumeRatio20
-        // استراتژی ۱۶ در نسخهٔ الیوت‌محور دیگر شرط اجماع چندلایه ندارد.
-        val driveBookRuleOk = true
-        val cond11Passed = directionalCandleOk && volumeMomentumOk && driveBookRuleOk
+        // استراتژی ۱۶ در نسخهٔ الیوت‌محور شرط اجماع چندلایه ندارد؛ پس این پرچم «همیشه درست»
+        // است و در شرط ۱۱ حذف شده تا یک شرط مرده در محاسبه و در گزارش باقی نماند.
+        val cond11Passed = directionalCandleOk && volumeMomentumOk
         val driveBookExtraDetail = ""
         val cond11Detail = String.format(
             Locale.US,
@@ -3717,6 +3739,10 @@ object IchimokuStrategyEngine {
         val cond13Passed = (erStrat >= minErReq || erTrig >= (minErReq + 0.02)) && !dualFlatChop && !htfKijunCounterTrap
 
         val waveBars = wave?.barsSinceWaveStart ?: 12
+        // توجه (قرارداد ۳.۹.۵۶): `!cond13Passed` عمداً باقی می‌ماند. شرط ۱۵ از شرط ۱۳ مشتق می‌شود و
+        // این «وزن دوگانه» طراحی‌شده است، نه باگ: شکست فیلتر رِنج باید هم به‌عنوان فیلتر و هم
+        // به‌عنوان فاز، ورود را ببندد. حذف این کوپل، محافظ رِنج را ضعیف می‌کند و آزمون
+        // `BaseStrategyDeepDiveTest.flat range is still rejected` دقیقاً همین را می‌پاید.
         val trendPhase = when {
             !cond13Passed || dualFlatChop -> TrendPhase.CHOP_RANGE
             !notOverextended || (waveBars > 55 && trigSnap.isTenkanFlat && stratSnap.isTenkanFlat) -> TrendPhase.LATE_EXHAUSTION
@@ -3800,7 +3826,11 @@ object IchimokuStrategyEngine {
         // لایهٔ «هیدن کراس» به‌صورت پیش‌فرض وارد استراتژی پایه هم شده است: سطح تاجی که از
         // کراس برابری تنکان/کیجون ساخته می‌شود، یک دیوار افقی واقعی است و باید مثل پلاتوی
         // فلت پلویل دیده شود. اگر تاجی در مسیر نباشد، رفتار دقیقاً مثل قبل می‌ماند.
-        val hiddenCrossWall = if (trigSnap.nearestCrownLevel > 0.0) listOf(trigSnap.nearestCrownLevel) else emptyList()
+        val hiddenCrossWall = if (effectiveConfig.includeHiddenCrossLayer && trigSnap.nearestCrownLevel > 0.0) {
+            listOf(trigSnap.nearestCrownLevel)
+        } else {
+            emptyList()
+        }
         val allPlateaus = ((macroSnap?.flatEquilibriumLevels ?: emptyList()) +
             stratSnap.flatEquilibriumLevels + hiddenCrossWall).distinct().sorted()
         val nearestObstacle = if (isLong) {
@@ -3831,14 +3861,20 @@ object IchimokuStrategyEngine {
             rawPrimaryTp
         }
 
-        // قفل قطعی تارگت سود در بازه [1.50R .. 3.00R] نسبت به نقطه ورود
+        // قفل قطعی تارگت سود در بازه [1.50R .. 3.00R] نسبت به نقطه ورود.
+        // هر دو کران با **یک** لنگر (`sniperOptimal` = همان قیمت ورودی پلن) و **یک** ۱R
+        // (`stopDist` = همان ۱R شرط ۱۲ و انتخاب موج) سنجیده می‌شوند. پیش‌تر کران پایین روی
+        // «ورود دورتر از SL» و کران بالا روی «ورود نزدیک‌تر به SL» بسته می‌شد؛ نتیجه این بود که
+        // روی شکاف کوچک بین تیک زنده و ناحیهٔ اسنایپر، دالان به سمت سقف ۳R جمع می‌شد و هدف از
+        // R:R بهینهٔ همان معامله فاصله می‌گرفت. این فرمول حالا دقیقاً همان حسابی است که
+        // `TradePlanGuard.sanitizePlan` هم با آن کار می‌کند، پس دو لایه یکدیگر را نقض نمی‌کنند.
         val effectiveTp = if (isLong) {
-            val minAllowedTp = max(livePrice, sniperOptimal) + abs(max(livePrice, sniperOptimal) - technicalSl) * requiredMinRr
-            val maxAllowedTp = min(livePrice, sniperOptimal) + abs(min(livePrice, sniperOptimal) - technicalSl) * maxAllowedRr
+            val minAllowedTp = sniperOptimal + stopDist * requiredMinRr
+            val maxAllowedTp = sniperOptimal + stopDist * maxAllowedRr
             round2(unclampedTp.coerceIn(minAllowedTp, max(minAllowedTp, maxAllowedTp)))
         } else {
-            val minAllowedTp = (min(livePrice, sniperOptimal) - abs(min(livePrice, sniperOptimal) - technicalSl) * requiredMinRr).coerceAtLeast(0.00001)
-            val maxAllowedTp = (max(livePrice, sniperOptimal) - abs(max(livePrice, sniperOptimal) - technicalSl) * maxAllowedRr).coerceAtLeast(0.00001)
+            val minAllowedTp = (sniperOptimal - stopDist * requiredMinRr).coerceAtLeast(0.00001)
+            val maxAllowedTp = (sniperOptimal - stopDist * maxAllowedRr).coerceAtLeast(0.00001)
             round2(unclampedTp.coerceIn(min(minAllowedTp, maxAllowedTp), minAllowedTp))
         }
 

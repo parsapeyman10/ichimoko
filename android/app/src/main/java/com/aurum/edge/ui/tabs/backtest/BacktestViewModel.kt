@@ -100,6 +100,8 @@ class BacktestViewModel(
         val useTimeStop: Boolean = true,
         val optimisticSameBarFill: Boolean = false,
         val maxBars: Int = 0,
+        /** لایهٔ هیدن کراس در «بیس» فعال باشد (برای مقایسهٔ A/B). */
+        val includeHiddenCrossLayer: Boolean = true,
     )
 
     private val _settings = MutableStateFlow(Settings())
@@ -243,6 +245,7 @@ class BacktestViewModel(
                 useTimeStop = s.useTimeStop,
                 optimisticSameBarFill = s.optimisticSameBarFill,
                 maxBars = s.maxBars,
+                includeHiddenCrossLayer = s.includeHiddenCrossLayer,
                 captureEntryReports = true,
             )
             runCatching { BacktestReplayEngine.run(cut, config) { p -> _progress.value = p } }

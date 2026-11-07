@@ -328,6 +328,10 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 ToggleRow("در لمس هم‌زمان، سود فرض شود", settings.optimisticSameBarFill) { on ->
                     vm.updateSettings { s -> s.copy(optimisticSameBarFill = on) }
                 }
+                // مقایسهٔ A/B «بیس کامل» با «بیس خالص چهارگانه» (بدون دیوار تاج هیدن کراس).
+                ToggleRow("لایهٔ هیدن کراس در بیس فعال باشد", settings.includeHiddenCrossLayer) { on ->
+                    vm.updateSettings { s -> s.copy(includeHiddenCrossLayer = on) }
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "بک‌تست روی ${fmtCount(endIndex)} کندلِ تا این نقطه اجرا می‌شود؛ کندل‌های آیندهٔ " +

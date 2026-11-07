@@ -63,6 +63,11 @@ object BacktestReplayEngine {
         val maxBars: Int = 0,
         /** در صورت لمس هم‌زمان SL و TP، سود فرض شود (پیش‌فرض: نه). */
         val optimisticSameBarFill: Boolean = false,
+        /**
+         * لایهٔ «هیدن کراس» (دیوار تاج + ابر مخفی) جزء شرایط بیس باشد.
+         * `true` = رفتار فعلی برنامه؛ `false` = بیس خالص چهارگانه. تنها ابزار مقایسهٔ A/B در بک‌تست.
+         */
+        val includeHiddenCrossLayer: Boolean = true,
         /** حداقل کندل لازم برای شروع ارزیابی؛ پیش‌فرض بر اساس دورهٔ سنکو B. */
         val warmupBars: Int = 60,
         /**
@@ -188,6 +193,7 @@ object BacktestReplayEngine {
             strategyIntervalLabel = config.strategyInterval.label,
             triggerIntervalLabel = config.triggerInterval.label,
             enablePreserveMode = config.usePreserveMode,
+            includeHiddenCrossLayer = config.includeHiddenCrossLayer,
         )
 
         val models: List<BitcoinStrategyModel> = if (config.runAllStrategies) {
