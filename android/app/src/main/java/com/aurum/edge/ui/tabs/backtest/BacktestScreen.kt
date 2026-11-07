@@ -475,6 +475,25 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                         }
                     }
                 }
+                // چه با معامله و چه بی‌معامله، سدهای اصلی باید دیده شوند: برای گرفتن بک‌تست
+                // معنادار باید بدانیم کدام شرط جلوی ورود را گرفته است.
+                if (res.trades.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "🔎 سدهای اصلی این بازه (شرط‌هایی که بیشترین بار جلوی ورود را گرفتند):",
+                        color = AurumColors.TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    res.topBlockers.forEach { (title, count) ->
+                        Text(
+                            "• $title — $count بار رد شد",
+                            color = AurumColors.TextMuted,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp,
+                        )
+                    }
+                }
                 if (res.trades.isEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Text(
