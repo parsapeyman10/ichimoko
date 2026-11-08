@@ -1506,6 +1506,54 @@ object IchimokuStrategyEngine {
     /** اعداد پایه و ترکیبی چرخه زمانی گوایچی هوسودا (Jikan Ron / Kihon Suchi) */
     val HOSODA_TIME_CYCLES = listOf(9, 17, 26, 33, 42, 65, 76, 129, 172)
 
+    // ── حافظهٔ اسنپ‌شات برای بک‌تست ────────────────────────────────────────────
+    // در بک‌تست، سه تایم‌فریم در یک لحظه ثابت‌اند و اگر «همهٔ استراتژی‌ها» اجرا شود،
+    // همان سه اسنپ‌شات تا ۱۵ بار دوباره ساخته می‌شوند (۱۲۹۷ms برای ۳۵۲۱ ارزیابی فقط
+    // همین تکرار بود). هر ورودی با (زمان آخرین کندل، تعداد، تایم‌فریم، شناسهٔ سری)
+    // کلید می‌شود؛ داده‌های بک‌تست تغییرناپذیرند، پس استفادهٔ دوباره بی‌خطر است.
+    // فقط از مسیر بک‌تست روشن می‌شود تا مسیر زنده هیچ حالتی برای خراب‌شدن نداشته باشد.
+    @Volatile
+    private var snapshotCacheEnabled: Boolean = false
+    /** برای هر سری (ماکرو/استراتژی/ماشه) جداگانه: کلید آخرین محاسبه و مقدارش. */
+    private val snapshotCache: HashMap<String, Pair<String, IchimokuBarSnapshot?>> = HashMap(4)
+
+    /** فعال‌کردن حافظهٔ اسنپ‌شات برای یک اجرای بک‌تست (دادهٔ تاریخی تغییرناپذیر است). */
+    fun enableBacktestSnapshotCache() {
+        snapshotCache.clear()
+        snapshotCacheEnabled = true
+    }
+
+    fun disableBacktestSnapshotCache() {
+        snapshotCacheEnabled = false
+        snapshotCache.clear()
+    }
+
+    /**
+     * حافظهٔ اسنپ‌شات به‌ازای هر سری.
+     *
+     * چرا جدا؟ چون کندل ماشه (۱۵ دقیقه‌ای) هر کندل عوض می‌شود ولی ابر ۴ ساعته فقط هر ۱۶
+     * کندل یک‌بار. با یک سبد مشترک، تغییر کندل ماشه ورودی ۴ ساعته را هم بیرون می‌انداخت و
+     * آن محاسبه ۱۶ بار تکرار می‌شد. با سه جایگاه مستقل، هر سری فقط وقتی عوض شود دوباره
+     * ساخته می‌شود.
+     */
+    private fun cachedSnapshot(
+        seriesTag: String,
+        candles: List<Candle>,
+        config: BaseStrategyConfig,
+        keepBars: Int,
+        includeAnalogue: Boolean,
+        compute: () -> IchimokuBarSnapshot?,
+    ): IchimokuBarSnapshot? {
+        if (!snapshotCacheEnabled) return compute()
+        val key = "$keepBars|$includeAnalogue|${config.tenkanPeriod}|${config.kijunPeriod}|" +
+            "${config.senkouBPeriod}|${candles.size}|${candles.lastOrNull()?.time}"
+        val cached = snapshotCache[seriesTag]
+        if (cached != null && cached.first == key) return cached.second
+        val value = compute()
+        snapshotCache[seriesTag] = key to value
+        return value
+    }
+
     /**
      * محاسبه دقیق اسنپ‌شات ایچیموکو روی آخرین کندل بسته‌شده یک تایم‌فریم.
      * قانون کارن پلویل: همیشه روی کندل‌های بسته‌شده (Closed) تصمیم‌گیری می‌شود تا از سیگنال‌های لحظه‌ای کاذب جلوگیری شود.
@@ -3277,9 +3325,17 @@ object IchimokuStrategyEngine {
         val needsAnalogue = activeModel == BitcoinStrategyModel.HIDDEN_CROSS
         // پنجرهٔ نگه‌داری: آنالوگ ابر مخفی ۲۴۰ کندل عقب را می‌بیند، بقیهٔ شرط‌ها حداکثر ۹۰ کندل.
         val keep = if (needsAnalogue) SNAPSHOT_KEEP_BARS else SNAPSHOT_KEEP_BARS_SHORT
-        val macroSnap = computeSnapshot(alignedMacroCandles, config, keepBars = keep, includeAnalogue = needsAnalogue)
-        val stratSnap = computeSnapshot(alignedStrategyCandles, config, keepBars = keep, includeAnalogue = needsAnalogue)
-        val trigSnap = computeSnapshot(alignedTriggerCandles, config, keepBars = keep, includeAnalogue = needsAnalogue)
+        // اگر «همهٔ استراتژی‌ها» اجرا شود، این سه اسنپ‌شات در هر کندل چند بار ساخته می‌شوند؛
+        // حافظه‌ای که بک‌تست روشن می‌کند همان‌ها را بین استراتژی‌ها به اشتراک می‌گذارد.
+        val macroSnap = cachedSnapshot("M", alignedMacroCandles, config, keep, needsAnalogue) {
+            computeSnapshot(alignedMacroCandles, config, keepBars = keep, includeAnalogue = needsAnalogue)
+        }
+        val stratSnap = cachedSnapshot("S", alignedStrategyCandles, config, keep, needsAnalogue) {
+            computeSnapshot(alignedStrategyCandles, config, keepBars = keep, includeAnalogue = needsAnalogue)
+        }
+        val trigSnap = cachedSnapshot("T", alignedTriggerCandles, config, keep, needsAnalogue) {
+            computeSnapshot(alignedTriggerCandles, config, keepBars = keep, includeAnalogue = needsAnalogue)
+        }
 
         if (activeModel == BitcoinStrategyModel.BTC_52_CANDLE_REGIME && normalizedSymbol != BTC_SYMBOL) {
             val condition = StrategyConditionCheck(

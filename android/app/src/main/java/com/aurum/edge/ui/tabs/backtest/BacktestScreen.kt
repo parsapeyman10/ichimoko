@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aurum.edge.core.BacktestReplayEngine
+import com.aurum.edge.core.BacktestTradeArchive
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.IchimokuStrategyEngine
 import com.aurum.edge.ui.components.Pill
@@ -71,8 +72,12 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
     val resultIsStale by vm.resultIsStale.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
+    val etaFa by vm.etaFa.collectAsStateWithLifecycle()
     val status by vm.statusFa.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val archive by vm.archive.collectAsStateWithLifecycle()
+    val archiveFiles by vm.archiveFiles.collectAsStateWithLifecycle()
+    val appliedEntry by vm.appliedEntry.collectAsStateWithLifecycle()
 
     var toastText by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
@@ -151,6 +156,13 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     modifier = Modifier.fillMaxWidth().height(4.dp),
                     color = AurumColors.Gold,
                     trackColor = AurumColors.SurfaceAlt,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "${String.format(java.util.Locale.US, "%.0f", progress * 100)}%" +
+                        (etaFa.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                    color = AurumColors.TextMuted,
+                    fontSize = 9.sp,
                 )
             }
             toastText?.let {
@@ -381,6 +393,29 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     fontSize = 10.sp,
                     lineHeight = 14.sp,
                 )
+                // سقف کندل: تنها اهرم صادقانه برای کوتاه‌کردن زمان اجرا. این عدد **نتیجه را عوض
+                // می‌کند** (بازهٔ کوتاه‌تر = نمونهٔ کمتر)، پس کنارش نوشته می‌شود، نه پنهان.
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "سقف کندل برای این اجرا (کوتاه‌تر = سریع‌تر، ولی نمونهٔ کمتر):",
+                    color = AurumColors.TextSecondary,
+                    fontSize = 10.sp,
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    listOf(0 to "همه", 2_000 to "۲٬۰۰۰", 5_000 to "۵٬۰۰۰", 10_000 to "۱۰٬۰۰۰").forEach { (cap, label) ->
+                        Pill(
+                            text = label,
+                            color = if (settings.maxBars == cap) AurumColors.Gold else AurumColors.TextMuted,
+                            modifier = Modifier.clickable {
+                                vm.updateSettings { st -> st.copy(maxBars = cap) }
+                            },
+                        )
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ActionButton(
@@ -406,6 +441,220 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     fontSize = 11.sp,
                     lineHeight = 16.sp,
                 )
+            }
+        }
+
+        // ── ۳.۵ آرشیو معاملاتی (پایان هر بک‌تست) ─────────────────────────────
+        archive?.let { arc ->
+            SectionCard(initiallyExpanded = true, title = "🗂 آرشیو معاملاتی این بک‌تست") {
+                Text(
+                    text = "${arc.strategyLabel} · ${arc.symbol} ${arc.intervalLabel} · " +
+                        "${arc.metrics.trades} معاملهٔ بسته‌شده در ${arc.days.size} روز معاملاتی",
+                    color = AurumColors.TextSecondary,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    MiniStat(
+                        "سود خالص",
+                        fmtUsd(arc.metrics.netUsd),
+                        if (arc.metrics.netUsd >= 0) AurumColors.Green else AurumColors.Red,
+                    )
+                    MiniStat(
+                        "کارمزد",
+                        String.format(java.util.Locale.US, "%.2f$", arc.metrics.feesUsd),
+                        AurumColors.Orange,
+                    )
+                    MiniStat(
+                        "برد",
+                        "${String.format(java.util.Locale.US, "%.0f", arc.metrics.winRatePct)}%",
+                        AurumColors.Gold,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+
+                // دکمهٔ اعمال — تنها راه تغییر موجودی از این صفحه، با قفل تکرار.
+                if (appliedEntry != null) {
+                    Text(
+                        text = "✅ قبلاً اعمال شده: " + fmtUsd(appliedEntry!!.netUsd) +
+                            " در " + BacktestTradeArchive.dayOf(appliedEntry!!.appliedAt) +
+                            " · موجودی آن زمان " + fmtUsd(appliedEntry!!.balanceAfter),
+                        color = AurumColors.Green,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
+                    )
+                    Text(
+                        text = "همین آرشیو دوباره اعمال نمی‌شود. برای اعمال دوباره، بک‌تست را با " +
+                            "داده یا تنظیم متفاوت اجرا کنید (شناسهٔ آرشیو عوض می‌شود).",
+                        color = AurumColors.TextMuted,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp,
+                    )
+                } else {
+                    ActionButton(
+                        label = if (busy) "…" else "💰 اعمال ${fmtUsd(arc.metrics.netUsd)} روی سرمایه",
+                        enabled = !busy && arc.metrics.trades > 0,
+                        color = if (arc.metrics.netUsd >= 0) AurumColors.Green else AurumColors.Red,
+                        onClick = { vm.applyArchiveToBalance() },
+                    )
+                    Text(
+                        text = "این دکمه فقط موجودی حساب را جابه‌جا می‌کند؛ هیچ معاملهٔ کاغذی ساخته " +
+                            "نمی‌شود و ژورنال واقعی دست نمی‌خورد. هر آرشیو فقط یک‌بار قابل اعمال است.",
+                        color = AurumColors.TextMuted,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp,
+                    )
+                }
+
+                if (arcFiles != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "فایل‌ها: ${arcFiles!!.csv.name} · ${arcFiles!!.json.name}",
+                        color = AurumColors.Cyan,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        ActionButton("📤 ارسال CSV", !busy, AurumColors.Cyan) { vm.shareArchive(csv = true) }
+                        ActionButton("📄 ارسال JSON", !busy, AurumColors.TextSecondary) { vm.shareArchive(csv = false) }
+                        ActionButton("👁 باز کردن CSV", !busy, AurumColors.Gold) { vm.openArchive(csv = true) }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+
+                // جدول روزانه: «سود متناسب با آن روز».
+                if (arc.days.isNotEmpty()) {
+                    Text(
+                        "📅 سود/زیان به‌تفکیک روز بسته‌شدن معامله (UTC):",
+                        color = AurumColors.TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().background(AurumColors.SurfaceAlt).padding(6.dp),
+                    ) {
+                        Text("روز", color = AurumColors.TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+                        Text("معامله", color = AurumColors.TextMuted, fontSize = 9.sp, modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center)
+                        Text("برد", color = AurumColors.TextMuted, fontSize = 9.sp, modifier = Modifier.weight(0.8f), textAlign = TextAlign.Center)
+                        Text("خالص", color = AurumColors.TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+                    }
+                    arc.days.forEach { d ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                BacktestTradeArchive.prettyDay(d.day),
+                                color = AurumColors.TextSecondary,
+                                fontSize = 9.sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                "${d.trades}",
+                                color = AurumColors.TextSecondary,
+                                fontSize = 9.sp,
+                                modifier = Modifier.weight(0.8f),
+                                textAlign = TextAlign.Center,
+                            )
+                            Text(
+                                "${String.format(java.util.Locale.US, "%.0f", d.winRatePct)}%",
+                                color = AurumColors.TextMuted,
+                                fontSize = 9.sp,
+                                modifier = Modifier.weight(0.8f),
+                                textAlign = TextAlign.Center,
+                            )
+                            Text(
+                                fmtUsd(d.netUsd),
+                                color = if (d.netUsd >= 0) AurumColors.Green else AurumColors.Red,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.End,
+                            )
+                        }
+                    }
+                }
+
+                // فهرست کامل معامله‌ها — همان چیزی که در CSV هم هست.
+                if (arc.rows.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    var showAll by remember(arc.contentHash) { mutableStateOf(false) }
+                    Text(
+                        "🧾 معامله‌ها (${arc.rows.size}):",
+                        color = AurumColors.TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val visible = if (showAll) arc.rows else arc.rows.take(12)
+                    visible.forEach { r ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(AurumColors.SurfaceAlt.copy(alpha = 0.55f))
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "#${r.tradeNumber} ${if (r.action == com.aurum.edge.domain.SignalAction.BUY) "▲" else "▼"} " +
+                                    BacktestTradeArchive.prettyDay(r.entryDateFa) +
+                                    " · ${r.exitReasonFa}",
+                                color = AurumColors.TextSecondary,
+                                fontSize = 9.sp,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                            )
+                            Text(
+                                "${fmtPrice(r.entryPrice)} → ${r.exitPrice?.let { fmtPrice(it) } ?: "—"}",
+                                color = AurumColors.TextMuted,
+                                fontSize = 8.sp,
+                                modifier = Modifier.weight(1.1f),
+                                maxLines = 1,
+                            )
+                            Text(
+                                "${String.format(java.util.Locale.US, "%+.2f", r.rMultiple)}R",
+                                color = AurumColors.TextMuted,
+                                fontSize = 9.sp,
+                                modifier = Modifier.width(44.dp),
+                                textAlign = TextAlign.End,
+                            )
+                            Text(
+                                fmtUsd(r.netPnlUsd),
+                                color = if (r.netPnlUsd >= 0) AurumColors.Green else AurumColors.Red,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.width(72.dp),
+                                textAlign = TextAlign.End,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                    if (arc.rows.size > 12) {
+                        Spacer(Modifier.height(4.dp))
+                        Pill(
+                            text = if (showAll) "بستن فهرست" else "نمایش همهٔ ${arc.rows.size} معامله",
+                            color = AurumColors.Gold,
+                            modifier = Modifier.clickable { showAll = !showAll },
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "شناسهٔ آرشیو: ${arc.contentHash}",
+                        color = AurumColors.TextMuted,
+                        fontSize = 8.sp,
+                        lineHeight = 12.sp,
+                    )
+                }
             }
         }
 

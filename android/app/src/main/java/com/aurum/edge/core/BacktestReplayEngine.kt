@@ -197,6 +197,10 @@ object BacktestReplayEngine {
         val strategyBars = BacktestSeries.resample(ordered, config.strategyInterval)
         val triggerBars = BacktestSeries.resample(ordered, config.triggerInterval)
 
+        // دادهٔ بک‌تست تغییرناپذیر است، پس اسنپ‌شات‌های یک کندل را می‌توان بین استراتژی‌ها
+        // به اشتراک گذاشت. این حافظه فقط در همین اجرا روشن است و در پایان خاموش می‌شود.
+        IchimokuStrategyEngine.enableBacktestSnapshotCache()
+
         val baseConfig = BaseStrategyConfig().copy(
             macroIntervalLabel = config.macroInterval.label,
             strategyIntervalLabel = config.strategyInterval.label,
@@ -275,8 +279,10 @@ object BacktestReplayEngine {
                 )
                 if (closed != null) {
                     state.openTrade = null
-                    allTrades += closed
                     equity += closed.netPnlUsd
+                    // سرمایهٔ بعد از هر معامله در خود معامله هم نوشته می‌شود (قبلاً همیشه ۰ بود و
+                    // ستون «سرمایه بعد از معامله» در آرشیو بی‌معنا بود).
+                    allTrades += closed.copy(equityAfterUsd = round2(equity))
                     equityPoints += ((closed.exitTime ?: now) to equity)
                 }
             }
@@ -331,8 +337,8 @@ object BacktestReplayEngine {
                 barsHeld = open.barsHeld,
                 config = config,
             )
-            allTrades += closed
             equity += closed.netPnlUsd
+            allTrades += closed.copy(equityAfterUsd = round2(equity))
             equityPoints += ((closed.exitTime ?: lastBar.time) to equity)
             state.openTrade = null
         }
@@ -345,10 +351,13 @@ object BacktestReplayEngine {
         }
         val stats = if (models.size > 1) perStrategy + buildStats("__ALL__", "مجموع همهٔ استراتژی‌ها", allTrades) else perStrategy
 
+        IchimokuStrategyEngine.disableBacktestSnapshotCache()
         return Result(
             config = config,
             stats = stats,
-            trades = allTrades.sortedBy { it.entryTime },
+            // شمارهٔ ردیف برای آرشیو: ترتیب زمانی ورود، از ۱. پیش از این همه ۰ بودند و
+            // فهرست معامله‌ها در آرشیو/چارت شمارهٔ قابل ارجاع نداشت.
+            trades = allTrades.sortedBy { it.entryTime }.mapIndexed { i, t -> t.copy(index = i + 1) },
             equityCurve = equityPoints,
             firstTime = ordered.first().time,
             lastTime = ordered.last().time,

@@ -9,7 +9,9 @@ import androidx.lifecycle.viewModelScope
 import com.aurum.edge.app.AppContainer
 import com.aurum.edge.core.BacktestNeuralTrainer
 import com.aurum.edge.core.BacktestReplayEngine
+import com.aurum.edge.core.BacktestTradeArchive
 import com.aurum.edge.core.BitcoinStrategyModel
+import com.aurum.edge.data.BacktestArchiveStore
 import com.aurum.edge.data.BacktestDataStore
 import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.Interval
@@ -37,6 +39,7 @@ class BacktestViewModel(
 ) : AndroidViewModel(application) {
 
     private val store = BacktestDataStore(application)
+    private val archiveStore = BacktestArchiveStore(application)
     private val trainer = BacktestNeuralTrainer(application)
 
     private val _dataSets = MutableStateFlow<List<BacktestDataStore.DataSet>>(emptyList())
@@ -57,6 +60,18 @@ class BacktestViewModel(
 
     private val _result = MutableStateFlow<BacktestReplayEngine.Result?>(null)
     val result: StateFlow<BacktestReplayEngine.Result?> = _result.asStateFlow()
+
+    /** آرشیو معاملاتی آخرین بک‌تست (در پایان هر اجرا ساخته می‌شود). */
+    private val _archive = MutableStateFlow<BacktestTradeArchive.Archive?>(null)
+    val archive: StateFlow<BacktestTradeArchive.Archive?> = _archive.asStateFlow()
+
+    /** فایل‌های CSV/JSON همان آرشیو روی حافظهٔ داخلی. */
+    private val _archiveFiles = MutableStateFlow<BacktestArchiveStore.ArchiveFiles?>(null)
+    val archiveFiles: StateFlow<BacktestArchiveStore.ArchiveFiles?> = _archiveFiles.asStateFlow()
+
+    /** اگر آرشیو فعلی قبلاً اعمال شده باشد، سطر دفتر؛ وگرنه `null`. */
+    private val _appliedEntry = MutableStateFlow<BacktestArchiveStore.AppliedEntry?>(null)
+    val appliedEntry: StateFlow<BacktestArchiveStore.AppliedEntry?> = _appliedEntry.asStateFlow()
 
     /** نقطه‌ای از چارت که نتیجهٔ فعلی روی آن محاسبه شده است. */
     private val _resultCursor = MutableStateFlow(0)
@@ -81,6 +96,10 @@ class BacktestViewModel(
 
     private val _progress = MutableStateFlow(0.0)
     val progress: StateFlow<Double> = _progress.asStateFlow()
+
+    /** زمان تقریبی باقی‌مانده به فارسی؛ خالی = هنوز قابل تخمین نیست. */
+    private val _etaFa = MutableStateFlow("")
+    val etaFa: StateFlow<String> = _etaFa.asStateFlow()
 
     private val _statusFa = MutableStateFlow("")
     val statusFa: StateFlow<String> = _statusFa.asStateFlow()
@@ -157,6 +176,9 @@ class BacktestViewModel(
             _selectedId.value = null
             _candles.value = emptyList()
             _result.value = null
+            _archive.value = null
+            _archiveFiles.value = null
+            _appliedEntry.value = null
             _training.value = null
             return
         }
@@ -173,6 +195,9 @@ class BacktestViewModel(
                 // پیش‌فرض: صفحهٔ آخر داده، تا معامله‌های تازه دیده شوند.
                 _cursor.value = (loaded.size / 2).coerceAtLeast(1)
                 _result.value = null
+                _archive.value = null
+                _archiveFiles.value = null
+                _appliedEntry.value = null
                 _training.value = null
                 _statusFa.value = if (loaded.isEmpty()) "" else
                     "${loaded.size} کندل ${set?.intervalLabel ?: ""} · ${set?.symbol ?: ""} آماده است"
@@ -229,6 +254,7 @@ class BacktestViewModel(
         val s = _settings.value
         _busy.value = true
         _progress.value = 0.0
+        _etaFa.value = ""
         _result.value = null
         _training.value = null
         _statusFa.value = "در حال اجرای بک‌تست روی ${cut.size} کندل…"
@@ -248,12 +274,48 @@ class BacktestViewModel(
                 includeHiddenCrossLayer = s.includeHiddenCrossLayer,
                 captureEntryReports = true,
             )
-            runCatching { BacktestReplayEngine.run(cut, config) { p -> _progress.value = p } }
+            // پیشرفت + زمان باقی‌مانده. قبلاً فقط نوار پیشرفت بود و کاربر نمی‌دانست
+            // «۳۰٪» یعنی ۱۰ ثانیه یا ۵ دقیقه؛ روی «همهٔ استراتژی‌ها» همین ابهام بزرگ بود.
+            val startedAt = System.currentTimeMillis()
+            _etaFa.value = ""
+            runCatching {
+                BacktestReplayEngine.run(cut, config) { p ->
+                    _progress.value = p
+                    val elapsed = System.currentTimeMillis() - startedAt
+                    if (p > 0.03 && elapsed > 900) {
+                        val totalMs = elapsed / p
+                        val remainSec = ((totalMs - elapsed) / 1000.0).toInt().coerceAtLeast(0)
+                        _etaFa.value = when {
+                            remainSec >= 60 -> "≈ ${remainSec / 60} دقیقه و ${remainSec % 60} ثانیه باقی مانده"
+                            else -> "≈ $remainSec ثانیه باقی مانده"
+                        }
+                    }
+                }
+            }
                 .onSuccess { res ->
+                    // آرشیو در همان لحظه ساخته و نوشته می‌شود: کاربر نباید برای دیدن فهرست
+                    // معامله‌ها منتظر کار دیگری بماند، و اگر برنامه بسته شود آرشیو از دست نرود.
+                    val built = runCatching {
+                        val ds = _dataSets.value.firstOrNull { it.id == _selectedId.value }
+                        BacktestTradeArchive.build(
+                            result = res,
+                            dataSetId = ds?.id ?: _selectedId.value.orEmpty(),
+                            dataSetName = ds?.displayName ?: "—",
+                            candles = cut,
+                        )
+                    }.getOrNull()
+                    val files = built?.let { runCatching { archiveStore.save(it.archive, it) }.getOrNull() }
+                    val alreadyApplied = built?.let {
+                        runCatching { archiveStore.findApplied(it.archive.contentHash) }.getOrNull()
+                    }
                     withContext(Dispatchers.Main) {
                         _result.value = res
+                        _archive.value = built?.archive
+                        _archiveFiles.value = files
+                        _appliedEntry.value = alreadyApplied
                         _resultCursor.value = cut.size
                         _progress.value = 1.0
+                        _etaFa.value = ""
                         _statusFa.value = buildString {
                             append("✅ بک‌تست تمام شد: ${res.trades.size} معامله در ${res.steps} کندل")
                             val stats = res.totals
@@ -268,12 +330,161 @@ class BacktestViewModel(
                     withContext(Dispatchers.Main) {
                         _statusFa.value = ""
                         _progress.value = 0.0
+                        _etaFa.value = ""
                         emit("⚠️ بک‌تست شکست خورد: ${err.message ?: "خطای نامشخص"}")
                     }
                 }
             _busy.value = false
         }
     }
+
+    /**
+     * اعمال سود/زیان آرشیو روی موجودی واقعی برنامه — **دقیقاً یک‌بار**.
+     *
+     * سه نگهبان پشت سر هم:
+     * ۱. آرشیو باید وجود داشته باشد و حداقل یک معاملهٔ بسته‌شده داشته باشد.
+     * ۲. شناسهٔ محتوایی نباید قبلاً در دفتر باشد (اگر بود، فقط پیام و سطر دفتر برمی‌گردد).
+     * ۳. تغییر موجودی از مسیر رسمی `SettingsStore.adjustBalance` انجام می‌شود تا سقف ضرر
+     *    روزانه و «سرمایهٔ آغاز روز» همان‌طور که در جای دیگر محاسبه می‌شود، حفظ شود.
+     *
+     * @param day این‌جا همیشه «کل آرشیو» اعمال می‌شود؛ محدودکردن به یک روز از پنل انجام
+     *   می‌شود (با `day = null`)، چون سود یک روز به‌تنهایی واقعیت حساب را نشان نمی‌دهد.
+     */
+    fun applyArchiveToBalance() {
+        if (_busy.value) return
+        val archive = _archive.value ?: run {
+            emit("اول بک‌تست را اجرا کنید تا آرشیو ساخته شود.")
+            return
+        }
+        if (archive.metrics.trades <= 0) {
+            emit("این آرشیو معاملهٔ بسته‌شده ندارد؛ چیزی برای اعمال نیست.")
+            return
+        }
+        if (!archive.metrics.netUsd.isFinite() || kotlin.math.abs(archive.metrics.netUsd) < 0.01) {
+            emit("سود خالص این آرشیو صفر است؛ اعمال لازم نیست.")
+            return
+        }
+        _busy.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = runCatching { archiveStore.findApplied(archive.contentHash) }.getOrNull()
+            if (existing != null) {
+                withContext(Dispatchers.Main) {
+                    _appliedEntry.value = existing
+                    _busy.value = false
+                    emit(
+                        "⛔️ این آرشیو قبلاً در ${BacktestTradeArchive.dayOf(existing.appliedAt)} روی حساب " +
+                            "اعمال شده است (${fmtUsd(existing.netUsd)}). دوباره اعمال نمی‌شود.",
+                    )
+                }
+                return@launch
+            }
+            val settings = container.settingsStore
+            val before = runCatching { settings.read().accountBalance }.getOrDefault(0.0)
+            val ok = runCatching { settings.adjustBalance(archive.metrics.netUsd) }.isSuccess
+            val after = runCatching { settings.read().accountBalance }.getOrDefault(before)
+            if (!ok) {
+                withContext(Dispatchers.Main) {
+                    _busy.value = false
+                    emit("⚠️ اعمال سود انجام نشد؛ موجودی تغییر نکرد.")
+                }
+                return@launch
+            }
+            val entry = BacktestArchiveStore.AppliedEntry(
+                contentHash = archive.contentHash,
+                fileNameBase = archive.suggestedFileNameBase,
+                symbol = archive.symbol,
+                intervalLabel = archive.intervalLabel,
+                trades = archive.metrics.trades,
+                netUsd = archive.metrics.netUsd,
+                balanceBefore = before,
+                balanceAfter = after,
+                appliedAt = System.currentTimeMillis(),
+            )
+            val recorded = runCatching { archiveStore.recordApplied(entry) }.getOrNull()
+            withContext(Dispatchers.Main) {
+                _busy.value = false
+                if (recorded == null) {
+                    // مسابقهٔ دو کلیک: یکی ثبت شد، دومی باید برگردد. موجودی را جبران می‌کنیم.
+                    runCatching { settings.adjustBalance(-archive.metrics.netUsd) }
+                    emit("⛔️ همین آرشیو یک لحظه پیش اعمال شد؛ تغییر دوم برگشت داده شد.")
+                } else {
+                    _appliedEntry.value = entry
+                    emit("✅ ${fmtUsd(archive.metrics.netUsd)} روی موجودی اعمال شد · موجودی: ${fmtUsd(after)}")
+                }
+            }
+        }
+    }
+
+    /**
+     * مسیر «آرشیو به ژورنال واقعی» عمداً وجود ندارد.
+     *
+     * درخواست کاربر «اعمال سود» است، نه ساختن معاملهٔ کاغذی از گذشته: اگر این معامله‌ها وارد
+     * ژورنال شوند، آمار واقعی یادگیری/عصبی با دادهٔ مصنوعی گذشته آلوده می‌شود. بنابراین
+     * آرشیو فایل مستقل خودش را دارد و فقط موجودی حساب تعدیل می‌شود.
+     */
+    /**
+     * اشتراک‌گذاری فایل آرشیو از Share Sheet اندروید (تلگرام/درایو/ایمیل).
+     *
+     * چرا لازم است؟ آرشیو داخل حافظهٔ خصوصی برنامه است و کاربر بدون این مسیر نمی‌تواند
+     * فایل CSV را به کامپیوتر یا اکسل ببرد. همان FileProvider موجود استفاده می‌شود.
+     */
+    fun shareArchive(csv: Boolean) {
+        val files = _archiveFiles.value ?: run {
+            emit("اول بک‌تست را اجرا کنید تا آرشیو ساخته شود.")
+            return
+        }
+        val file = if (csv) files.csv else files.json
+        if (!file.isFile) {
+            emit("فایل آرشیو پیدا نشد؛ بک‌تست را دوباره اجرا کنید.")
+            return
+        }
+        val app = getApplication<Application>()
+        val mime = if (csv) "text/csv" else "application/json"
+        runCatching {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                app, "${app.packageName}.updateprovider", file,
+            )
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = mime
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                putExtra(android.content.Intent.EXTRA_SUBJECT, "Aurum Edge — آرشیو بک‌تست")
+                putExtra(
+                    android.content.Intent.EXTRA_TEXT,
+                    "آرشیو معاملات بک‌تست Aurum Edge (${_archive.value?.symbol ?: ""} " +
+                        "${_archive.value?.intervalLabel ?: ""}) — ${file.name}",
+                )
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = android.content.Intent.createChooser(
+                send, "ارسال/ذخیرهٔ آرشیو (${if (csv) "CSV" else "JSON"})",
+            ).apply { addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) }
+            app.startActivity(chooser)
+        }.onFailure { err ->
+            emit("⚠️ اشتراک‌گذاری ممکن نشد: ${err.message}")
+        }
+    }
+
+    /** بازکردن آرشیو در برنامهٔ پیش‌فرض گوشی (اکسل/مرورگر). */
+    fun openArchive(csv: Boolean) {
+        val files = _archiveFiles.value ?: return
+        val file = if (csv) files.csv else files.json
+        if (!file.isFile) return
+        val app = getApplication<Application>()
+        runCatching {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                app, "${app.packageName}.updateprovider", file,
+            )
+            val view = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, if (csv) "text/csv" else "application/json")
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            app.startActivity(view)
+        }.onFailure { err ->
+            emit("⚠️ برنامه‌ای برای باز کردن این فایل نبود: ${err.message}")
+        }
+    }
+
+    fun archiveNoteFa(): String = "آرشیو فقط خواندنی است و ژورنال/یادگیری واقعی را تغییر نمی‌دهد."
 
     /** آموزش شبکهٔ عصبیِ اتاق تمرین با معامله‌های همین بک‌تست. */
     fun trainNeural() {
