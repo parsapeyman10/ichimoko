@@ -4372,7 +4372,7 @@ object IchimokuStrategyEngine {
         val allSixteenPassed = modelCoreConditions.all { it.passed }
 
         // ── دروازه‌بندی مکتبی بیس (۳.۹.۵۷) ────────────────────────────────────
-        // پیش از این تنها راه ورود، «هر ۱۶ شرط هم‌زمان» بود؛ با احتمال تجربی هر شرط
+        // پیش از این تنها راه ورود، «هر ۱۷ شرط هم‌زمان» بود؛ با احتمال تجربی هر شرط
         // (۵۵٪ تا ۸۲٪) حاصل‌ضرب عملاً صفر می‌شود و در ۸۸ روز یک معامله می‌دهد. در کتاب‌های
         // مرجع (پاتل، تاتل، هوسودا، پلویل) هیچ‌جا «۱۶ تأیید هم‌زمان» شرط ورود نیست؛ آن‌ها سه
         // لایه دارند و هر لایه باید سالم باشد:
@@ -4482,20 +4482,25 @@ object IchimokuStrategyEngine {
 
         val baseReadiness = when {
             neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) -> StrategyReadinessState.BLOCKED
-            // مسیر کلاسیک: هر ۱۶ شرط هم‌زمان (سخت‌گیرترین حالت، هنوز معتبر است).
+            // مسیر کلاسیک: هر ۱۷ شرط هم‌زمان (سخت‌گیرترین حالت، هنوز معتبر است).
             allSixteenPassed && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
             allSixteenPassed && kijunGatePassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
             allSixteenPassed && !kijunGatePassed -> StrategyReadinessState.BLOCKED
             // مسیر مکتبی بیس: وتوی سخت‌ها پاس + امتیاز هم‌گرایی کافی + ماشه.
             bookGate.fires && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
             bookGate.fires && kijunGatePassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
+            // «آماده» یعنی نزدیکِ ورود، نه «بهتر از نصف». اندازه‌گیری روی سری مصنوعی نشان داد
+            // آستانهٔ ۶۶٪ در ۴۵٪ کندل‌ها (و شمارش ≥۱۱ شرط در بیشتر کندل‌ها) برقرار می‌شد و
+            // برچسب «آماده» عملاً همه‌جا بود؛ پس همان آستانهٔ شلیک (۸۰٪) با یک پله پایین‌تر
+            // استفاده می‌شود تا فقط ستاپ‌های واقعاً نزدیک دیده شوند.
             customWatchSetup || sniperArmedPendingRetest || bookGate.watch ||
-                (!isBtc52Model && !isParsaModel && !isHiddenCrossModel && passedCount >= 11) -> StrategyReadinessState.WATCH_SETUP
+                (!isBtc52Model && !isParsaModel && !isHiddenCrossModel &&
+                    passedCount >= BOOK_WATCH_MIN_CONDITIONS) -> StrategyReadinessState.WATCH_SETUP
             else -> StrategyReadinessState.BLOCKED
         }
 
         // ── مسیر ورود رمزارز بر پایهٔ نئوویو ─────────────────────────────────
-        // شرط عمومی (هر ۱۶ شرط هم‌زمان) در رمزارز می‌تواند روزها برقرار نشود. در این مسیر
+        // شرط عمومی (هر ۱۷ شرط هم‌زمان) در رمزارز می‌تواند روزها برقرار نشود. در این مسیر
         // الگوی کامل، تأییدشده و هم‌جهتِ نئوویو ماشهٔ ورود است؛ کنترل‌های ریسک دست‌نخورده‌اند
         // (R:R ≥ ۱.۵، پلن معتبر، بدون وتو، بدون بازار بسته).
         val isCryptoClass = AssetClass.of(normalizedSymbol) == AssetClass.CRYPTO
@@ -5095,7 +5100,11 @@ object IchimokuStrategyEngine {
     /** حداقل امتیاز لازم برای «سیگنال» و برای «آماده». */
     internal const val BOOK_MIN_TOTAL_PCT: Double = 80.0
     internal const val BOOK_MIN_LAYER_PCT: Double = 70.0
-    internal const val BOOK_WATCH_TOTAL_PCT: Double = 66.0
+    /** آستانهٔ «آماده» (WATCH). قبلاً ۶۶٪ بود و ۴۵٪ کندل‌ها را آماده اعلام می‌کرد. */
+    internal const val BOOK_WATCH_TOTAL_PCT: Double = 76.0
+
+    /** کف شمارش شرط برای «آماده» در روش‌های اختصاصی. */
+    internal const val BOOK_WATCH_MIN_CONDITIONS: Int = 14
 
     internal fun bookConfluenceGate(
         conditions: List<StrategyConditionCheck>,

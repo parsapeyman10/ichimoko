@@ -580,9 +580,19 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 }
                 if (res.trades.isEmpty()) {
                     Spacer(Modifier.height(8.dp))
+                    // تفکیک دو حالت، چون درمانشان یکی نیست: «هیچ‌جا نزدیک نشد» یعنی آستانه/بازه،
+                    // «نزدیک شد ولی وتو شد» یعنی یک شرط ساختاری جلوی ورود را گرفته است.
+                    val nearMiss = res.bestBookGatePct >= IchimokuStrategyEngine.BOOK_WATCH_TOTAL_PCT
                     Text(
-                        "این استراتژی در این بازه هیچ ورودی معتبری نداشت. بیشترین شرطی که هم‌زمان پاس شد: " +
-                            "${res.maxConditionsPassed} از ${17}. سدهای اصلی همین بازه:",
+                        if (nearMiss)
+                            "این استراتژی تا آستانهٔ ورود رسید ولی وتوی سخت یا یک لایه جلوی آن را گرفت. " +
+                                "بیشترین شرطی که هم‌زمان پاس شد: ${res.maxConditionsPassed} از ${17} — ولی " +
+                                "دروازهٔ مکتبی «امتیاز» را می‌سنجد، نه شمارش شرط. سدهای اصلی همین بازه:"
+                        else
+                            "این استراتژی در این بازه هیچ ورودی معتبری نداشت و به آستانهٔ آماده هم نرسید " +
+                                "(بهترین هم‌گرایی ${String.format(java.util.Locale.US, "%.0f", res.bestBookGatePct)}٪ " +
+                                "در برابر آستانهٔ ${IchimokuStrategyEngine.BOOK_WATCH_TOTAL_PCT.toInt()}٪). " +
+                                "بیشترین شرطی که هم‌زمان پاس شد: ${res.maxConditionsPassed} از ${17}. سدهای اصلی:",
                         color = AurumColors.Orange,
                         fontSize = 11.sp,
                         lineHeight = 15.sp,

@@ -70,6 +70,8 @@ rm -rf "$WORK/out"; mkdir -p "$WORK/out"
 ( cd "$WORK/shadow" && "$KOTLINC" -nowarn -d "$WORK/out" $(find . -name '*.kt' | sed 's|^\./||' | tr '\n' ' ') ) 2>&1 | grep -E "error" || true
 
 echo "[lab] کامپایل آزمایشگاه…"
+"$KOTLINC" -nowarn -Xfriend-paths="$WORK/out" -cp "$WORK/out:$STDLIB" -d "$WORK/out" \
+  "$ROOT"/tools/strategy_lab/*.kt 2>&1 | grep -E "error" || true
 
 echo "[lab] اجرا (bars=$BARS seed=$SEED)…"
 MAIN="LabKt"

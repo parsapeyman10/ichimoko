@@ -254,4 +254,38 @@ class BaseStrategyBookGateTest {
             ratio <= IchimokuStrategyEngine.MAX_COST_TO_RISK_RATIO + 1e-6,
         )
     }
+
+    // ───────────────── ۴) «آماده» باید نادر باشد، وگرنه برچسب بی‌معنا است ─────────────────
+
+    @Test
+    fun `watch threshold sits just under the fire threshold so the badge stays meaningful`() {
+        // اندازه‌گیری: با ۶۶٪، ۴۵٪ کندل‌ها «آماده» اعلام می‌شدند و برچسب عملاً همه‌جا بود.
+        // قرارداد: «آماده» یک پله زیر آستانهٔ شلیک است، ولی هم‌چنان دروازهٔ وتوی سخت را دارد.
+        assertTrue(
+            "آستانهٔ آماده باید کمتر از آستانهٔ شلیک باشد",
+            IchimokuStrategyEngine.BOOK_WATCH_TOTAL_PCT < IchimokuStrategyEngine.BOOK_MIN_TOTAL_PCT,
+        )
+        assertTrue(
+            "آستانهٔ آماده نباید بی‌دلیل شل شود (کف ۷۵٪)",
+            IchimokuStrategyEngine.BOOK_WATCH_TOTAL_PCT >= 75.0,
+        )
+        assertTrue(
+            "کف شمارش شرط برای آماده نباید به «نصف شرط‌ها» برگردد",
+            IchimokuStrategyEngine.BOOK_WATCH_MIN_CONDITIONS >= 14,
+        )
+    }
+
+    @Test
+    fun `watch is never granted while a hard veto is failing`() {
+        val flags = BooleanArray(17) { true }
+        flags[0] = false // شرط ۱ — کوموی سه‌تایم‌فریم (وتوی سخت)
+        val gate = IchimokuStrategyEngine.bookConfluenceGate(
+            conditions = checks(*flags),
+            isBaseModel = true,
+            baseConfig = BaseStrategyConfig(),
+        )
+        assertFalse("با وتوی سختِ شکسته حتی «آماده» هم نباید داده شود", gate.watch)
+        assertFalse(gate.fires)
+        assertTrue(gate.failedHard.isNotEmpty())
+    }
 }
