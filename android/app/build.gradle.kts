@@ -62,6 +62,11 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
+        // 2.0.9 (code 768): heavy CSV hardening. The backtest window per bar is capped at
+        // BacktestSeries.ENGINE_WINDOW_BARS (the engine reads 260) so a 100k-bar file went from
+        // >600 s to ~57 s with a bit-identical result; the runtime is announced before the run;
+        // oversized files are refused before they enter memory and get an actionable message.
+        // See docs/HEAVY_CSV_GUARDS_FA.md.
         // Keep the published update channel upgradeable: 2.0.5 is code 677 after 2.0.4 (676).
         // 2.0.5 ships the per-symbol Twelve Data keys, the symbol→source map
         // (docs/SYMBOL_SOURCES_FA.md) and an updater that reports which published version it saw
