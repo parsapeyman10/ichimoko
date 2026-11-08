@@ -511,7 +511,7 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     )
                 }
 
-                val files = arcFiles
+                val files = archiveFiles
                 if (files != null) {
                     Spacer(Modifier.height(6.dp))
                     Text(
