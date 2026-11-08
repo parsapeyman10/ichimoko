@@ -130,10 +130,23 @@ object BacktestCsvReader {
         dropFlatBars: Boolean = true,
     ): ParseResult {
         require(raw.isNotBlank()) { "فایل خالی است؛ چیزی برای بک‌تست وجود ندارد." }
-        val lines = raw.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
-        require(lines.size >= 2) { "فایل باید یک سطر عنوان و حداقل یک سطر داده داشته باشد." }
+        // ── پیمایش یک‌گذره ──────────────────────────────────────────────────────
+        // قبلاً ابتدا همهٔ سطرها در یک List جمع می‌شد و بعد دوباره پیمایش می‌شد؛ روی فایل
+        // سنگین این کار یک کپی کامل از فایل (به‌صورت String جدا) در heap نگه می‌داشت و
+        // دقیقاً همان‌جا برنامه با OutOfMemory می‌مرد. حالا فقط سری کندل‌ها نگه داشته
+        // می‌شود و حافظهٔ اضافی، مستقل از حجم فایل، ثابت است.
+        // نکتهٔ ظریف: `Sequence` در کاتلین دوباره‌پیمایش‌شدنی است؛ اگر با `firstOrNull()`
+        // سرسطر را برداریم و بعد خود Sequence را حلقه کنیم، سرسطر **دوباره** به‌عنوان ردیف
+        // داده خوانده می‌شود (یک ردیف ردشده و یک ردیف اضافه در شمارش). پس یک iterator
+        // صریح می‌گیریم و تا آخر همان را جلو می‌بریم.
+        val rows = raw.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .iterator()
+        require(rows.hasNext()) { "فایل باید یک سطر عنوان و حداقل یک سطر داده داشته باشد." }
+        val headerLine = rows.next()
 
-        val header = splitCsvLine(lines.first()).map { it.lowercase().trim() }
+        val header = splitCsvLine(headerLine).map { it.lowercase().trim() }
         val columnIndex = header.withIndex().associate { (i, name) -> name to i }
         val kind = when {
             columnIndex.containsKey("open") && columnIndex.containsKey("close") -> SourceKind.CANDLE
@@ -152,7 +165,10 @@ object BacktestCsvReader {
         var duplicates = 0
         val byTime = LinkedHashMap<Long, Candle>()
 
-        for (row in lines.drop(1)) {
+        var dataRows = 0
+        while (rows.hasNext()) {
+            val row = rows.next()
+            dataRows++
             val cells = splitCsvLine(row)
             val time = cells.getOrNull(tsCol)?.let { parseTimestamp(it) }
             if (time == null) {
@@ -172,6 +188,7 @@ object BacktestCsvReader {
             if (byTime.putIfAbsent(adjustedTime, candle) != null) duplicates++
         }
 
+        require(dataRows > 0) { "فایل باید یک سطر عنوان و حداقل یک سطر داده داشته باشد." }
         require(byTime.isNotEmpty()) { "هیچ ردیف معتبری خوانده نشد؛ فایل یا خراب است یا ستون‌ها جابه‌جا شده‌اند." }
 
         val ordered = byTime.values.sortedBy { it.time }
@@ -189,7 +206,7 @@ object BacktestCsvReader {
         return ParseResult(
             candles = kept,
             sourceKind = kind,
-            totalRows = lines.size - 1,
+            totalRows = dataRows,
             skippedRows = skipped,
             duplicateRows = duplicates,
             flatRowsDropped = flatCount,

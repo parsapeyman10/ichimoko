@@ -56,7 +56,7 @@ FILES=(
   core/NeoWaveNeuralAdvisor.kt core/RiskAndCalendarEngine.kt core/SessionExitPlanner.kt
   core/TradingPerformanceAnalytics.kt core/NeuralGatePolicy.kt core/EntrySafetyGate.kt
   core/IchimokuStrategyEngine.kt core/BacktestSeries.kt core/BacktestReplayEngine.kt
-  core/BacktestCsvReader.kt core/BacktestTradeArchive.kt
+  core/BacktestCsvReader.kt core/BacktestCsvLimits.kt core/BacktestTradeArchive.kt
 )
 for f in "${FILES[@]}"; do
   mkdir -p "$WORK/shadow/$(dirname "$f")"

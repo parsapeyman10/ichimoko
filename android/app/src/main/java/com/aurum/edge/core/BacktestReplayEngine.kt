@@ -1,5 +1,6 @@
 package com.aurum.edge.core
 
+import com.aurum.edge.core.BacktestSeries.ENGINE_WINDOW_BARS
 import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.domain.SignalAction
@@ -178,7 +179,56 @@ object BacktestReplayEngine {
     }
 
     /**
+     * برآورد زمان اجرا **پیش از شروع**، تا کاربر روی فایل سنگین غافلگیر نشود.
+     *
+     * اعداد از اندازه‌گیری واقعی روی همان موتور می‌آید (نه حدس): هر کندل در حالت تک‌استراتژی
+     * حدود ۰٫۶۵ و در «همهٔ استراتژی‌ها» حدود ۲٫۱ میلی‌ثانیه. اگر سقف کندل (`maxBars`) گذاشته
+     * شده باشد، همان تعداد شبیه‌سازی می‌شود و مبنا هم همان است.
+     *
+     * این تابع فقط **تخمین** می‌دهد؛ هیچ‌جا اجرا را متوقف نمی‌کند. تصمیم «اجرا یا کوچک‌کردن
+     * بازه» با کاربر است، ولی دیگر کورکورانه نیست.
+     */
+    fun estimateMs(
+        barCount: Int,
+        runAllStrategies: Boolean,
+        maxBars: Int = 0,
+    ): Long {
+        val effective = if (maxBars > 0) minOf(barCount, maxBars) else barCount
+        val perBar = if (runAllStrategies) ALL_STRATEGIES_MS_PER_BAR else SINGLE_MS_PER_BAR
+        return (effective * perBar).toLong()
+    }
+
+    /** جملهٔ فارسیِ برآورد برای نمایش در UI (بدون عدد نجومی و بدون ادعای دقیق). */
+    fun estimateSentenceFa(
+        barCount: Int,
+        runAllStrategies: Boolean,
+        maxBars: Int = 0,
+    ): String {
+        val effective = if (maxBars > 0) minOf(barCount, maxBars) else barCount
+        val sec = (estimateMs(barCount, runAllStrategies, maxBars) / 1000).coerceAtLeast(1)
+        val scope = if (runAllStrategies) "همهٔ استراتژی‌ها" else "یک استراتژی"
+        val clamped = if (maxBars > 0 && maxBars < barCount) {
+            " (فقط ${grouped(maxBars)} کندل آخر شبیه‌سازی می‌شود)"
+        } else ""
+        return when {
+            sec >= 90 -> "≈ ${sec / 60} دقیقه برای $scope روی ${grouped(effective)} کندل$clamped"
+            else -> "≈ $sec ثانیه برای $scope روی ${grouped(effective)} کندل$clamped"
+        }
+    }
+
+    private fun grouped(n: Int): String = "%,d".format(n).replace(',', '٬')
+
+    /** میلی‌ثانیه به‌ازای هر کندل، اندازه‌گیری‌شده روی همین موتور. */
+    const val SINGLE_MS_PER_BAR: Double = 0.65
+    const val ALL_STRATEGIES_MS_PER_BAR: Double = 2.1
+
+    /**
      * اجرای بک‌تست.
+     *
+     * پنجرهٔ دید هر کندل به [ENGINE_WINDOW_BARS] محدود است و این روی نتیجه اثری ندارد: موتور
+     * بیش از آن را نمی‌خواند. آزمون `HeavyCsvGuardTest` تک‌تک معامله‌ها را با حالت
+     * «کل تاریخچه» مقایسه می‌کند. بدون این محدودیت، هزینه با هر کندل جدید رشد می‌کرد
+     * (روی ۱۰۰٬۰۰۰ کندل: بیش از ۶۰۰ ثانیه → ۵۷ ثانیه).
      *
      * @param source کندل‌های پایه (بسته‌شده، مرتب، بدون شکاف نگران‌کننده).
      * @param progress هرچند قدم یک‌بار صدا زده می‌شود؛ `0..1`.
@@ -186,6 +236,17 @@ object BacktestReplayEngine {
     fun run(
         source: List<Candle>,
         config: Config,
+        progress: ((Double) -> Unit)? = null,
+    ): Result = runWithWindow(source, config, ENGINE_WINDOW_BARS, progress)
+
+    /**
+     * همان `run` با پنجرهٔ دید قابل‌تنظیم — فقط برای آزمون این‌که بریدن پنجره نتیجه را عوض
+     * نمی‌کند. مسیر اصلی همان `ENGINE_WINDOW_BARS` است.
+     */
+    internal fun runWithWindow(
+        source: List<Candle>,
+        config: Config,
+        windowBars: Int,
         progress: ((Double) -> Unit)? = null,
     ): Result {
         val started = System.currentTimeMillis()
@@ -248,9 +309,17 @@ object BacktestReplayEngine {
                 continue
             }
 
-            val macroWindow = BacktestSeries.closedUpTo(macroBars, config.macroInterval.millis, now)
-            val strategyWindow = BacktestSeries.closedUpTo(strategyBars, config.strategyInterval.millis, now)
-            val triggerWindow = BacktestSeries.closedUpTo(triggerBars, triggerSize, now)
+            // limit عمدی است: موتور بیش از ~۲۰۰ کندل آخر را نمی‌خواند، پس آوردن کل تاریخچه
+            // فقط هزینهٔ فیلتر و مرتب‌سازی در هر کندل را به تاریخچه گره می‌زد (رشد درجه‌دو).
+            val macroWindow = BacktestSeries.closedUpTo(
+                macroBars, config.macroInterval.millis, now, windowBars,
+            )
+            val strategyWindow = BacktestSeries.closedUpTo(
+                strategyBars, config.strategyInterval.millis, now, windowBars,
+            )
+            val triggerWindow = BacktestSeries.closedUpTo(
+                triggerBars, triggerSize, now, windowBars,
+            )
             if (macroWindow.size < 30 || strategyWindow.size < 30 || triggerWindow.size < firstEvaluable) {
                 skipped++
                 continue

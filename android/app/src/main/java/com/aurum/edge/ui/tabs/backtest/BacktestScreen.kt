@@ -73,6 +73,7 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
     val etaFa by vm.etaFa.collectAsStateWithLifecycle()
+    val heavyRunFa by vm.heavyRunFa.collectAsStateWithLifecycle()
     val status by vm.statusFa.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val archive by vm.archive.collectAsStateWithLifecycle()
@@ -148,6 +149,18 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
             status.takeIf { it.isNotBlank() }?.let {
                 Spacer(Modifier.height(6.dp))
                 Text(it, color = AurumColors.Cyan, fontSize = 11.sp, lineHeight = 15.sp)
+            }
+            // هشدار «اجرای سنگین» **پیش از** شروع و بی‌درنگ با تغییر بازه/حالت نمایش داده
+            // می‌شود: کاربر باید بداند ۸ دقیقه منتظر می‌ماند یا بازه را کوچک کند.
+            val heavy = heavyRunFa
+            if (heavy.isNotBlank() && !busy) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = heavy,
+                    color = AurumColors.Gold,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                )
             }
             if (busy) {
                 Spacer(Modifier.height(6.dp))

@@ -18,9 +18,11 @@ import com.aurum.edge.domain.Interval
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -101,6 +103,25 @@ class BacktestViewModel(
     private val _etaFa = MutableStateFlow("")
     val etaFa: StateFlow<String> = _etaFa.asStateFlow()
 
+    /**
+     * آیا این اجرا «سنگین» است؟ آستانه از اندازه‌گیری واقعی می‌آید: بالای ۲ دقیقه یعنی کاربر
+     * باید بداند و بتواند بازه را کوچک کند، نه این‌که ۱۰ دقیقه به نوار پیشرفت خیره شود.
+     */
+    val heavyRunFa: StateFlow<String> = combine(_candles, _cursor, _settings) { all, cursor, s ->
+        val n = all.take(cursor.coerceIn(1, all.size.coerceAtLeast(1))).size
+        val ms = BacktestReplayEngine.estimateMs(n, s.runAllStrategies, s.maxBars)
+        when {
+            n < 200 -> ""
+            ms >= HEAVY_RUN_MS -> "این اجرا سنگین است: ${
+                BacktestReplayEngine.estimateSentenceFa(n, s.runAllStrategies, s.maxBars)
+            }. می‌توانید «حداکثر کندل» را کم کنید تا سریع‌تر تمام شود؛ نتیجهٔ بازهٔ کمتر هم معتبر است، فقط معامله‌های کمتر."
+            ms >= SLOW_RUN_MS -> "اجرای متوسط: ${
+                BacktestReplayEngine.estimateSentenceFa(n, s.runAllStrategies, s.maxBars)
+            }."
+            else -> ""
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
     private val _statusFa = MutableStateFlow("")
     val statusFa: StateFlow<String> = _statusFa.asStateFlow()
 
@@ -163,8 +184,12 @@ class BacktestViewModel(
                 }
                 .onFailure { err ->
                     withContext(Dispatchers.Main) {
-                        _statusFa.value = ""
-                        emit("⚠️ ${err.message ?: "فایل خوانده نشد"}")
+                        val msg = err.message ?: "فایل خوانده نشد"
+                        // پیام فایل سنگین چند خطی و راهنمادار است؛ Toast اندروید آن را
+                        // می‌بُرد. پس متن روی صفحه هم می‌ماند (قابل اسکرول و خواندن) و
+                        // Toast فقط تذکر کوتاه است.
+                        _statusFa.value = "⚠️ $msg"
+                        emit("⚠️ فایل وارد نشد")
                     }
                 }
             _busy.value = false
@@ -257,7 +282,14 @@ class BacktestViewModel(
         _etaFa.value = ""
         _result.value = null
         _training.value = null
-        _statusFa.value = "در حال اجرای بک‌تست روی ${cut.size} کندل…"
+        // برآورد پیش از شروع: کاربر پیش از انتظار می‌داند چه چیزی در انتظارش است و اگر
+        // «همهٔ استراتژی‌ها» روی یک فایل سنگین انتخاب کرده، همان‌جا اخطار می‌گیرد.
+        val estimateFa = BacktestReplayEngine.estimateSentenceFa(
+            barCount = cut.size,
+            runAllStrategies = s.runAllStrategies,
+            maxBars = s.maxBars,
+        )
+        _statusFa.value = "در حال اجرای بک‌تست روی ${cut.size} کندل… ($estimateFa)"
         viewModelScope.launch(Dispatchers.Default) {
             val config = BacktestReplayEngine.Config(
                 strategyId = s.strategyId,
@@ -552,6 +584,13 @@ class BacktestViewModel(
             return BacktestViewModel(app, container) as T
         }
     }
-}
 
-internal fun fmtUsd(v: Double): String = String.format(java.util.Locale.US, "%+,.2f$", v)
+    companion object {
+        /** بالای این زمان، اجرا «کند» اعلام می‌شود. */
+        const val SLOW_RUN_MS: Long = 90_000
+
+        /** بالای این زمان، اجرا «سنگین» اعلام می‌شود و پیشنهاد کوچک‌کردن بازه داده می‌شود. */
+        const val HEAVY_RUN_MS: Long = 300_000
+    }
+
+}
