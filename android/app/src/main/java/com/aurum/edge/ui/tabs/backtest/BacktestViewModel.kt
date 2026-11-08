@@ -103,25 +103,6 @@ class BacktestViewModel(
     private val _etaFa = MutableStateFlow("")
     val etaFa: StateFlow<String> = _etaFa.asStateFlow()
 
-    /**
-     * آیا این اجرا «سنگین» است؟ آستانه از اندازه‌گیری واقعی می‌آید: بالای ۲ دقیقه یعنی کاربر
-     * باید بداند و بتواند بازه را کوچک کند، نه این‌که ۱۰ دقیقه به نوار پیشرفت خیره شود.
-     */
-    val heavyRunFa: StateFlow<String> = combine(_candles, _cursor, _settings) { all, cursor, s ->
-        val n = all.take(cursor.coerceIn(1, all.size.coerceAtLeast(1))).size
-        val ms = BacktestReplayEngine.estimateMs(n, s.runAllStrategies, s.maxBars)
-        when {
-            n < 200 -> ""
-            ms >= HEAVY_RUN_MS -> "این اجرا سنگین است: ${
-                BacktestReplayEngine.estimateSentenceFa(n, s.runAllStrategies, s.maxBars)
-            }. می‌توانید «حداکثر کندل» را کم کنید تا سریع‌تر تمام شود؛ نتیجهٔ بازهٔ کمتر هم معتبر است، فقط معامله‌های کمتر."
-            ms >= SLOW_RUN_MS -> "اجرای متوسط: ${
-                BacktestReplayEngine.estimateSentenceFa(n, s.runAllStrategies, s.maxBars)
-            }."
-            else -> ""
-        }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
-
     private val _statusFa = MutableStateFlow("")
     val statusFa: StateFlow<String> = _statusFa.asStateFlow()
 
@@ -146,6 +127,29 @@ class BacktestViewModel(
 
     private val _settings = MutableStateFlow(Settings())
     val settings: StateFlow<Settings> = _settings.asStateFlow()
+
+    /**
+     * آیا این اجرا «سنگین» است؟ آستانه از اندازه‌گیری واقعی می‌آید: بالای ۵ دقیقه یعنی کاربر
+     * باید بداند و بتواند بازه را کوچک کند، نه این‌که ۱۰ دقیقه به نوار پیشرفت خیره شود.
+     *
+     * جای این ویژگی عمدی است: باید **بعد از** `_settings` تعریف شود، چون مقدار اولیهٔ
+     * ویژگی‌ها به ترتیب اعلان اجرا می‌شود و اگر بالا باشد، دسترسی به `_settings` هنوز
+     * مقدار نگرفته است (`Variable '_settings' must be initialized`).
+     */
+    val heavyRunFa: StateFlow<String> = combine(_candles, _cursor, _settings) { all, cursor, s ->
+        val n = all.take(cursor.coerceIn(1, all.size.coerceAtLeast(1))).size
+        val ms = BacktestReplayEngine.estimateMs(n, s.runAllStrategies, s.maxBars)
+        when {
+            n < 200 -> ""
+            ms >= HEAVY_RUN_MS -> "این اجرا سنگین است: ${
+                BacktestReplayEngine.estimateSentenceFa(n, s.runAllStrategies, s.maxBars)
+            }. می‌توانید «حداکثر کندل» را کم کنید تا سریع‌تر تمام شود؛ نتیجهٔ بازهٔ کمتر هم معتبر است، فقط معامله‌های کمتر."
+            ms >= SLOW_RUN_MS -> "اجرای متوسط: ${
+                BacktestReplayEngine.estimateSentenceFa(n, s.runAllStrategies, s.maxBars)
+            }."
+            else -> ""
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
     val storePathFa: String get() = store.storagePathFa()
 
