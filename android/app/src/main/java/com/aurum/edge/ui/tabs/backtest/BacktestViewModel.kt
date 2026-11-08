@@ -592,5 +592,7 @@ class BacktestViewModel(
         /** بالای این زمان، اجرا «سنگین» اعلام می‌شود و پیشنهاد کوچک‌کردن بازه داده می‌شود. */
         const val HEAVY_RUN_MS: Long = 300_000
     }
-
 }
+
+/** قالب دلاری با علامت؛ در صفحهٔ بک‌تست و پیام‌هایش مشترک است. */
+internal fun fmtUsd(v: Double): String = String.format(java.util.Locale.US, "%+,.2f$", v)
