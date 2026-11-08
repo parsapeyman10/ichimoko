@@ -431,6 +431,40 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     Spacer(Modifier.height(8.dp))
                 }
                 res.totals?.let { totals -> StatsGrid(totals, res.config.startEquityUsd) }
+                // هزینهٔ اجرا، پنهان‌ترین دلیل «چرا سود نمی‌دهد» است: کارمزد درصدی از قیمت است
+                // ولی ۱R از ATR می‌آید؛ روی نماد ارزان با ۱R کوچک، کارمزد نصف ریسک را می‌خورد.
+                // عدد این‌جا همان چیزی است که شرط ۱۷ در موتور می‌سنجد.
+                run {
+                    val costPct = IchimokuStrategyEngine.roundTripCostPct(
+                        res.config.symbol,
+                        res.trades.lastOrNull()?.entryPrice ?: 0.0,
+                    )
+                    val medianOneRPct = res.trades
+                        .map { kotlin.math.abs(it.entryPrice - it.stopLoss) / it.entryPrice * 100.0 }
+                        .sorted()
+                        .let { if (it.isEmpty()) 0.0 else it[it.size / 2] }
+                    if (costPct > 0.0) {
+                        Spacer(Modifier.height(6.dp))
+                        val feeInR = if (medianOneRPct > 0.0) costPct * 100.0 / medianOneRPct else 0.0
+                        Text(
+                            text = "💸 هزینهٔ رفت‌وبرگشت ${String.format(java.util.Locale.US, "%.3f", costPct * 100.0)}٪ قیمت" +
+                                " · میانهٔ ۱R ${String.format(java.util.Locale.US, "%.2f", medianOneRPct)}٪" +
+                                if (feeInR > 0.0) " · کارمزد ≈ ${String.format(java.util.Locale.US, "%.2f", feeInR)}R از هر معامله" else "",
+                            color = if (feeInR > 0.35) AurumColors.Orange else AurumColors.TextMuted,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp,
+                        )
+                        if (feeInR > 0.35) {
+                            Text(
+                                text = "برای این نماد و تایم‌فریم، ۱R کوچک‌تر از آن است که کارمزد را بپوشاند؛ " +
+                                    "تایم‌فریم بالاتر یا نمادی با اسپرد کمتر نتیجهٔ واقعی‌تری می‌دهد (شرط ۱۷ همین را می‌سنجد).",
+                                color = AurumColors.Orange,
+                                fontSize = 9.sp,
+                                lineHeight = 13.sp,
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "بازه: ${formatShortTime(res.firstTime)} → ${formatShortTime(res.lastTime)} · " +
