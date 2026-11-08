@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aurum.edge.core.BacktestReplayEngine
 import com.aurum.edge.core.BitcoinStrategyModel
+import com.aurum.edge.core.IchimokuStrategyEngine
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.theme.AurumColors
@@ -264,6 +266,45 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                         },
                     )
                 }
+                // ── معامله‌ها روی چارت ──────────────────────────────────────
+                // کاربر باید بتواند «کجا معامله شد» را نه از روی حدس، بلکه با یک ضربه ببیند:
+                // هر تراشه، چارت را دقیقاً روی کندل ورود همان معامله می‌برد.
+                val chartTrades = if (resultIsStale) emptyList() else result?.trades.orEmpty()
+                if (chartTrades.isNotEmpty()) {
+                    val sortedCandles = candles
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "📍 معامله‌ها روی چارت (${chartTrades.size}) — با ضربه، چارت روی کندل ورود همان معامله می‌رود:",
+                        color = AurumColors.TextSecondary,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        chartTrades.forEach { trade ->
+                            val entryIdx = sortedCandles.indexOfFirst { it.time == trade.entryTime }
+                            val isBuy = trade.action == com.aurum.edge.domain.SignalAction.BUY
+                            Pill(
+                                text = "${if (isBuy) "▲" else "▼"} ${formatShortTime(trade.entryTime)} · " +
+                                    "${if (trade.netPnlUsd >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.0f", trade.netPnlUsd)}\$",
+                                color = when {
+                                    trade.isOpen -> AurumColors.Cyan
+                                    trade.netPnlUsd >= 0 -> AurumColors.Green
+                                    else -> AurumColors.Red
+                                },
+                                modifier = Modifier.clickable {
+                                    if (entryIdx >= 0) {
+                                        // کمی فضا بعد از ورود تا خروج هم داخل کادر باشد.
+                                        vm.setCursor((entryIdx + 12).coerceIn(1, sortedCandles.size))
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
             }
 
             // ── ۳. استراتژی و اجرا ─────────────────────────────────────────
@@ -475,6 +516,49 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                         }
                     }
                 }
+                // ── دروازهٔ هم‌گرایی مکتبی ────────────────────────────────────
+                // «۰ معامله» بدون عدد، ابهام است. این‌جا هم بهترین امتیاز بازه و هم میانگین
+                // نشان داده می‌شود تا معلوم باشد استراتژی چقدر نزدیک بوده و کدام لایه کم آورده.
+                if (res.bestBookGatePct > 0.0) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        MiniStat(
+                            "بهترین هم‌گرایی",
+                            "${String.format(java.util.Locale.US, "%.0f", res.bestBookGatePct)}%",
+                            if (res.bestBookGatePct >= 80.0) AurumColors.Green else AurumColors.Gold,
+                        )
+                        MiniStat(
+                            "میانگین بازه",
+                            "${String.format(java.util.Locale.US, "%.0f", res.averageBookGatePct)}%",
+                            AurumColors.TextSecondary,
+                        )
+                        MiniStat(
+                            "برترین حالت",
+                            if (res.trades.isNotEmpty()) "✓ ورود" else "زیر آستانه",
+                            if (res.trades.isNotEmpty()) AurumColors.Green else AurumColors.Orange,
+                        )
+                    }
+                    if (res.bestBookGateNoteFa.isNotBlank()) {
+                        Text(
+                            text = "🧭 ${res.bestBookGateNoteFa}",
+                            color = AurumColors.TextMuted,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp,
+                        )
+                    }
+                    Text(
+                        text = "آستانه‌ها: کل ≥ ${IchimokuStrategyEngine.BOOK_MIN_TOTAL_PCT.toInt()}٪ · " +
+                            "لایهٔ تعادل و ماشه هرکدام ≥ ${IchimokuStrategyEngine.BOOK_MIN_LAYER_PCT.toInt()}٪ · " +
+                            "رژیم و اقتصاد اجرا وتوی سخت‌اند.",
+                        color = AurumColors.TextMuted,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp,
+                    )
+                }
                 // چه با معامله و چه بی‌معامله، سدهای اصلی باید دیده شوند: برای گرفتن بک‌تست
                 // معنادار باید بدانیم کدام شرط جلوی ورود را گرفته است.
                 if (res.trades.isNotEmpty()) {
@@ -498,7 +582,7 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "این استراتژی در این بازه هیچ ورودی معتبری نداشت. بیشترین شرطی که هم‌زمان پاس شد: " +
-                            "${res.maxConditionsPassed} از ۱۶. سدهای اصلی همین بازه:",
+                            "${res.maxConditionsPassed} از ${17}. سدهای اصلی همین بازه:",
                         color = AurumColors.Orange,
                         fontSize = 11.sp,
                         lineHeight = 15.sp,

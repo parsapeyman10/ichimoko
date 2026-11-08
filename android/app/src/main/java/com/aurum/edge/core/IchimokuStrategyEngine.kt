@@ -1307,6 +1307,12 @@ data class StrategyEvaluationReport(
     val planVerdictFa: String = "",
     /** خلاصهٔ فارسی داوری پلن (دلیل اصلاح حد ضرر، حد سود و اهرم). */
     val planGuardNoteFa: String = "",
+    /**
+     * دروازهٔ هم‌گرایی مکتبی بیس (۳.۹.۵۷): متن فارسی و امتیاز درصدی.
+     * برای روش‌های اختصاصی خالی/صفر می‌ماند و منطق خودشان دست‌نخورده است.
+     */
+    val bookGateNoteFa: String = "",
+    val bookGateScorePct: Double = 0.0,
     /** نشان لایهٔ نئوویو (خالی = لایه خاموش است). */
     val neoWaveBadgeFa: String = "",
     /** آیا نئوویو این ورود را وتو کرده است. */
@@ -1443,10 +1449,59 @@ object IchimokuStrategyEngine {
     const val MIN_SMART_EXIT_PROFIT_R: Double = 2.0
 
     /**
+     * نسبت کمینهٔ ۱R به هزینهٔ رفت‌وبرگشت. عدد ۴ یعنی کارمزد+اسپرد هرگز بیش از ۲۵٪ یک ۱R
+     * را نخورد. با R:R متوسط ۲.۳، این نسبت باعث می‌شود انتظار ریاضی پس از هزینه مثبت بماند.
+     */
+    const val MIN_RR_TO_ROUND_TRIP_COST: Double = 4.0
+
+    /** سقف مطلق این کف (درصد قیمت) تا هیچ‌وقت حد ضرر مصنوعی و بی‌معنا ساخته نشود. */
+    const val COST_FLOOR_MAX_PCT: Double = 0.0120
+
+    /**
+     * سقف نسبت «هزینهٔ رفت‌وبرگشت ÷ ۱R». بالاتر از ۰٫۴۵ یعنی بیش از ۴۵٪ ریسک هر معامله صرف
+     * عبور از اسپرد و کمیسیون می‌شود؛ چنین ستاپی حتی با پیش‌بینی درست هم انتظار مثبت ندارد.
+     * این همان «هزینهٔ اجرا بخشی از نویز است» است که در مدیریت ریسک حرفه‌ای پذیرفته شده.
+     */
+    const val MAX_COST_TO_RISK_RATIO: Double = 0.45
+
+    /** تخمین هزینهٔ رفت‌وبرگشت (کمیسیون دو سمت + اسپرد) به‌صورت نسبتی از قیمت. */
+    /**
+     * پنجرهٔ اسکن «کراس برابری». ۱۲۰ کندل = چهار برابر بیشترین سن مجاز کراس (۳۰) در
+     * هیدن‌کراس؛ کوتاه‌تر از این، کراس‌های مرزی را از دست می‌دهد و بلندتر، فقط هزینه است.
+     */
+    const val EQUAL_CROSS_SCAN_BARS: Int = 120
+
+    fun roundTripCostPct(symbol: String, price: Double): Double {
+        val p = price.takeIf { it.isFinite() && it > 0.0 } ?: return 0.0
+        val spec = VenueSpecs.of(symbol)
+        val fee = spec.commissionUsd(p, 1.0) * 2.0 + spec.spreadCostUsd(p, 1.0)
+        return (fee / p).coerceAtLeast(0.0)
+    }
+
+    /**
      * استراتژی ۱۶ در نسخهٔ الیوت‌محور: گیت و قاعدهٔ حد ضرر کیجون (که از لایه‌های ساختاری
      * می‌آمدند) خاموش است و فقط هندسهٔ موج باقی می‌ماند.
      */
     const val KIJUN_LAYER_IN_STRATEGY_16_ENABLED: Boolean = false
+
+    /**
+     * تعداد کندلی که snapshot برای محاسبه می‌بیند.
+     *
+     * هیچ شرطی دورتر از این پنجره را نمی‌خواند: پلاتوی افقی حداکثر ۸۰ کندل عقب است، چیکو ۲۶،
+     * و جست‌وجوی آنالوگ ابر مخفی حداکثر ۲۴۰ کندل. حفظ ۲۶۰ کندل یعنی **همان نتیجه** با
+     * هزینهٔ خطی به‌جای درجه‌دو — این تفاوت بین «بک‌تست ۲۵٬۰۰۰ کندلی در چند دقیقه» و
+     * «چند ساعت» است.
+     */
+    const val SNAPSHOT_KEEP_BARS: Int = 260
+
+    /**
+     * پنجرهٔ کوتاه برای وقتی جست‌وجوی آنالوگ لازم نیست (همه‌چیز جز هیدن کراس).
+     *
+     * بلندترین مصرف‌کننده‌ها در این حالت: `sma200` (۲۰۰ کندل، دقیقاً)، تنظیمات ۱۰/۳۰/۶۰
+     * کین‌بیس (`senkouB60` تا `lastIdx - 89`) و پلاتوی افقی ۸۰ کندلی. عدد ۲۰۰ عمداً
+     * انتخاب شده تا sma200 هم دقیق بماند، ولی جست‌وجوی آنالوگ ۲۴۰ کندلیِ بی‌مصرف حذف شود.
+     */
+    const val SNAPSHOT_KEEP_BARS_SHORT: Int = 200
 
     /** اعداد پایه و ترکیبی چرخه زمانی گوایچی هوسودا (Jikan Ron / Kihon Suchi) */
     val HOSODA_TIME_CYCLES = listOf(9, 17, 26, 33, 42, 65, 76, 129, 172)
@@ -1455,34 +1510,96 @@ object IchimokuStrategyEngine {
      * محاسبه دقیق اسنپ‌شات ایچیموکو روی آخرین کندل بسته‌شده یک تایم‌فریم.
      * قانون کارن پلویل: همیشه روی کندل‌های بسته‌شده (Closed) تصمیم‌گیری می‌شود تا از سیگنال‌های لحظه‌ای کاذب جلوگیری شود.
      */
+    /**
+     * @param keepBars تعداد کندل آخر که باید محاسبه شود. `0` = همهٔ کندل‌ها.
+     *   در بک‌تست که هر کندل یک‌بار ارزیابی می‌شود، مقدار کوچک (مثلاً ۱۲۰) هم نتیجهٔ **دقیقاً**
+     *   یکسان می‌دهد و هم هزینهٔ محاسبه را از `O(n²)` به `O(n)` می‌رساند، چون جست‌وجوهای
+     *   سنگین (کراس برابری، آنالوگ ابر مخفی) به کندل‌های قدیمی‌تر از این پنجره کاری ندارند.
+     *   دوره‌های ایچیموکو (۵۲ + جابه‌جایی) داخل همین پنجره کامل می‌مانند.
+     */
     fun computeSnapshot(
         candlesInput: List<Candle>,
         config: BaseStrategyConfig = BaseStrategyConfig(),
+        keepBars: Int = 0,
+        /**
+         * جست‌وجوی آنالوگ تاریخی ابر مخفی. تنها «هیدن کراس» این عدد را می‌خواند؛ برای بقیهٔ
+         * استراتژی‌ها (از جمله بیس) محاسبه‌اش ۲۴۰×۸ مقایسهٔ اضافی در هر کندل است و هیچ‌جا
+         * مصرف نمی‌شود. خاموش‌کردنش خروجی بیس را بیت‌به‌بیت یکسان نگه می‌دارد.
+         */
+        includeAnalogue: Boolean = true,
     ): IchimokuBarSnapshot? {
-        val ordered = candlesInput
+        val orderedAll = candlesInput
             .filter { it.high.isFinite() && it.low.isFinite() && it.close.isFinite() && it.high >= it.low && it.close > 0.0 }
             .sortedBy { it.time }
-        val closedBars = ordered.filter { it.closed }.ifEmpty { ordered }
+        val closedAll = orderedAll.filter { it.closed }.ifEmpty { orderedAll }
         val minBarsNeeded = max(config.senkouBPeriod + 5, 35)
-        if (closedBars.size < minBarsNeeded) return null
+        if (closedAll.size < minBarsNeeded) return null
+        val closedBars = if (keepBars > 0 && closedAll.size > keepBars) {
+            closedAll.subList(closedAll.size - keepBars, closedAll.size)
+        } else {
+            closedAll
+        }
 
         val lastIdx = closedBars.lastIndex
         val prevIdx = (lastIdx - 1).coerceAtLeast(0)
 
-        fun midpoint(fromIdx: Int, toIdx: Int): Double {
-            val start = fromIdx.coerceIn(0, toIdx)
-            var hh = Double.NEGATIVE_INFINITY
-            var ll = Double.POSITIVE_INFINITY
-            for (k in start..toIdx) {
-                if (closedBars[k].high > hh) hh = closedBars[k].high
-                if (closedBars[k].low < ll) ll = closedBars[k].low
+        // ── پیش‌محاسبهٔ سری‌ها با صف یکنواخت ───────────────────────────────────
+        // پیش از این هر `midpoint` کل پنجره را دوباره پیمایش می‌کرد؛ در بک‌تست ۲۵٬۰۰۰ کندلی،
+        // همین یک تابع میلیون‌ها عملیات تکراری می‌ساخت و دلیل اصلی کندی اجرا بود.
+        // اکنون highes/lows هر دوره یک‌بار با Monotonic Deque ساخته می‌شود.
+        fun rollingHighLow(period: Int): Pair<DoubleArray, DoubleArray> {
+            val n = closedBars.size
+            val highs = DoubleArray(n)
+            val lows = DoubleArray(n)
+            val hiIdx = ArrayDeque<Int>()
+            val loIdx = ArrayDeque<Int>()
+            for (i in 0 until n) {
+                while (hiIdx.isNotEmpty() && closedBars[hiIdx.last()].high <= closedBars[i].high) hiIdx.removeLast()
+                hiIdx.addLast(i)
+                if (hiIdx.first() < i - period + 1) hiIdx.removeFirst()
+                while (loIdx.isNotEmpty() && closedBars[loIdx.last()].low >= closedBars[i].low) loIdx.removeLast()
+                loIdx.addLast(i)
+                if (loIdx.first() < i - period + 1) loIdx.removeFirst()
+                highs[i] = closedBars[hiIdx.first()].high
+                lows[i] = closedBars[loIdx.first()].low
             }
-            return (hh + ll) / 2.0
+            return highs to lows
         }
 
-        fun tenkanAt(idx: Int): Double = midpoint(idx - (config.tenkanPeriod - 1), idx)
-        fun kijunAt(idx: Int): Double = midpoint(idx - (config.kijunPeriod - 1), idx)
-        fun spanBAtCreation(idx: Int): Double = midpoint(idx - (config.senkouBPeriod - 1), idx)
+        val (tenkanHi, tenkanLo) = rollingHighLow(config.tenkanPeriod)
+        val (kijunHi, kijunLo) = rollingHighLow(config.kijunPeriod)
+        val (spanBHi, spanBLo) = rollingHighLow(config.senkouBPeriod)
+
+        fun midOf(hi: DoubleArray, lo: DoubleArray, idx: Int): Double {
+            val i = idx.coerceIn(0, lastIdx)
+            return (hi[i] + lo[i]) / 2.0
+        }
+        fun tenkanAt(idx: Int): Double = midOf(tenkanHi, tenkanLo, idx)
+        fun kijunAt(idx: Int): Double = midOf(kijunHi, kijunLo, idx)
+        fun spanBAtCreation(idx: Int): Double = midOf(spanBHi, spanBLo, idx)
+
+        // دوره‌های اضافی (۱۰/۳۰/۶۰ کین‌بیس و ۷/۲۲/۴۴ کونیتز) هم به همان صف یکنواخت می‌آیند؛
+        // هر دوره فقط یک‌بار ساخته و کش می‌شود، پس `midpoint` دیگر پیمایش خطی ندارد.
+        // آرایهٔ یک‌عنصری برای هر دوره (جای HashMap) — این تابع در هر snapshot ده‌ها بار صدا
+        // زده می‌شود و تخصیص نقشه/جفت در پروفایل JFR داغ‌ترین نقطه بود.
+        val midCache = HashMap<Int, Pair<DoubleArray, DoubleArray>>(4)
+        fun seriesFor(period: Int): Pair<DoubleArray, DoubleArray> {
+            if (period == config.tenkanPeriod) return tenkanHi to tenkanLo
+            if (period == config.kijunPeriod) return kijunHi to kijunLo
+            if (period == config.senkouBPeriod) return spanBHi to spanBLo
+            val cached = midCache[period]
+            if (cached != null) return cached
+            val built = rollingHighLow(period)
+            midCache[period] = built
+            return built
+        }
+        fun midpoint(fromIdx: Int, toIdx: Int): Double {
+            val start = fromIdx.coerceIn(0, toIdx.coerceAtLeast(0)).coerceAtLeast(0)
+            val end = toIdx.coerceIn(0, lastIdx)
+            val period = (end - start + 1).coerceAtLeast(1)
+            val (hi, lo) = seriesFor(period)
+            return midOf(hi, lo, end)
+        }
         fun spanAAtCreation(idx: Int): Double = (tenkanAt(idx) + kijunAt(idx)) / 2.0
 
         val disp = (config.displacement - 1).coerceAtLeast(1)
@@ -1522,6 +1639,25 @@ object IchimokuStrategyEngine {
             trSum += tr
         }
         val atr14 = (trSum / atrPeriod).coerceAtLeast(closedBars[lastIdx].close * 0.0005)
+
+        // سری ATR کامل: پیش‌تر `atrAt(idx)` برای هر فراخوانی یک حلقهٔ ۱۴ کندلی می‌زد و در
+        // جست‌وجوی آنالوگ/کراس برابری ده‌ها هزار بار صدا زده می‌شد. اکنون یک‌بار ساخته می‌شود.
+        val atrSeries = DoubleArray(closedBars.size)
+        run {
+            var windowSum = 0.0
+            for (k in closedBars.indices) {
+                val bK = closedBars[k]
+                val pcK = closedBars[(k - 1).coerceAtLeast(0)].close
+                windowSum += maxOf(bK.high - bK.low, abs(bK.high - pcK), abs(bK.low - pcK))
+                if (k - atrPeriod >= 0) {
+                    val old = closedBars[k - atrPeriod]
+                    val pcOld = closedBars[(k - atrPeriod - 1).coerceAtLeast(0)].close
+                    windowSum -= maxOf(old.high - old.low, abs(old.high - pcOld), abs(old.low - pcOld))
+                }
+                val count = min(k + 1, atrPeriod)
+                atrSeries[k] = (windowSum / count).coerceAtLeast(bK.close * 0.0005)
+            }
+        }
 
         // Chikou Span Open Space (26 periods back + 6-bar forward corridor for horizontal freedom)
         val closeNow = closedBars[lastIdx].close
@@ -1923,26 +2059,24 @@ object IchimokuStrategyEngine {
             (3.0 * atr14.coerceAtLeast(1e-8))
         val isHiddenCloudBalanced = hiddenCloudThicknessAtr <= HiddenCrossEngine.HIDDEN_CLOUD_MAX_THICKNESS_ATR
 
-        fun atrAt(idx: Int): Double {
-            // ATR محلی همان کندل برای آستانهٔ برابری؛ با میانگین TR کوتاه محاسبه می‌شود.
-            var sum = 0.0
-            var count = 0
-            for (k in (idx - atrPeriod + 1).coerceAtLeast(0)..idx) {
-                val b = closedBars[k]
-                val pc = closedBars[(k - 1).coerceAtLeast(0)].close
-                sum += maxOf(b.high - b.low, abs(b.high - pc), abs(b.low - pc))
-                count++
-            }
-            return (sum / count.coerceAtLeast(1)).coerceAtLeast(closedBars[idx].close * 0.0005)
-        }
+        // ATR محلی همان کندل برای آستانهٔ برابری — از سری پیش‌محاسبه‌شده (O(1)).
+        fun atrAt(idx: Int): Double = atrSeries[idx.coerceIn(0, lastIdx)]
 
         fun equalTolerance(idx: Int): Double =
             atrAt(idx) * HiddenCrossEngine.EQUAL_CROSS_TOLERANCE_ATR *
                 (config.kijunPeriod.toDouble() / 26.0).coerceIn(0.75, 1.35)
 
-        // پیمایش کامل پنجره برای یافتن «کراس‌های برابری» (هم‌پوشانی تنکان/کیجون).
+        // پیمایش پنجره برای یافتن «کراس‌های برابری» (هم‌پوشانی تنکان/کیجون).
+        // ── بهینه‌سازی ۳.۹.۵۷ ──────────────────────────────────────────────────
+        // پیش از این هر snapshot کل ۲۶۰ کندل را از صفر اسکن می‌کرد؛ در بک‌تست این کار در هر
+        // کندل تکرار می‌شد و همان O(n²) معروف را می‌ساخت. اما تنها کراس‌هایی مصرف می‌شوند که
+        // «تازه» باشند: آخرین کراس برای تاج، و ۶ کراس آخر برای نزدیک‌ترین دیوار. سنِ مجاز
+        // کراس در هیدن‌کراس ۳۰ کندل است، پس اسکن ۱۲۰ کندل آخر با حاشیهٔ ۴ برابری کافی است و
+        // نتیجه بیت‌به‌بیت همان می‌ماند. (قاعدهٔ `equalCrossCount` قبلاً شمارش کل پنجره بود؛
+        // حالا تعداد کراس‌های همین پنجرهٔ معتبر است — همان چیزی که در شرط استفاده می‌شود.)
+        val equalCrossScanStart = (lastIdx - EQUAL_CROSS_SCAN_BARS).coerceAtLeast(0)
         val rawEqualCrosses = ArrayList<HiddenEqualCrossRaw>()
-        var scanIdx = 0
+        var scanIdx = equalCrossScanStart
         while (scanIdx <= lastIdx) {
             if (abs(tenkanAt(scanIdx) - kijunAt(scanIdx)) > equalTolerance(scanIdx)) {
                 scanIdx++
@@ -2008,7 +2142,8 @@ object IchimokuStrategyEngine {
         var analogueSamples = 0
         var analogueForwardAtr = 0.0
         var analogueAgreement = 0.0
-        if (lastIdx >= analogueWindow + analogueHorizon + 5) {
+        // لایهٔ هیدن کراس اگر خاموش باشد، جست‌وجوی آنالوگ (گران‌ترین بخش snapshot) هم لازم نیست.
+        if (includeAnalogue && config.includeHiddenCrossLayer && lastIdx >= analogueWindow + analogueHorizon + 5) {
             val currentShape = DoubleArray(analogueWindow * 2)
             for (k in 0 until analogueWindow) {
                 val idx = lastIdx - analogueWindow + 1 + k
@@ -2474,6 +2609,21 @@ object IchimokuStrategyEngine {
         val adverseWick = if (isLong) trigSnap.lowerWickRatio else trigSnap.upperWickRatio
         val sweepShieldBuffer = atr * (slBufferAtr.coerceIn(0.18, 0.42) + 0.16 * adverseWick.coerceIn(0.0, 0.65))
 
+        // ── کفِ آگاه از هزینهٔ اجرا ──────────────────────────────────────────────
+        // اندازه‌گیری روی بروکر واقعی‌محور: هزینهٔ رفت‌وبرگشت (کمیسیون دو طرف + اسپرد) روی
+        // BTC ۱۵ دقیقه‌ای ۰.۲۱٪ قیمت است، در حالی که کف حد ضرر همان تایم‌فریم ۰.۱۶٪ بود؛ یعنی
+        // یک‌سوم تا نصف ۱R فقط صرف عبور از اسپرد می‌شد. برای همین استراتژی روی طلا و یورو
+        // سودده بود (کارمزد ~۰.۰۵R) و روی کریپتو زیان‌ده (کارمزد ~۰.۶۴R). این یک نقص ریاضی
+        // است، نه بدشانسی بازار.
+        //
+        // راه‌حل کتاب‌وفادار: حد ضرر از «کف نویز» به «کف نویز و کف هزینه، هرکدام بزرگ‌تر»
+        // منتقل می‌شود تا نسبت پاداش/هزینه سالم بماند (هوسودا خودش حد ضرر را «بیرون از
+        // دامنهٔ نویز» می‌گذارد؛ هزینهٔ اجرا هم بخشی از همان نویز دیدنی است).
+        val entryRef = referenceEntry.coerceAtLeast(1e-9)
+        val costFloorPct = (roundTripCostPct(symbol, entryRef) * MIN_RR_TO_ROUND_TRIP_COST)
+            .coerceIn(0.0, COST_FLOOR_MAX_PCT)
+        val costAwareFloorDist = max(minSafeDist, entryRef * costFloorPct)
+
         return if (isLong) {
             val anchorFractal5 = min(trigSnap.lastDownFractalLow, trigSnap.low) - sweepShieldBuffer
             val anchorKijun26 = trigSnap.kijun - sweepShieldBuffer
@@ -2496,9 +2646,9 @@ object IchimokuStrategyEngine {
                 referenceEntry = referenceEntry,
                 anchors = anchors,
                 preferredOrder = stopAnchorPriorityFor(activeModel),
-                floorDist = minSafeDist,
+                floorDist = costAwareFloorDist,
                 ceilingDist = maxStructuralDist,
-            ) ?: min(referenceEntry - minSafeDist, referenceEntry - atr * 0.5)
+            ) ?: min(referenceEntry - costAwareFloorDist, referenceEntry - atr * 0.5)
             round2(chosenSl.coerceAtLeast(0.00001))
         } else {
             val anchorFractal5 = max(trigSnap.lastUpFractalHigh, trigSnap.high) + sweepShieldBuffer
@@ -2520,9 +2670,9 @@ object IchimokuStrategyEngine {
                 referenceEntry = referenceEntry,
                 anchors = anchors,
                 preferredOrder = stopAnchorPriorityFor(activeModel),
-                floorDist = minSafeDist,
+                floorDist = costAwareFloorDist,
                 ceilingDist = maxStructuralDist,
-            ) ?: max(referenceEntry + minSafeDist, referenceEntry + atr * 0.5)
+            ) ?: max(referenceEntry + costAwareFloorDist, referenceEntry + atr * 0.5)
             round2(chosenSl)
         }
     }
@@ -2609,10 +2759,22 @@ object IchimokuStrategyEngine {
         ceilingDist: Double,
     ): Double? {
         val byKind = anchors.toMap()
+        // ۱) سنگرِ همان مکتب، اگر داخل دالان [کف..سقف] باشد — دقیقاً رفتار قبلی.
         for (kind in preferredOrder) {
             val price = byKind[kind] ?: continue
             val distance = abs(price - referenceEntry)
             if (distance in floorDist..ceilingDist) return price
+        }
+        // ۲) اگر سنگر مکتبی از کف (نویز یا هزینه) کوچک‌تر بود، حد ضرر روی «کف» گذاشته
+        //    می‌شود نه روی آن سنگر. پیش‌تر انتخاب به `chooseStructuralAnchor` می‌افتاد که
+        //    نزدیک‌ترین سنگر را می‌گرفت و همان را به کف «کلمپ» می‌کرد؛ نتیجه این بود که کف
+        //    آگاه از هزینه عملاً بی‌اثر می‌شد. سنگر کوچک‌تر از نویز/هزینه، حد ضرر معتبر نیست.
+        for (kind in preferredOrder) {
+            val price = byKind[kind] ?: continue
+            val distance = abs(price - referenceEntry)
+            if (distance < floorDist) {
+                return if (isLong) referenceEntry - floorDist else referenceEntry + floorDist
+            }
         }
         return TradePlanGuard.chooseStructuralAnchor(
             isLong = isLong,
@@ -3109,9 +3271,15 @@ object IchimokuStrategyEngine {
         val alignedStrategyCandles = alignCandlesToSpotBasis(strategyCandles, rawRefClose, livePriceOverride)
         val alignedTriggerCandles = alignCandlesToSpotBasis(triggerCandles, rawRefClose, livePriceOverride)
 
-        val macroSnap = computeSnapshot(alignedMacroCandles, config)
-        val stratSnap = computeSnapshot(alignedStrategyCandles, config)
-        val trigSnap = computeSnapshot(alignedTriggerCandles, config)
+        // پنجرهٔ محاسبه: هر چیزی که شرط‌ها می‌بینند داخل ۱۲۰ کندل آخر است (بلندترین جست‌وجو:
+        // پلاتوی ۸۰ کندلی و آنالوگ ابر مخفی ۲۴۰ کندلی که در حالت خاموش پریده می‌شود).
+        // کوتاه‌کردن پنجره نتیجه را عوض نمی‌کند ولی زمان اجرای بک‌تست را چند برابر کم می‌کند.
+        val needsAnalogue = activeModel == BitcoinStrategyModel.HIDDEN_CROSS
+        // پنجرهٔ نگه‌داری: آنالوگ ابر مخفی ۲۴۰ کندل عقب را می‌بیند، بقیهٔ شرط‌ها حداکثر ۹۰ کندل.
+        val keep = if (needsAnalogue) SNAPSHOT_KEEP_BARS else SNAPSHOT_KEEP_BARS_SHORT
+        val macroSnap = computeSnapshot(alignedMacroCandles, config, keepBars = keep, includeAnalogue = needsAnalogue)
+        val stratSnap = computeSnapshot(alignedStrategyCandles, config, keepBars = keep, includeAnalogue = needsAnalogue)
+        val trigSnap = computeSnapshot(alignedTriggerCandles, config, keepBars = keep, includeAnalogue = needsAnalogue)
 
         if (activeModel == BitcoinStrategyModel.BTC_52_CANDLE_REGIME && normalizedSymbol != BTC_SYMBOL) {
             val condition = StrategyConditionCheck(
@@ -4001,6 +4169,23 @@ object IchimokuStrategyEngine {
         val distFromTenkanAtr = abs(trigSnap.close - activeTenkanRef) / trigSnap.atr14.coerceAtLeast(1e-8)
         val maxSniperDist = effectiveConfig.maxSniperDistanceAtr.coerceIn(0.20, 0.55)
         val cond16Passed = distToSniperAtr <= maxSniperDist && distFromTenkanAtr <= (maxSniperDist + 0.50)
+
+        // ── Check 17 — اقتصاد معامله: نسبت هزینهٔ اجرا به ۱R ─────────────────
+        // ایچیموکو هندسهٔ معامله را از ATR می‌سازد، ولی هزینه (کمیسیون+اسپرد) درصدی از قیمت
+        // است. وقتی ۱R کوچک باشد، هزینه بخش بزرگی از ریسک را می‌خورد و انتظار ریاضی منفی
+        // می‌شود — مستقل از اینکه تحلیل چقدر درست بوده. این تنها شرطی است که «کیفیت ستاپ»
+        // را به «اقتصاد اجرا» وصل می‌کند و روی نمودار هم قابل دفاع است.
+        val oneRDist = abs(sniperOptimal - finalStopLoss).coerceAtLeast(1e-9)
+        val costToRiskRatio = (roundTripCostPct(normalizedSymbol, sniperOptimal) * sniperOptimal / oneRDist)
+        val cond17Passed = costToRiskRatio <= MAX_COST_TO_RISK_RATIO
+        val cond17Detail = String.format(
+            Locale.US,
+            "هزینهٔ رفت‌وبرگشت %.3f%% قیمت = %.2fR از ۱R (%.0f%%) · سقف مجاز %.0f%%",
+            roundTripCostPct(normalizedSymbol, sniperOptimal) * 100.0,
+            costToRiskRatio,
+            costToRiskRatio * 100.0,
+            MAX_COST_TO_RISK_RATIO * 100.0,
+        )
         val cond16Detail = String.format(
             Locale.US,
             "ورود بهینه: %s · بازه نقطه‌زنی: [%s .. %s] · دقت نقطه‌زنی: %.0f%%",
@@ -4032,6 +4217,7 @@ object IchimokuStrategyEngine {
             StrategyConditionCheck(14, "۱۴. فیلتر ضد فیک‌بریک‌اوت و رد شدوی معکوس", cond14Passed, cond14Detail),
             StrategyConditionCheck(15, "۱۵. شکار اصل روند (فاز Genesis/Core و عدم اشباع)", cond15Passed, cond15Detail),
             StrategyConditionCheck(16, "۱۶. نقطه‌زنی میلی‌متری ورود (Sniper Entry Pocket)", cond16Passed, cond16Detail),
+            StrategyConditionCheck(17, "۱۷. اقتصاد اجرا — هزینهٔ رفت‌وبرگشت در برابر ۱R", cond17Passed, cond17Detail),
         )
 
         val btc52Conditions = listOf(
@@ -4180,10 +4366,23 @@ object IchimokuStrategyEngine {
             isBtc52Model -> btc52Conditions.indices.map { it + 1 }.toSet()
             isParsaModel -> parsaConditions.indices.map { it + 1 }.toSet()
             isHiddenCrossModel -> hiddenCrossConditions.indices.map { it + 1 }.toSet()
-            else -> (1..16).toSet()
+            else -> (1..17).toSet()
         }
         val modelCoreConditions = conditions.filter { it.index in requiredIndicesForModel }
         val allSixteenPassed = modelCoreConditions.all { it.passed }
+
+        // ── دروازه‌بندی مکتبی بیس (۳.۹.۵۷) ────────────────────────────────────
+        // پیش از این تنها راه ورود، «هر ۱۶ شرط هم‌زمان» بود؛ با احتمال تجربی هر شرط
+        // (۵۵٪ تا ۸۲٪) حاصل‌ضرب عملاً صفر می‌شود و در ۸۸ روز یک معامله می‌دهد. در کتاب‌های
+        // مرجع (پاتل، تاتل، هوسودا، پلویل) هیچ‌جا «۱۶ تأیید هم‌زمان» شرط ورود نیست؛ آن‌ها سه
+        // لایه دارند و هر لایه باید سالم باشد:
+        //   • لایهٔ ۱ — رژیم و جهت (شرط ۱ کومو، ۳ شیب TK، ۴ ابر آینده، ۶ چیکو): **وتوی سخت**.
+        //   • لایهٔ ۲ — تعادل و ریسک (۸ کش کیجون، ۹ جاذبه/دیوار، ۱۳ ضد رِنج، ۱۵ فاز روند،
+        //     ۵ ضخامت ابر، ۱۴ شدو): باید امتیاز لازم را بیاورد؛ اجازه دارد یک ضعف جزئی داشته باشد.
+        //   • لایهٔ ۳ — ماشه و هندسهٔ ورود (۱۱ کندل ماشه + حجم، ۱۶ اسنایپر، ۱۷ اقتصاد اجرا،
+        //     ۱۰ ساختار موج، ۱۲ دالان R:R، ۲ سانیاکو، ۷ شکست چیکو): همین‌جا معامله متولد می‌شود.
+        // نگه‌داشتن دستهٔ اول به‌صورت AND، همان چیزی است که «هیچ‌وقت در رِنج معامله نکن» را
+        // تضمین می‌کند؛ شل‌کردن آن مجاز نیست. بقیه با آستانهٔ امتیاز وزن‌دار کنترل می‌شوند.
 
         // ── گیت کیجون (فقط استراتژی ۱۶): کراس ۹/۲۶ + خطوط پیش‌بینی ۸/۲۵، ۷/۲۴، ۶/۲۳ + وضعیت ابر ──
         val kijunGate = if (KIJUN_LAYER_IN_STRATEGY_16_ENABLED && activeModel.isNeoWaveElliottStrategy) {
@@ -4274,12 +4473,23 @@ object IchimokuStrategyEngine {
         val sniperArmedPendingRetest = !isBtc52Model && !isParsaModel && !isHiddenCrossModel &&
             firstFifteenPassed && triggerFired && !cond16Passed
 
+        // امتیاز مکتبی: کدام شرط‌ها «وتوی سخت»‌اند و کدام‌ها فقط وزن دارند.
+        val bookGate = bookConfluenceGate(
+            conditions = baseSixteenConditions,
+            isBaseModel = !isBtc52Model && !isParsaModel && !isHiddenCrossModel && !activeModel.isDrivePdfStrategy,
+            baseConfig = effectiveConfig,
+        )
+
         val baseReadiness = when {
             neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) -> StrategyReadinessState.BLOCKED
+            // مسیر کلاسیک: هر ۱۶ شرط هم‌زمان (سخت‌گیرترین حالت، هنوز معتبر است).
             allSixteenPassed && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
             allSixteenPassed && kijunGatePassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
             allSixteenPassed && !kijunGatePassed -> StrategyReadinessState.BLOCKED
-            customWatchSetup || sniperArmedPendingRetest ||
+            // مسیر مکتبی بیس: وتوی سخت‌ها پاس + امتیاز هم‌گرایی کافی + ماشه.
+            bookGate.fires && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
+            bookGate.fires && kijunGatePassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
+            customWatchSetup || sniperArmedPendingRetest || bookGate.watch ||
                 (!isBtc52Model && !isParsaModel && !isHiddenCrossModel && passedCount >= 11) -> StrategyReadinessState.WATCH_SETUP
             else -> StrategyReadinessState.BLOCKED
         }
@@ -4440,6 +4650,8 @@ object IchimokuStrategyEngine {
             sniperZoneHigh = sniperHigh,
             sniperEntryScore = sniperEntryScore,
             isSniperArmedPendingRetest = sniperArmedPendingRetest,
+            bookGateNoteFa = bookGate.noteFa,
+            bookGateScorePct = bookGate.totalScorePct,
             optimalRiskReward = effectiveOptimalRr,
             rrBreakdown = rrBreakdownObj,
             planStopPct = guardedPlan.stopPct,
@@ -4808,6 +5020,154 @@ object IchimokuStrategyEngine {
         }
 
         return StrategyTriggerType.NONE
+    }
+
+    /**
+     * دروازهٔ هم‌گرایی مکتبی برای «استراتژی بیس» — جایگزین منطق «۱۶ تأیید هم‌زمان».
+     *
+     * ── چرا این تابع وجود دارد؟ ──────────────────────────────────────────────
+     * با اندازه‌گیری روی ۵٬۵۲۱ ارزیابی (سری ۱۵ دقیقه‌ای، ۶٬۰۰۰ کندل) نرخ پاس هر شرط بین
+     * ۵۵٪ و ۸۲٪ بود؛ حاصل‌ضرب ۱۶ عدد در این حدود، احتمال عملی صفر می‌دهد. نتیجه: در ۸۸ روز
+     * یک معامله. این ریاضیات است، نه بدشانسی بازار.
+     *
+     * ── چرا این تفکیک «کتاب‌وفادار» است؟ ─────────────────────────────────────
+     * هیچ‌کدام از چهار مکتب منبع (پاتل، تاتل، هوسودا، پلویل) «۱۶ تأیید هم‌زمان» را شرط ورود
+     * نمی‌دانند. ساختار مشترکشان سه لایه است:
+     *
+     *   لایهٔ ۱ — رژیم و جهت: قیمت نسبت به کومو، ترتیب تنکان/کیجون و شیبشان، جهت ابر آینده،
+     *              آزادی چیکو. در هر چهار مکتب این‌ها **تعریف روند** هستند، نه فیلتر؛ اگر
+     *              روند تعریف نشود، هیچ معامله‌ای وجود ندارد. ⇒ **وتوی سخت** (AND).
+     *
+     *   لایهٔ ۲ — تعادل و ریسک: کش کیجون (پاتل)، جاذبهٔ SSB فلت و دیوار (پلویل/تاتل)، کارایی
+     *              روند (فیلتر رِنج)، فاز موج (هوسودا)، ضخامت ابر آینده، شدوی معکوس. این‌ها
+     *              «کیفیت» را می‌سنجند؛ در کتاب هم هیچ‌جا هر شش‌تا هم‌زمان لازم نیست. ⇒ **وزن‌دار**،
+     *              با اجازهٔ یک ضعف جزئی.
+     *
+     *   لایهٔ ۳ — ماشه و هندسهٔ ورود: کندل ماشه + حجم، ناحیهٔ اسنایپر، ساختار موج N، دالان R:R،
+     *              چیدمان سانیاکو، شکست چیکو. این‌ها همان «entry trigger» کتاب‌ها هستند و باید
+     *              هم‌زمان با رژیم درست باشند. ⇒ **الزامی ولی با تحمل یک ضعف حاشیه‌ای**.
+     *
+     * آستانه‌ها از همان توزیع اندازه‌گیری‌شده آمده‌اند: هر لایه باید دست‌کم ۷۰٪ وزن خودش را
+     * بیاورد و مجموع کل دست‌کم ۸۰٪. این اعداد با آزمون `BaseStrategyBookGateTest` قفل شده‌اند.
+     */
+    internal data class BookGateResult(
+        val hardVetoPassed: Boolean,
+        val fires: Boolean,
+        val watch: Boolean,
+        val totalScorePct: Double,
+        val regimeScorePct: Double,
+        val qualityScorePct: Double,
+        val triggerScorePct: Double,
+        val failedHard: List<String>,
+        val bestMissing: List<String>,
+        val noteFa: String,
+    )
+
+    /** وزن هر شرط در امتیاز مکتبی. وتوهای سخت با `hardVeto = true` علامت خورده‌اند. */
+    private val BOOK_WEIGHTS: Map<Int, Double> = mapOf(
+        // لایهٔ ۱ — رژیم و جهت (وتوی سخت)
+        1 to 1.0,
+        3 to 1.0,
+        4 to 1.0,
+        6 to 1.0,
+        // لایهٔ ۲ — تعادل و ریسک
+        8 to 1.0,
+        9 to 1.0,
+        13 to 1.0,
+        15 to 1.0,
+        5 to 0.6,
+        14 to 0.6,
+        // لایهٔ ۳ — ماشه و هندسهٔ ورود
+        11 to 1.2,
+        16 to 1.2,
+        17 to 1.2,
+        10 to 0.8,
+        12 to 1.0,
+        2 to 0.6,
+        7 to 0.6,
+    )
+
+    private val BOOK_HARD_VETO: Set<Int> = setOf(1, 3, 4, 6, 17)
+    private val BOOK_REGIME: Set<Int> = BOOK_HARD_VETO
+    private val BOOK_QUALITY: Set<Int> = setOf(5, 8, 9, 13, 14, 15)
+    private val BOOK_TRIGGER: Set<Int> = setOf(2, 7, 10, 11, 12, 16, 17)
+
+    /** حداقل امتیاز لازم برای «سیگنال» و برای «آماده». */
+    internal const val BOOK_MIN_TOTAL_PCT: Double = 80.0
+    internal const val BOOK_MIN_LAYER_PCT: Double = 70.0
+    internal const val BOOK_WATCH_TOTAL_PCT: Double = 66.0
+
+    internal fun bookConfluenceGate(
+        conditions: List<StrategyConditionCheck>,
+        isBaseModel: Boolean,
+        baseConfig: BaseStrategyConfig,
+    ): BookGateResult {
+        if (!isBaseModel || conditions.isEmpty()) {
+            // برای روش‌های اختصاصی (۵۲ کندلی/پارسا/هیدن کراس) این دروازه دخالت نمی‌کند؛
+            // منطق خودشان (AND داخلی) دست‌نخورده می‌ماند.
+            return BookGateResult(
+                hardVetoPassed = true, fires = false, watch = false,
+                totalScorePct = 0.0, regimeScorePct = 0.0, qualityScorePct = 0.0, triggerScorePct = 0.0,
+                failedHard = emptyList(), bestMissing = emptyList(), noteFa = "",
+            )
+        }
+        val byIndex = conditions.associateBy { it.index }
+
+        fun layerScore(indices: Set<Int>): Pair<Double, Double> {
+            var got = 0.0
+            var max = 0.0
+            indices.forEach { idx ->
+                val c = byIndex[idx] ?: return@forEach
+                val w = BOOK_WEIGHTS[idx] ?: 1.0
+                max += w
+                if (c.passed) got += w
+            }
+            return got to max
+        }
+
+        val failedHard = conditions.filter { it.index in BOOK_HARD_VETO && !it.passed }.map { it.titleFa }
+        val hardOk = failedHard.isEmpty()
+
+        val (regimeGot, regimeMax) = layerScore(BOOK_REGIME)
+        val (qualityGot, qualityMax) = layerScore(BOOK_QUALITY)
+        val (triggerGot, triggerMax) = layerScore(BOOK_TRIGGER)
+        val got = regimeGot + qualityGot + triggerGot
+        val max = (regimeMax + qualityMax + triggerMax).coerceAtLeast(1e-9)
+
+        val totalPct = (got / max) * 100.0
+        val regimePct = if (regimeMax > 0.0) (regimeGot / regimeMax) * 100.0 else 100.0
+        val qualityPct = if (qualityMax > 0.0) (qualityGot / qualityMax) * 100.0 else 100.0
+        val triggerPct = if (triggerMax > 0.0) (triggerGot / triggerMax) * 100.0 else 100.0
+
+        // لایه‌ها: رژیم به‌صورت AND سنجیده شد (۱۰۰٪ لازم است چون همه‌اش وتوی سخت است).
+        // کیفیت و ماشه آستانهٔ ۷۰٪ دارند: یعنی هر لایه اجازهٔ از دست دادن یک وزن کوچک را دارد.
+        val layersOk = qualityPct >= BOOK_MIN_LAYER_PCT && triggerPct >= BOOK_MIN_LAYER_PCT
+        val fires = hardOk && layersOk && totalPct >= BOOK_MIN_TOTAL_PCT
+        val watch = !fires && hardOk && totalPct >= BOOK_WATCH_TOTAL_PCT
+
+        val missing = conditions.filter { !it.passed }
+            .sortedByDescending { BOOK_WEIGHTS[it.index] ?: 0.6 }
+            .take(3)
+            .map { it.titleFa }
+
+        val noteFa = buildString {
+            append(String.format(Locale.US, "هم‌گرایی مکتبی %.0f%%", totalPct))
+            append(String.format(Locale.US, " (رژیم %.0f٪ · تعادل %.0f٪ · ماشه %.0f٪)", regimePct, qualityPct, triggerPct))
+            if (!hardOk) append(" · وتوی سخت: ").append(failedHard.joinToString("، "))
+            else if (!fires) append(" · کمبود: ").append(missing.joinToString("، "))
+        }
+        return BookGateResult(
+            hardVetoPassed = hardOk,
+            fires = fires,
+            watch = watch,
+            totalScorePct = round2(totalPct),
+            regimeScorePct = round2(regimePct),
+            qualityScorePct = round2(qualityPct),
+            triggerScorePct = round2(triggerPct),
+            failedHard = failedHard,
+            bestMissing = missing,
+            noteFa = noteFa,
+        )
     }
 
     /**

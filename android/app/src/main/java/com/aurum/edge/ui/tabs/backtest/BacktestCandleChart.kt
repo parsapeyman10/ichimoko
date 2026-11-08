@@ -45,10 +45,21 @@ import com.aurum.edge.ui.theme.AurumColors
  * چارت کندلی بک‌تست — بدون WebView و بدون شبکه.
  *
  * چرا Canvas و نه TradingView؟ چون این چارت باید بداند «کدام معامله کجا باز و کجا بسته
- * شد» و باید با پیمایش همان دادهٔ CSV هم‌گام باشد؛ ویجت آماده چنین چیزی نمی‌دهد. این
- * چارت فقط `List<Candle>` می‌کشد: شمع، ابر کومو، تنکان/کیجون و نشانگر ورود/خروج.
+ * شد» و باید با پیمایش همان دادهٔ CSV هم‌گام باشد؛ ویجت آماده چنین چیزی نمی‌دهد.
  *
- * تعامل: کشیدن افقی = پیمایش زمان، دو-انگشتی = بزرگ‌نمایی، تک‌ضربه = انتخاب کندل.
+ * سه درسی که در نسخهٔ ۳.۹.۵۷ از بازخورد کاربرد آمد و این‌جا اصلاح شد:
+ *  ۱. **ایچیموکو روی کل سری محاسبه می‌شود، نه روی برش دید.** پیش‌تر خطوط روی همان ۴۰ تا
+ *     ۶۰۰ کندلِ دیده‌شده حساب می‌شد؛ نتیجه این بود که ابتدای هر برش ۲۶ تا ۵۲ کندل بدون
+ *     تنکان/کیجون/سنکو B می‌ماند و ابر با هر زوم/پیمایش از نو «متولد» می‌شد. الان سری کامل
+ *     یک‌بار محاسبه و فقط برش داده می‌شود — همان چیزی که در GoCharting/TradingView می‌بینید.
+ *  ۲. **ابر کومو دو رنگ است، نه یک لکه.** جایی که سنکو A بالای B است سبز و جایی که B بالای A
+ *     است سرخ؛ و در محل `null` بریده می‌شود تا مسیر، شکاف را با خط مستقیم پر نکند.
+ *  ۳. **نشانگر معامله با «زمان» تطبیق داده می‌شود، نه با برابری کندل.** پیش‌تر فقط وقتی نشانگر
+ *     می‌افتاد که `entryTime` دقیقاً برابر `bar.time` باشد و اگر کندل خروج بیرون از برش بود هیچ
+ *     خط SL/TP کشیده نمی‌شد. الان نقشهٔ زمان→ایندکس ساخته می‌شود و بازهٔ هر معامله سایه می‌خورد.
+ *
+ * تعامل: کشیدن افقی = پیمایش زمان، دو-انگشتی = بزرگ‌نمایی، تک‌ضربه = انتخاب کندل،
+ * دو-ضربه = پرش به نزدیک‌ترین معامله.
  */
 @Composable
 internal fun BacktestCandleChart(
@@ -78,10 +89,21 @@ internal fun BacktestCandleChart(
     val safeEnd = endIndex.coerceIn(1, candles.size)
     val safeCount = visibleCount.coerceIn(MIN_VISIBLE, MAX_VISIBLE)
     val startIndex = (safeEnd - safeCount).coerceAtLeast(0)
-    val slice = candles.subList(startIndex, safeEnd)
 
-    val ichimoku: IchimokuLines? = remember(slice, showIchimoku) {
-        if (!showIchimoku || slice.size < 60) null else buildIchimokuLines(slice)
+    // ── محاسبهٔ ایچیموکو روی «کل» سری ─────────────────────────────────────
+    // کلید کش فقط خودِ لیست است؛ زوم و پیمایش دیگر محاسبه را تکرار نمی‌کنند.
+    val ichimokuAll: IchimokuLines? = remember(candles, showIchimoku) {
+        if (!showIchimoku || candles.size < 60) null else buildIchimokuLines(candles)
+    }
+    // برش نمایش برای شمع‌ها و برای خطوط (اندیس‌ها هم‌تراز می‌مانند).
+    val slice = candles.subList(startIndex, safeEnd)
+    val ichimoku: IchimokuLines? = ichimokuAll?.sliceTo(startIndex, safeEnd)
+
+    // نقشهٔ زمان→اندیس برای معامله‌ها؛ O(1) به‌جای indexOfFirst در هر کندل.
+    val timeIndex: Map<Long, Int> = remember(candles) {
+        val m = HashMap<Long, Int>(candles.size * 2)
+        candles.forEachIndexed { i, c -> m.putIfAbsent(c.time, i) }
+        m
     }
 
     Canvas(
@@ -101,13 +123,26 @@ internal fun BacktestCandleChart(
                     }
                 }
             }
-            .pointerInput(slice) {
-                detectTapGestures { offset ->
-                    val barWidth = size.width / safeCount.toFloat()
-                    val idx = (offset.x / barWidth).toInt().coerceIn(0, slice.lastIndex)
-                    selected = startIndex + idx
-                    onScrub(startIndex + idx + 1)
-                }
+            .pointerInput(slice, trades) {
+                detectTapGestures(
+                    onTap = { offset ->
+                        val barWidth = size.width / safeCount.toFloat()
+                        val idx = (offset.x / barWidth).toInt().coerceIn(0, slice.lastIndex)
+                        selected = startIndex + idx
+                        onScrub(startIndex + idx + 1)
+                    },
+                    onDoubleTap = {
+                        // پرش سریع به معاملهٔ بعدی/قبلی نسبت به کندل انتخاب‌شده.
+                        val anchor = if (selected >= 0) selected else startIndex
+                        val entryIdx = trades
+                            .mapNotNull { timeIndex[it.entryTime] }
+                            .sorted()
+                        if (entryIdx.isNotEmpty()) {
+                            val next = entryIdx.firstOrNull { it > anchor } ?: entryIdx.first()
+                            onScrub((next + 1).coerceIn(1, candles.size))
+                        }
+                    },
+                )
             }
             .pointerInput(slice) {
                 detectDragGestures { change, drag ->
@@ -121,8 +156,10 @@ internal fun BacktestCandleChart(
         drawChart(
             slice = slice,
             startIndex = startIndex,
+            fullSize = candles.size,
             ichimoku = ichimoku,
             trades = trades,
+            timeIndex = timeIndex,
             textMeasurer = textMeasurer,
             highlightIndex = if (highlightIndex >= 0) highlightIndex else selected,
         )
@@ -137,35 +174,66 @@ private data class IchimokuLines(
     val kijun: List<Double?>,
     val spanA: List<Double?>,
     val spanB: List<Double?>,
-)
+) {
+    /** برش هم‌تراز با کندل‌ها؛ هر چهار سری با هم بریده می‌شوند تا اندیس‌ها جابه‌جا نشوند. */
+    fun sliceTo(from: Int, to: Int): IchimokuLines {
+        val f = from.coerceIn(0, tenkan.size)
+        val t = to.coerceIn(f, tenkan.size)
+        return IchimokuLines(
+            tenkan = tenkan.subList(f, t),
+            kijun = kijun.subList(f, t),
+            spanA = spanA.subList(f, t),
+            spanB = spanB.subList(f, t),
+        )
+    }
+}
 
-/** خطوط ایچیموکو برای همان بازهٔ دید؛ دوره‌ها از تنظیمات پیش‌فرض موتور گرفته می‌شوند. */
+/**
+ * خطوط کامل ایچیموکو برای **کل** سری.
+ *
+ * دوره‌ها از تنظیمات پیش‌فرض موتور می‌آیند (۹/۲۶/۵۲ و جابه‌جایی ۲۶) تا چارت و استراتژی
+ * دقیقاً یک چیز را نشان دهند. ابر با جابه‌جایی رو به آینده رسم می‌شود، پس `spanA/spanB` در
+ * اندیس `i` مقدار محاسبه‌شده در `i - disp` است؛ درست مثل `currentSpanAAt` موتور.
+ */
 private fun buildIchimokuLines(bars: List<Candle>): IchimokuLines {
     val tenkanP = BasePeriods.TENKAN
     val kijunP = BasePeriods.KIJUN
     val spanBP = BasePeriods.SPAN_B
     val disp = BasePeriods.DISPLACEMENT
-    fun mid(from: Int, to: Int): Double {
-        var hi = Double.NEGATIVE_INFINITY
-        var lo = Double.POSITIVE_INFINITY
-        for (i in from..to) {
-            if (bars[i].high > hi) hi = bars[i].high
-            if (bars[i].low < lo) lo = bars[i].low
+    val n = bars.size
+
+    /** میانهٔ سقف/کف با صف یکنواخت — O(n) به‌جای O(n·period). */
+    fun rollingMid(period: Int): DoubleArray {
+        val hi = java.util.ArrayDeque<Int>()
+        val lo = java.util.ArrayDeque<Int>()
+        val out = DoubleArray(n)
+        for (i in 0 until n) {
+            while (hi.isNotEmpty() && bars[hi.last()].high <= bars[i].high) hi.removeLast()
+            hi.addLast(i)
+            if (hi.first() < i - period + 1) hi.removeFirst()
+            while (lo.isNotEmpty() && bars[lo.last()].low >= bars[i].low) lo.removeLast()
+            lo.addLast(i)
+            if (lo.first() < i - period + 1) lo.removeFirst()
+            out[i] = (bars[hi.first()].high + bars[lo.first()].low) / 2.0
         }
-        return (hi + lo) / 2.0
+        return out
     }
-    val tenkan = MutableList<Double?>(bars.size) { null }
-    val kijun = MutableList<Double?>(bars.size) { null }
-    val spanA = MutableList<Double?>(bars.size) { null }
-    val spanB = MutableList<Double?>(bars.size) { null }
-    for (i in bars.indices) {
-        if (i >= tenkanP - 1) tenkan[i] = mid(i - tenkanP + 1, i)
-        if (i >= kijunP - 1) kijun[i] = mid(i - kijunP + 1, i)
-        val target = i - disp
-        if (target >= 0 && tenkan[target] != null && kijun[target] != null) {
-            spanA[i] = (tenkan[target]!! + kijun[target]!!) / 2.0
-        }
-        if (target >= spanBP - 1) spanB[i] = mid(target - spanBP + 1, target)
+
+    val tenkanRaw = rollingMid(tenkanP)
+    val kijunRaw = rollingMid(kijunP)
+    val spanBRaw = rollingMid(spanBP)
+
+    val tenkan = MutableList<Double?>(n) { null }
+    val kijun = MutableList<Double?>(n) { null }
+    val spanA = MutableList<Double?>(n) { null }
+    val spanB = MutableList<Double?>(n) { null }
+    for (i in 0 until n) {
+        if (i >= tenkanP - 1) tenkan[i] = tenkanRaw[i]
+        if (i >= kijunP - 1) kijun[i] = kijunRaw[i]
+        // ابر در اندیس i از دادهٔ i - disp ساخته می‌شود (جابه‌جایی رو به آینده).
+        val src = i - disp
+        if (src >= kijunP - 1) spanA[i] = (tenkanRaw[src] + kijunRaw[src]) / 2.0
+        if (src >= spanBP - 1) spanB[i] = spanBRaw[src]
     }
     return IchimokuLines(tenkan, kijun, spanA, spanB)
 }
@@ -180,8 +248,10 @@ private object BasePeriods {
 private fun DrawScope.drawChart(
     slice: List<Candle>,
     startIndex: Int,
+    fullSize: Int,
     ichimoku: IchimokuLines?,
     trades: List<BacktestReplayEngine.Trade>,
+    timeIndex: Map<Long, Int>,
     textMeasurer: TextMeasurer,
     highlightIndex: Int,
 ) {
@@ -193,20 +263,31 @@ private fun DrawScope.drawChart(
     val plotH = size.height - topPad - bottomPad
     if (plotW <= 0f || plotH <= 0f || slice.isEmpty()) return
 
-    // محدودهٔ قیمت: کندل‌ها + ابر آینده تا از کادر بیرون نزند.
+    // معامله‌هایی که «بازه‌شان» با این برش تلاقی دارد (نه فقط آن‌هایی که ورودشان داخل برش است).
+    val viewStart = startIndex
+    val viewEnd = startIndex + slice.size - 1
+    val visibleTrades = trades.mapNotNull { trade ->
+        val entryIdx = timeIndex[trade.entryTime] ?: return@mapNotNull null
+        val exitIdx = trade.exitTime?.let { timeIndex[it] } ?: (fullSize - 1)
+        if (exitIdx < viewStart || entryIdx > viewEnd) return@mapNotNull null
+        VisibleTrade(trade, entryIdx, exitIdx)
+    }
+
+    // محدودهٔ قیمت: کندل‌ها + ابر (فقط همان برش) + SL/TP معامله‌های دیده‌شده.
     var minPrice = slice.minOf { it.low }
     var maxPrice = slice.maxOf { it.high }
     ichimoku?.let { lines ->
         lines.spanA.forEach { v -> if (v != null) { if (v < minPrice) minPrice = v; if (v > maxPrice) maxPrice = v } }
         lines.spanB.forEach { v -> if (v != null) { if (v < minPrice) minPrice = v; if (v > maxPrice) maxPrice = v } }
     }
-    trades.filter { trade -> trade.entryTime >= slice.first().time && trade.entryTime <= slice.last().time }
-        .forEach { trade ->
-            if (trade.stopLoss < minPrice) minPrice = trade.stopLoss
-            if (trade.stopLoss > maxPrice) maxPrice = trade.stopLoss
-            if (trade.takeProfit < minPrice) minPrice = trade.takeProfit
-            if (trade.takeProfit > maxPrice) maxPrice = trade.takeProfit
+    visibleTrades.forEach { vt ->
+        listOf(vt.trade.stopLoss, vt.trade.takeProfit, vt.trade.entryPrice).forEach { p ->
+            if (p.isFinite() && p > 0.0) {
+                if (p < minPrice) minPrice = p
+                if (p > maxPrice) maxPrice = p
+            }
         }
+    }
     val pad = (maxPrice - minPrice) * 0.06
     minPrice -= pad
     maxPrice += pad
@@ -216,6 +297,28 @@ private fun DrawScope.drawChart(
 
     fun xOf(index: Int): Float = leftPad + index * barW + barW / 2f
     fun yOf(price: Double): Float = topPad + ((maxPrice - price) / priceSpan * plotH).toFloat()
+
+    // ── سایهٔ بازهٔ معامله‌ها: «کجا معامله شد» با یک نگاه ──────────────────
+    visibleTrades.forEach { vt ->
+        val from = (vt.entryIdx - viewStart).coerceIn(0, slice.lastIndex)
+        val to = (vt.exitIdx - viewStart).coerceIn(0, slice.lastIndex)
+        val won = vt.trade.netPnlUsd >= 0.0
+        val tint = if (won) AurumColors.Green else AurumColors.Red
+        val x0 = xOf(from) - barW / 2f
+        val x1 = xOf(to) + barW / 2f
+        drawRect(
+            color = tint.copy(alpha = 0.07f),
+            topLeft = Offset(x0, topPad),
+            size = Size((x1 - x0).coerceAtLeast(1f), plotH),
+        )
+        // خط عمودی ورود برای این‌که در زوم‌های دور هم دیده شود.
+        drawLine(
+            color = tint.copy(alpha = 0.35f),
+            start = Offset(xOf(from), topPad),
+            end = Offset(xOf(from), topPad + plotH),
+            strokeWidth = 1f,
+        )
+    }
 
     // شبکهٔ افقی + برچسب قیمت
     val gridColor = AurumColors.Grid
@@ -233,30 +336,9 @@ private fun DrawScope.drawChart(
         )
     }
 
-    // ابر کومو
+    // ── ابر کومو: دو رنگ، و بریده در شکاف‌های null ────────────────────────
     ichimoku?.let { lines ->
-        val cloudPath = Path()
-        var started = false
-        for (i in slice.indices) {
-            val a = lines.spanA.getOrNull(i) ?: continue
-            val b = lines.spanB.getOrNull(i) ?: continue
-            val x = xOf(i)
-            if (!started) {
-                cloudPath.moveTo(x, yOf(a))
-                started = true
-            } else {
-                cloudPath.lineTo(x, yOf(a))
-            }
-        }
-        for (i in slice.indices.reversed()) {
-            val a = lines.spanA.getOrNull(i) ?: continue
-            val b = lines.spanB.getOrNull(i) ?: continue
-            cloudPath.lineTo(xOf(i), yOf(b))
-        }
-        if (started) {
-            cloudPath.close()
-            drawPath(cloudPath, color = AurumColors.Cyan.copy(alpha = 0.08f))
-        }
+        drawKumo(lines.spanA, lines.spanB, ::xOf, ::yOf)
         drawSeries(lines.spanA, ::xOf, ::yOf, AurumColors.Green.copy(alpha = 0.55f))
         drawSeries(lines.spanB, ::xOf, ::yOf, AurumColors.Red.copy(alpha = 0.55f))
         drawSeries(lines.tenkan, ::xOf, ::yOf, AurumColors.Gold.copy(alpha = 0.9f))
@@ -275,52 +357,67 @@ private fun DrawScope.drawChart(
         drawRect(color, topLeft = Offset(x - bodyW / 2f, top), size = Size(bodyW, h))
     }
 
-    // نشانگر ورود/خروج معامله‌ها
-    slice.forEachIndexed { i, bar ->
-        val absIndex = startIndex + i
-        trades.filter { trade ->
-            trade.entryTime == bar.time || trade.exitTime == bar.time
-        }.forEach { trade ->
-            val isEntry = trade.entryTime == bar.time
-            val price = if (isEntry) trade.entryPrice else (trade.exitPrice ?: bar.close)
-            val y = yOf(price)
-            val markerColor = when {
-                !isEntry -> AurumColors.TextSecondary
-                trade.action == SignalAction.BUY -> AurumColors.Green
-                else -> AurumColors.Red
-            }
-            val r = 3.2.dp.toPx()
-            drawCircle(markerColor, r, Offset(xOf(i), y))
-            if (isEntry) {
-                val dir = if (trade.action == SignalAction.BUY) 1f else -1f
-                val tri = Path().apply {
-                    moveTo(xOf(i), y + dir * 8.dp.toPx())
-                    lineTo(xOf(i) - 4.dp.toPx(), y + dir * 2.dp.toPx())
-                    lineTo(xOf(i) + 4.dp.toPx(), y + dir * 2.dp.toPx())
-                    close()
-                }
-                drawPath(tri, markerColor)
-            }
-            // خطوط حد ضرر/حد سود تا نقطهٔ خروج
-            val exitIdx = slice.indexOfFirst { it.time == trade.exitTime }
-            if (isEntry && exitIdx >= 0) {
-                drawLine(
-                    color = AurumColors.Red.copy(alpha = 0.25f),
-                    start = Offset(xOf(i), yOf(trade.stopLoss)),
-                    end = Offset(xOf(exitIdx), yOf(trade.stopLoss)),
-                    strokeWidth = 1f,
-                )
-                drawLine(
-                    color = AurumColors.Green.copy(alpha = 0.25f),
-                    start = Offset(xOf(i), yOf(trade.takeProfit)),
-                    end = Offset(xOf(exitIdx), yOf(trade.takeProfit)),
-                    strokeWidth = 1f,
-                )
-            }
-            if (absIndex == highlightIndex) {
-                drawLine(AurumColors.Gold.copy(alpha = 0.6f), Offset(xOf(i), topPad), Offset(xOf(i), topPad + plotH), strokeWidth = 1f)
-            }
+    // ── نشانگر ورود/خروج ─────────────────────────────────────────────────
+    visibleTrades.forEach { vt ->
+        val trade = vt.trade
+        val from = (vt.entryIdx - viewStart).coerceIn(0, slice.lastIndex)
+        val to = (vt.exitIdx - viewStart).coerceIn(0, slice.lastIndex)
+        val isBuy = trade.action == SignalAction.BUY
+        val markerColor = if (isBuy) AurumColors.Green else AurumColors.Red
+
+        // خطوط SL/TP از ورود تا خروج — حتی اگر کندل خروج بیرون از برش باشد، تا لبهٔ راست کشیده می‌شود.
+        drawLine(
+            color = AurumColors.Red.copy(alpha = 0.30f),
+            start = Offset(xOf(from), yOf(trade.stopLoss)),
+            end = Offset(xOf(to), yOf(trade.stopLoss)),
+            strokeWidth = 1f,
+        )
+        drawLine(
+            color = AurumColors.Green.copy(alpha = 0.30f),
+            start = Offset(xOf(from), yOf(trade.takeProfit)),
+            end = Offset(xOf(to), yOf(trade.takeProfit)),
+            strokeWidth = 1f,
+        )
+        // خط ورود (قیمت ورود) نقطه‌چین‌گونه: خط نازک کم‌رنگ.
+        drawLine(
+            color = markerColor.copy(alpha = 0.45f),
+            start = Offset(xOf(from), yOf(trade.entryPrice)),
+            end = Offset(xOf(to), yOf(trade.entryPrice)),
+            strokeWidth = 1f,
+        )
+
+        // پیکان ورود (همیشه در برش دیده می‌شود چون ورود داخل بازه است).
+        val entryY = yOf(trade.entryPrice)
+        val dir = if (isBuy) 1f else -1f
+        val tri = Path().apply {
+            moveTo(xOf(from), entryY + dir * 8.dp.toPx())
+            lineTo(xOf(from) - 4.dp.toPx(), entryY + dir * 2.dp.toPx())
+            lineTo(xOf(from) + 4.dp.toPx(), entryY + dir * 2.dp.toPx())
+            close()
         }
+        drawPath(tri, markerColor)
+
+        // نشانگر خروج (اگر داخل برش باشد).
+        if (!trade.isOpen) {
+            val exitPrice = trade.exitPrice ?: slice.getOrNull(to)?.close ?: trade.entryPrice
+            val won = trade.netPnlUsd >= 0.0
+            drawCircle(
+                color = if (won) AurumColors.Green else AurumColors.Red,
+                radius = 3.2.dp.toPx(),
+                center = Offset(xOf(to), yOf(exitPrice)),
+            )
+        }
+    }
+
+    // خط عمودی کندل انتخاب‌شده
+    val hl = highlightIndex - viewStart
+    if (hl in slice.indices) {
+        drawLine(
+            color = AurumColors.Gold.copy(alpha = 0.6f),
+            start = Offset(xOf(hl), topPad),
+            end = Offset(xOf(hl), topPad + plotH),
+            strokeWidth = 1f,
+        )
     }
 
     // محور زمان
@@ -335,16 +432,93 @@ private fun DrawScope.drawChart(
     }
 }
 
+private data class VisibleTrade(
+    val trade: BacktestReplayEngine.Trade,
+    val entryIdx: Int,
+    val exitIdx: Int,
+)
+
+/**
+ * ابر کومو با دو رنگ: سبز جایی که سنکو A بالای B است (روند صعودی) و سرخ جایی که B بالای A.
+ *
+ * پیاده‌سازی: ران‌های پیوستهٔ غیر-null پیدا می‌شوند و هر ران یک‌جا به بازه‌های رنگ‌همگن تقسیم
+ * می‌شود؛ برای هر بازه یک مسیر بسته (رفت روی A، برگشت روی B) کشیده می‌شود. تقسیم‌بندی در محل
+ * تقاطع، همان کاری است که کتاب هوسودا «کوموی سه‌خطی» می‌نامد و در GoCharting هم دیده می‌شود.
+ */
+private fun DrawScope.drawKumo(
+    spanA: List<Double?>,
+    spanB: List<Double?>,
+    xOf: (Int) -> Float,
+    yOf: (Double) -> Float,
+) {
+    val n = minOf(spanA.size, spanB.size)
+    var i = 0
+    while (i < n) {
+        // شروع یک ران پیوسته
+        if (spanA[i] == null || spanB[i] == null) { i++; continue }
+        var end = i
+        while (end + 1 < n && spanA[end + 1] != null && spanB[end + 1] != null) end++
+        // تقسیم ران به بازه‌های هم‌علامت
+        var segStart = i
+        var bull = (spanA[i]!! >= spanB[i]!!)
+        for (k in i..end) {
+            val a = spanA[k] ?: continue
+            val b = spanB[k] ?: continue
+            val isBull = a >= b
+            if (k > segStart && isBull != bull) {
+                fillKumoSegment(spanA, spanB, segStart, k, bull, xOf, yOf)
+                segStart = k
+            }
+            bull = isBull
+        }
+        fillKumoSegment(spanA, spanB, segStart, end, bull, xOf, yOf)
+        i = end + 1
+    }
+}
+
+private fun DrawScope.fillKumoSegment(
+    spanA: List<Double?>,
+    spanB: List<Double?>,
+    from: Int,
+    to: Int,
+    bullish: Boolean,
+    xOf: (Int) -> Float,
+    yOf: (Double) -> Float,
+) {
+    if (to < from) return
+    val path = Path()
+    var started = false
+    for (k in from..to) {
+        val a = spanA.getOrNull(k) ?: continue
+        val x = xOf(k)
+        val y = yOf(a)
+        if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
+    }
+    if (!started) return
+    for (k in to downTo from) {
+        val b = spanB.getOrNull(k) ?: continue
+        path.lineTo(xOf(k), yOf(b))
+    }
+    path.close()
+    val color = if (bullish) AurumColors.Green.copy(alpha = 0.12f) else AurumColors.Red.copy(alpha = 0.12f)
+    drawPath(path, color = color)
+}
+
 private fun DrawScope.drawSeries(
     values: List<Double?>,
     xOf: (Int) -> Float,
     yOf: (Double) -> Float,
     color: Color,
 ) {
-    val path = Path()
+    val stroke = Stroke(width = 1.1f)
+    var path = Path()
     var started = false
     values.forEachIndexed { i, v ->
-        if (v == null) return@forEachIndexed
+        if (v == null) {
+            // شکاف: مسیر فعلی تمام می‌شود تا خط، null را با پرش پر نکند.
+            if (started) { drawPath(path, color, style = stroke); path = Path(); started = false }
+            return@forEachIndexed
+        }
         val x = xOf(i)
         val y = yOf(v)
         if (!started) {
@@ -354,7 +528,7 @@ private fun DrawScope.drawSeries(
             path.lineTo(x, y)
         }
     }
-    if (started) drawPath(path, color, style = Stroke(width = 1.1f))
+    if (started) drawPath(path, color, style = stroke)
 }
 
 internal fun formatShortTime(millis: Long): String {
@@ -384,7 +558,7 @@ internal fun BacktestChartLegend(
         Box(Modifier.size(7.dp).clip(RoundedCornerShape(4.dp)).background(AurumColors.Cyan))
         Text(
             text = if (candle == null) {
-                "کشیدن = پیمایش · دو انگشت = بزرگ‌نمایی · ضربه = انتخاب کندل"
+                "کشیدن = پیمایش · دو انگشت = بزرگ‌نمایی · ضربه = انتخاب کندل · دو-ضربه = پرش به معامله"
             } else {
                 "$intervalLabel · ${formatShortTime(candle.time)} · O ${formatPrice(candle.open)} " +
                     "H ${formatPrice(candle.high)} L ${formatPrice(candle.low)} C ${formatPrice(candle.close)}"

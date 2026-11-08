@@ -114,9 +114,9 @@ class BaseStrategyDeepDiveTest {
     // ─────────────────────────── مبنا ───────────────────────────
 
     @Test
-    fun `base strategy still produces a full sixteen-condition long signal`() {
+    fun `base strategy still produces a full seventeen-condition long signal`() {
         val report = evaluate()
-        assertEquals(16, report.conditions.size)
+        assertEquals(17, report.conditions.size)
         assertTrue(
             report.conditions.joinToString(" | ") { "${it.index}:${it.passed}(${it.detailFa})" },
             report.conditions.all { it.passed },
@@ -248,9 +248,9 @@ class BaseStrategyDeepDiveTest {
             pureDetail.contains("دیوار تاج"),
         )
         assertTrue("شرط ۹ در بیس خالص باید پاس شود: $pureDetail", pureBase.conditions.first { it.index == 9 }.passed)
-        // تعداد شرط‌ها به لایه وابسته نیست: بیس همیشه ۱۶ شرط دارد.
-        assertEquals(16, pureBase.conditions.size)
-        assertEquals(16, withLayer.conditions.size)
+        // تعداد شرط‌ها به لایه وابسته نیست: بیس همیشه ۱۷ شرط دارد (۱۶ شرط مکتبی + اقتصاد اجرا).
+        assertEquals(17, pureBase.conditions.size)
+        assertEquals(17, withLayer.conditions.size)
         // هر دو حالت باید همچنان سیگنال معتبر بدهند (لایه یک فیلتر است، نه موتور).
         assertEquals(StrategyReadinessState.SIGNAL_BUY, pureBase.readiness)
         if (withDetail.contains("دیوار تاج")) {

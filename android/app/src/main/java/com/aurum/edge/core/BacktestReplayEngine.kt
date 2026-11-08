@@ -159,6 +159,15 @@ object BacktestReplayEngine {
         val entryReports: Map<Long, StrategyEvaluationReport> = emptyMap(),
         /** بیشترین شرطی که در یک کندل پاس شد؛ سقف واقعی همان بازه. */
         val maxConditionsPassed: Int = 0,
+        /**
+         * بهترین «هم‌گرایی مکتبی» که در این بازه دیده شد (درصد) و متن توضیحش.
+         * چرا لازم است؟ چون «۰ معامله» بدون عدد، کاربر را در ابهام می‌گذارد؛ با این دو
+         * مقدار معلوم می‌شود استراتژی چند درصد نزدیک بوده و کدام لایه کم آورده است.
+         */
+        val bestBookGatePct: Double = 0.0,
+        val bestBookGateNoteFa: String = "",
+        /** میانگین هم‌گرایی روی کل بازه — برای مقایسهٔ A/B بین دو تنظیم. */
+        val averageBookGatePct: Double = 0.0,
         /** شرط‌هایی که بیشترین بار رد شدند (عنوان فارسی → تعداد)، بیشترین اول. */
         val topBlockers: List<Pair<String, Int>> = emptyList(),
     ) {
@@ -210,6 +219,10 @@ object BacktestReplayEngine {
         // نه این‌که با یک «۰ معامله» بی‌توضیح روبه‌رو شود.
         val conditionFailCounts = LinkedHashMap<String, Int>()
         var maxConditionsPassed = 0
+        var bestBookGatePct = 0.0
+        var bestBookGateNoteFa = ""
+        var bookGateSum = 0.0
+        var bookGateSamples = 0
         val allTrades = ArrayList<Trade>(256)
         val equityPoints = ArrayList<Pair<Long, Double>>(1024)
         var equity = config.startEquityUsd
@@ -282,6 +295,14 @@ object BacktestReplayEngine {
                     symbolInput = config.symbol,
                 )
                 maxConditionsPassed = maxOf(maxConditionsPassed, report.conditions.count { it.passed })
+                if (report.bookGateScorePct > 0.0) {
+                    bookGateSum += report.bookGateScorePct
+                    bookGateSamples++
+                    if (report.bookGateScorePct > bestBookGatePct) {
+                        bestBookGatePct = report.bookGateScorePct
+                        bestBookGateNoteFa = report.bookGateNoteFa
+                    }
+                }
                 report.conditions.filterNot { it.passed }.forEach { cond ->
                     conditionFailCounts[cond.titleFa] = (conditionFailCounts[cond.titleFa] ?: 0) + 1
                 }
@@ -338,6 +359,9 @@ object BacktestReplayEngine {
             skippedWarmupSteps = skipped,
             entryReports = entryReports,
             maxConditionsPassed = maxConditionsPassed,
+            bestBookGatePct = bestBookGatePct,
+            bestBookGateNoteFa = bestBookGateNoteFa,
+            averageBookGatePct = if (bookGateSamples > 0) bookGateSum / bookGateSamples else 0.0,
             topBlockers = conditionFailCounts.entries.sortedByDescending { it.value }.take(6).map { it.toPair() },
         )
     }

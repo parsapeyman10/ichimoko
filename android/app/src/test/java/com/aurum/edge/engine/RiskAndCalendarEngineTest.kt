@@ -388,7 +388,7 @@ class RiskAndCalendarEngineTest {
         val report = dualReport.report15m
 
         assertEquals(IchimokuStrategyEngine.BTC_SYMBOL, report.symbol)
-        assertEquals(16, report.conditions.size)
+        assertEquals(17, report.conditions.size)
         assertTrue(
             report.conditions.joinToString(" | ") { "${it.index}:${it.passed}(${it.detailFa})" },
             report.conditions.all { it.passed }
@@ -483,7 +483,7 @@ class RiskAndCalendarEngineTest {
             symbolInput = "EUR/USD",
         )
         assertEquals("EUR/USD", eurusdReport.symbol)
-        assertEquals(16, eurusdReport.conditions.size)
+        assertEquals(17, eurusdReport.conditions.size)
         assertTrue(eurusdReport.livePrice in 1.0..1.5)
 
         // Verify Smart15mSyncPlanner candle-boundary alignment and delta fetch sizing
