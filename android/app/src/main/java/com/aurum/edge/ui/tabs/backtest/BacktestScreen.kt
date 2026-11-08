@@ -478,11 +478,12 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 Spacer(Modifier.height(8.dp))
 
                 // دکمهٔ اعمال — تنها راه تغییر موجودی از این صفحه، با قفل تکرار.
-                if (appliedEntry != null) {
+                val applied = appliedEntry
+                if (applied != null) {
                     Text(
-                        text = "✅ قبلاً اعمال شده: " + fmtUsd(appliedEntry!!.netUsd) +
-                            " در " + BacktestTradeArchive.dayOf(appliedEntry!!.appliedAt) +
-                            " · موجودی آن زمان " + fmtUsd(appliedEntry!!.balanceAfter),
+                        text = "✅ قبلاً اعمال شده: " + fmtUsd(applied.netUsd) +
+                            " در " + BacktestTradeArchive.dayOf(applied.appliedAt) +
+                            " · موجودی آن زمان " + fmtUsd(applied.balanceAfter),
                         color = AurumColors.Green,
                         fontSize = 10.sp,
                         lineHeight = 14.sp,
@@ -510,10 +511,11 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     )
                 }
 
-                if (arcFiles != null) {
+                val files = arcFiles
+                if (files != null) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "فایل‌ها: ${arcFiles!!.csv.name} · ${arcFiles!!.json.name}",
+                        text = "فایل‌ها: ${files.csv.name} · ${files.json.name}",
                         color = AurumColors.Cyan,
                         fontSize = 9.sp,
                         lineHeight = 13.sp,
