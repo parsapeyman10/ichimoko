@@ -546,7 +546,8 @@ class RiskAndCalendarEngineTest {
             val rep5 = dualReport.reportFor(Interval.M5, model.id)
             assertNotNull(rep15)
             assertNotNull(rep5)
-            assertEquals(16, rep15!!.conditions.size)
+            // 3.9.57: شرط ۱۷ «اقتصاد اجرا» اضافه شد؛ هر استراتژی همان ۱۷ شرط مشترک را می‌سازد.
+            assertEquals(17, rep15!!.conditions.size)
             assertNotNull(rep15.rrBreakdown)
             assertTrue((rep15.optimalRiskReward ?: 0.0) >= 1.5)
             assertTrue((rep15.riskReward ?: 0.0) >= 1.5)
@@ -960,7 +961,7 @@ class RiskAndCalendarEngineTest {
             strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
         )
 
-        // Verify all 9 Drive PDF strategies have complete DriveBookPlaybookSpec + live telemetry + dedicated 16 conditions
+        // Verify all 9 Drive PDF strategies have complete DriveBookPlaybookSpec + live telemetry + dedicated 17 conditions
         BitcoinStrategyModel.drivePdfStrategies.forEach { driveModel ->
             val spec = driveModel.driveBookPlaybook()
             assertTrue(spec.bookFileTitle.isNotBlank())
