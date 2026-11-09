@@ -3810,7 +3810,9 @@ object IchimokuStrategyEngine {
             tenkanAboveKijun = hcTkBullish,
             chikouFree = hcChikouOk,
         )
-        val hiddenCrossReady = hcSpecForTrigger.allPassed && hcDirectionOk
+        // فقط و فقط همان پنج قاعده. `hcDirectionOk` هم عمداً کنار گذاشته شد چون یک
+        // شرط شیب (`hiddenCloudSlopeAtrPerBar`) داشت که در هیچ‌یک از نُه تصویر نیست.
+        val hiddenCrossReady = hcSpecForTrigger.allPassed
 
         val triggerType = when {
             isBtc52Model && btc52Ready -> StrategyTriggerType.BTC_52_STRUCTURE_BREAK

@@ -200,7 +200,7 @@ class CustomIchimokuStrategiesTest {
     }
 
     @Test
-    fun `hidden cross evaluation exposes hidden cloud and ten unambiguous conditions`() {
+    fun `hidden cross evaluation exposes hidden cloud and exactly five conditions`() {
         val bars = hiddenCrossSeries()
         val report = IchimokuStrategyEngine.evaluateBitcoinStrategy(
             activeModel = BitcoinStrategyModel.HIDDEN_CROSS,
@@ -210,8 +210,12 @@ class CustomIchimokuStrategiesTest {
             triggerCandles = bars,
             symbolInput = "BTC/USDT",
         )
-        assertEquals(10, report.conditions.size)
-        assertEquals((1..10).toList(), report.conditions.map { it.index })
+        // آموزش اصلی (۹ تصویر پوشهٔ «hidden cross») فقط پنج چیز می‌گوید: ابر مخفی باریک،
+        // جهت از ابر مخفی، آزادی چیکو، کراس برابری، و تاج. نسخهٔ قبلی ده شرط داشت
+        // (آنالوگ آماری، تازگی، بدنهٔ کندل، هم‌سویی تایم‌فریم، شیب…) که در آموزش نبودند و
+        // روی هم استراتژی را به «۰ معامله» می‌رساندند. اگر کسی شرط ششم اضافه کند، همین‌جا می‌افتد.
+        assertEquals(5, report.conditions.size)
+        assertEquals((1..5).toList(), report.conditions.map { it.index })
         val snap = report.triggerSnapshot!!
         // ابر مخفی = نوار تنکان/کیجون و همیشه سقف >= کف
         assertTrue(snap.hiddenCloudTop >= snap.hiddenCloudBottom)
@@ -221,9 +225,8 @@ class CustomIchimokuStrategiesTest {
         // شرایط کلیدی روش در چک‌لیست حاضرند
         assertTrue(report.conditions.any { it.titleFa.contains("ابر مخفی") })
         assertTrue(report.conditions.any { it.titleFa.contains("کراس برابری") })
-        assertTrue(report.conditions.any { it.titleFa.contains("آنالوگ") })
         assertTrue(report.conditions.any { it.titleFa.contains("تاج") })
-        assertTrue(report.conditions.any { it.titleFa.contains("Chikou") })
+        assertTrue(report.conditions.any { it.titleFa.contains("چیکو") })
         // R:R هرگز زیر ۱:۱٫۵ نیست حتی وقتی پلنی ساخته نشود
         assertTrue((report.riskReward ?: 0.0) == 0.0 || (report.riskReward ?: 0.0) >= 1.5)
         assertEquals("HIDDEN_CROSS", report.strategyId)

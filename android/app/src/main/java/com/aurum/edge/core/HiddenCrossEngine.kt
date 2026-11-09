@@ -100,7 +100,6 @@ object HiddenCrossEngine {
         // بدتر: هر معاملهٔ فروش را حذف می‌کرد (چون برای فروش هم تاج مثبت و بالای صفر است).
         // پس معیار درست همان است که در عکس‌ها دیده می‌شود: تاج باید **وجود داشته باشد**.
         val crownExists = cloud.crownLevel > 0.0
-        val crownAhead = crownExists
 
         return Spec(
             listOf(
@@ -153,7 +152,7 @@ object HiddenCrossEngine {
                 Rule(
                     5,
                     "۵. وجود تاج (نصف اندازهٔ کراس، در جهت شکست)",
-                    crownAhead,
+                    crownExists,
                     if (crownExists) {
                         String.format(
                             Locale.US,
