@@ -309,6 +309,11 @@ class BacktestViewModel(
                 maxBars = s.maxBars,
                 includeHiddenCrossLayer = s.includeHiddenCrossLayer,
                 captureEntryReports = true,
+                // ── گیت عصبی = همان کلید «مانع» در بخش هوش عصبی ──────────────────
+                // پیش از این، بک‌تست هیچ‌گاه گیت را نمی‌پرسید؛ بنابراین روشن‌وخاموش
+                // کردن «مانع» نتیجه را عوض نمی‌کرد و کاربر به‌درستی می‌گفت
+                // «با مانع و بدون مانع یکی بود». حالا هر ورود نامزد از شبکه می‌پرسد.
+                neuralGate = trainer.entryGate(),
             )
             // پیشرفت + زمان باقی‌مانده. قبلاً فقط نوار پیشرفت بود و کاربر نمی‌دانست
             // «۳۰٪» یعنی ۱۰ ثانیه یا ۵ دقیقه؛ روی «همهٔ استراتژی‌ها» همین ابهام بزرگ بود.
@@ -357,6 +362,16 @@ class BacktestViewModel(
                             val stats = res.totals
                             if (stats != null) {
                                 append(" · برد ${stats.winRatePct}% · خالص ${fmtUsd(stats.netPnlUsd)}")
+                            }
+                            // ── اثر «مانع» باید دیده شود، نه فرض شود ──────────────────
+                            // پیش از این، روشن‌بودن گیت هیچ عددی در نتیجه نداشت و کاربر
+                            // به‌درستی می‌گفت «با مانع و بدون مانع یکی بود». حالا هم
+                            // تعداد ورودهای مسدودشده می‌آید و هم دلیلش.
+                            if (res.neuralBlockedEntries > 0) {
+                                append(" · 🛑 مانع عصبی ${res.neuralBlockedEntries} ورود را گرفت")
+                                res.neuralBlockReasons.entries
+                                    .maxByOrNull { it.value }
+                                    ?.let { append(" (بیشترین دلیل: ${it.key} ×${it.value})") }
                             }
                             append(" (${res.elapsedMs} میلی‌ثانیه)")
                         }

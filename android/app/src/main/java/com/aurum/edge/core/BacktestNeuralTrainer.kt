@@ -276,6 +276,63 @@ class BacktestNeuralTrainer(
         return copy(pnlUsd = r)
     }
 
+    /**
+     * درگاه گیت عصبی برای بک‌تست — همان چیزی که کلید «مانع» باید کنترل کند.
+     *
+     * تا امروز `BacktestReplayEngine` هیچ‌گاه گیت را نمی‌پرسید، پس روشن‌کردن «مانع»
+     * نتیجهٔ بک‌تست را مطلقاً عوض نمی‌کرد (همان مشاهدهٔ «با مانع و بدون مانع یکی بود»).
+     *
+     * @param respectUserActivation اگر `true` (رفتار برنامه)، تا وقتی خود کاربر کلید
+     *   «فعال‌سازی گیت» را روشن نکرده باشد هیچ ورودی مسدود نمی‌شود — دقیقاً مثل مسیر زنده.
+     *   اگر `false`، فقط برای آزمون A/B، گیت بی‌توجه به کلید اعمال می‌شود.
+     */
+    fun entryGate(respectUserActivation: Boolean = true): NeuralGatePolicy.EntryGate {
+        val file = storageFile ?: return NeuralGatePolicy.EntryGate.ALLOW_ALL
+        if (!file.exists()) return NeuralGatePolicy.EntryGate.ALLOW_ALL
+        return NeuralGatePolicy.EntryGate { request ->
+            runCatching {
+                // موتور از همان فایل حافظهٔ انباشته ساخته می‌شود: دانش بک‌تست‌های قبلی
+                // همان دانشی است که همین حالا جلوی معاملهٔ نامزد را می‌گیرد.
+                val engine = NeuralSelfLearningEngine(context = null, storageFile = file)
+                val summary = engine.state.value
+                if (respectUserActivation && !summary.gateUserActivationEnabled) {
+                    return@runCatching NeuralGatePolicy.GateVerdict(
+                        blocks = false,
+                        reasonFa = "کلید «فعال‌سازی گیت» در بخش هوش عصبی روشن نیست.",
+                        summaryFa = "⚪ مانع خاموش است",
+                    )
+                }
+                val action = if (request.isLong) SignalAction.BUY else SignalAction.SELL
+                val (features, key, _) = engine.extractConditionFeatures(
+                    symbolInput = request.symbol,
+                    action = action,
+                    interval = request.triggerInterval,
+                    strategyId = request.strategyId,
+                    optimalRr = request.plannedRiskReward,
+                    confidence = request.engineConfidencePct,
+                    report = request.report,
+                )
+                val evaluation = engine.evaluateFeatures(
+                    symbol = request.symbol,
+                    features = features.toDoubleArray(),
+                    conditionKey = key,
+                )
+                NeuralGatePolicy.GateVerdict(
+                    blocks = evaluation.isBlockingTradeNow,
+                    reasonFa = evaluation.noTradeWarningFa ?: evaluation.summaryFa,
+                    summaryFa = evaluation.summaryFa,
+                )
+            }.getOrElse {
+                // خطای گیت هرگز نباید بک‌تست را بشکند یا بی‌صدا معامله را حذف کند.
+                NeuralGatePolicy.GateVerdict(
+                    blocks = false,
+                    reasonFa = "گیت عصبی خطا داد: ${it.message ?: it::class.simpleName}",
+                    summaryFa = "⚠️ گیت خطا داد و مانع نشد",
+                )
+            }
+        }
+    }
+
     /** چند نمونه در حافظهٔ اتاق تمرین هست (بدون تغییر چیزی). */
     fun memorySize(): Int {
         val f = storageFile ?: return 0

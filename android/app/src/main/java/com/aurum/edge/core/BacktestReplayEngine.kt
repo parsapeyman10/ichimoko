@@ -76,6 +76,14 @@ object BacktestReplayEngine {
          * فقط برای آموزش هوش عصبی لازم است و حافظه می‌گیرد؛ برای بک‌تست خالی می‌مانَد.
          */
         val captureEntryReports: Boolean = false,
+        /**
+         * گیت عصبی که پیش از هر ورود پرسیده می‌شود.
+         *
+         * `null` یعنی گیت خاموش است و رفتار مو‌به‌مو مثل قبل می‌ماند. برای اینکه کلید
+         * «مانع» در بخش هوش عصبی واقعاً اثر بگذارد، درگاه واقعی از `BacktestNeuralTrainer`
+         * ساخته و از `BacktestViewModel` اینجا تزریق می‌شود.
+         */
+        val neuralGate: NeuralGatePolicy.EntryGate? = null,
     )
 
     /** یک معاملهٔ بک‌تست. جدا از `PaperTrade` نگه داشته می‌شود تا هیچ‌جا با ژورنال قاطی نشود. */
@@ -158,6 +166,10 @@ object BacktestReplayEngine {
         val skippedWarmupSteps: Int,
         /** گزارش استراتژی در لحظهٔ ورود هر معامله؛ خالی مگر `captureEntryReports` روشن باشد. */
         val entryReports: Map<Long, StrategyEvaluationReport> = emptyMap(),
+        /** تعداد ورودی‌هایی که گیت عصبی مسدود کرد (۰ = گیت خاموش یا هیچ‌چیز مسدود نشد). */
+        val neuralBlockedEntries: Int = 0,
+        /** دلیل مسدودی گیت → تعداد. برای اینکه بشود دید «مانع» چه چیزی را گرفته است. */
+        val neuralBlockReasons: Map<String, Int> = emptyMap(),
         /** بیشترین شرطی که در یک کندل پاس شد؛ سقف واقعی همان بازه. */
         val maxConditionsPassed: Int = 0,
         /**
@@ -280,6 +292,9 @@ object BacktestReplayEngine {
 
         val states = models.associateWith { StrategyRunState(it) }
         val entryReports = LinkedHashMap<Long, StrategyEvaluationReport>()
+        // شمارش مسدودی‌های گیت عصبی — تا «مانع» قابل‌اندازه‌گیری باشد، نه ادعا.
+        var neuralBlocked = 0
+        val neuralBlockReasons = LinkedHashMap<String, Int>()
         // اگر در کل بازه هیچ ورودی ساخته نشد، کاربر باید بداند کدام شرط سد راه بوده،
         // نه این‌که با یک «۰ معامله» بی‌توضیح روبه‌رو شود.
         val conditionFailCounts = LinkedHashMap<String, Int>()
@@ -383,8 +398,29 @@ object BacktestReplayEngine {
                 }
                 val decision = entryDecision(report, bar.close, equity, config.riskPercent)
                 if (decision != null) {
-                    state.openTrade = decision
-                    if (config.captureEntryReports) entryReports.putIfAbsent(decision.entryTime, report)
+                    // ── گیت عصبی (همان کلید «مانع» بخش هوش عصبی) ──────────────────
+                    // پیش از این هیچ‌جای این موتور `NeuralGatePolicy.decide` صدا زده
+                    // نمی‌شد، پس روشن‌وخاموش‌کردن «مانع» نتیجهٔ بک‌تست را عوض نمی‌کرد.
+                    val gate = config.neuralGate
+                    val verdict = gate?.judge(
+                        NeuralGatePolicy.GateRequest(
+                            strategyId = state.model.id,
+                            symbol = config.symbol,
+                            isLong = decision.action == SignalAction.BUY,
+                            triggerInterval = config.triggerInterval,
+                            engineConfidencePct = report.confidence,
+                            plannedRiskReward = report.riskReward ?: 0.0,
+                            entryTime = decision.entryTime,
+                            report = report,
+                        ),
+                    )
+                    if (verdict?.blocks == true) {
+                        neuralBlocked++
+                        neuralBlockReasons[verdict.reasonFa] = (neuralBlockReasons[verdict.reasonFa] ?: 0) + 1
+                    } else {
+                        state.openTrade = decision
+                        if (config.captureEntryReports) entryReports.putIfAbsent(decision.entryTime, report)
+                    }
                 }
             }
 
@@ -436,6 +472,8 @@ object BacktestReplayEngine {
             evaluatedSteps = evaluated,
             skippedWarmupSteps = skipped,
             entryReports = entryReports,
+            neuralBlockedEntries = neuralBlocked,
+            neuralBlockReasons = neuralBlockReasons,
             maxConditionsPassed = maxConditionsPassed,
             bestBookGatePct = bestBookGatePct,
             bestBookGateNoteFa = bestBookGateNoteFa,

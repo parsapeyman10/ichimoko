@@ -133,6 +133,63 @@ object NeuralGatePolicy {
         )
     }
 
+    // ─────────────────────── درگاه بک‌تست ───────────────────────
+
+    /**
+     * خواستهٔ گیت برای یک ورودِ نامزد در بک‌تست.
+     *
+     * این کلاس در فایل «خالص» (بدون وابستگی اندروید) نگه داشته می‌شود تا
+     * `BacktestReplayEngine` بتواند در محیط آزمایشی JVM هم کامپایل و آزمون شود.
+     * پیاده‌سازی واقعی — که شبکهٔ عصبی را می‌پرسد — در `BacktestNeuralTrainer` است.
+     */
+    data class GateRequest(
+        val strategyId: String,
+        val symbol: String,
+        /** جهت معامله؛ برای نمایش و کلید خوشه. */
+        val isLong: Boolean,
+        /** تایم‌فریم ماشه؛ بخشی از بردار ویژگی شبکه است. */
+        val triggerInterval: com.aurum.edge.domain.Interval,
+        /** اعتماد موتور استراتژی در همین کندل (۰..۱۰۰). */
+        val engineConfidencePct: Double,
+        val plannedRiskReward: Double,
+        val entryTime: Long,
+        /**
+         * گزارش کامل استراتژی در همین کندل.
+         *
+         * بدون این، گیت مجبور می‌شد ویژگی‌ها را از هوا بسازد. با آن، همان بردار ویژگی‌ای
+         * ساخته می‌شود که هنگام آموزش از معاملهٔ بسته‌شده ساخته می‌شد — پس گیت دقیقاً
+         * همان چیزی را می‌بیند که شبکه یاد گرفته است.
+         */
+        val report: StrategyEvaluationReport? = null,
+    )
+
+    /** پاسخ گیت به یک ورودِ نامزد. */
+    data class GateVerdict(
+        val blocks: Boolean,
+        val reasonFa: String,
+        val summaryFa: String,
+    ) {
+        companion object {
+            val ALLOW = GateVerdict(false, "گیت مانع نشد.", "🟢 مانع ورود ندارد")
+        }
+    }
+
+    /**
+     * درگاهی که بک‌تست قبل از بازکردن هر معامله از آن می‌پرسد.
+     *
+     * چرا این لازم بود: کلید «مانع» در بخش هوش عصبی تا امروز **هیچ اثری در بک‌تست
+     * نداشت**، چون `BacktestReplayEngine` هیچ‌جا `NeuralGatePolicy.decide` را صدا
+     * نمی‌زد. نتیجه همان چیزی بود که کاربر دید: «با مانع و بدون مانع یکی بود».
+     */
+    fun interface EntryGate {
+        fun judge(request: GateRequest): GateVerdict
+
+        companion object {
+            /** گیت خاموش: هیچ ورودی مسدود نمی‌شود (رفتار پیش‌فرض و سازگار با قبل). */
+            val ALLOW_ALL: EntryGate = EntryGate { GateVerdict.ALLOW }
+        }
+    }
+
     private fun fmtPct(v: Double): String = "${(kotlin.math.round(v * 10.0) / 10.0)}%"
 
     private fun fmtR(v: Double): String = String.format(java.util.Locale.US, "%+.2fR", v)
