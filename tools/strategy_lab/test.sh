@@ -54,7 +54,9 @@ for f in "${COMPILE[@]}"; do
     RUN+=("$pkg.$name")
   else
     echo "[test] ⚠️  $name در این محیط (بدون اندروید) کامپایل نمی‌شود — CI آن را اجرا می‌کند:"
-    grep -E "error" "$log" | head -3 | sed 's/^/        /'
+    # `head -3` بعد از سه خط لوله را می‌بندد و با `set -o pipefail` کل اسکریپت
+    # با SIGPIPE (کد ۱۴۱) می‌مُرد؛ یعنی خروجی ناقص و «سبز»ی که سبز نبود. حالا مهار می‌شود.
+    { grep -E "error" "$log" || true; } | head -3 | sed 's/^/        /' || true
   fi
   rm -f "$log"
 done

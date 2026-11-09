@@ -53,6 +53,9 @@ FILES=(
   domain/FeedMode.kt domain/FeedStatus.kt
   core/Models.kt core/V1Universe.kt core/VenueSpecs.kt core/MarketHours.kt core/MarketState.kt
   core/PaperOrderRules.kt core/TradePlanGuard.kt core/HiddenCrossEngine.kt core/ParsaLineTurnEngine.kt core/CompressionExpansionEngine.kt core/NeoWaveEngine.kt
+  core/peyman/PeymanCryptoModels.kt core/peyman/PeymanMarketContextEngine.kt
+  core/peyman/NeoWaveCountEnsemble.kt core/peyman/CryptoStructuralBreakEngine.kt
+  core/peyman/CryptoExecutionQualityGate.kt core/peyman/PeymanCryptoEngine.kt
   core/NeoWaveNeuralAdvisor.kt core/RiskAndCalendarEngine.kt core/SessionExitPlanner.kt
   core/TradingPerformanceAnalytics.kt core/NeuralGatePolicy.kt core/EntrySafetyGate.kt
   core/IchimokuStrategyEngine.kt core/BacktestSeries.kt core/BacktestReplayEngine.kt

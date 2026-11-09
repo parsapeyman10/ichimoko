@@ -130,6 +130,11 @@ class BacktestViewModel(
          * ورود (شکست تأییدشده / بازآزمایی تأییدشده) را فعال می‌کند.
          */
         val compressionExpansion: Boolean = false,
+        /**
+         * موتور «پیمان کریپتو» در حالت معاملهٔ کاغذی.
+         * خاموش = `DISABLED` (هیچ ارزیابی‌ای انجام نمی‌شود و رفتار قبلی دست‌نخورده است).
+         */
+        val peymanCryptoPaper: Boolean = false,
     )
 
     private val _settings = MutableStateFlow(Settings())
@@ -316,6 +321,11 @@ class BacktestViewModel(
                 maxBars = s.maxBars,
                 includeHiddenCrossLayer = s.includeHiddenCrossLayer,
                 compressionExpansionEnabled = s.compressionExpansion,
+                peymanCryptoConfig = if (s.peymanCryptoPaper) {
+                    com.aurum.edge.core.peyman.PeymanCryptoConfig.PAPER
+                } else {
+                    com.aurum.edge.core.peyman.PeymanCryptoConfig()
+                },
                 captureEntryReports = true,
                 // ── گیت عصبی = همان کلید «مانع» در بخش هوش عصبی ──────────────────
                 // پیش از این، بک‌تست هیچ‌گاه گیت را نمی‌پرسید؛ بنابراین روشن‌وخاموش

@@ -102,6 +102,14 @@ object BacktestReplayEngine {
         val macroCandlesOverride: List<com.aurum.edge.domain.Candle> = emptyList(),
         /** کندل‌های تایم‌فریم استراتژی که کاربر جداگانه داده است. */
         val strategyCandlesOverride: List<com.aurum.edge.domain.Candle> = emptyList(),
+        /**
+         * تنظیمات موتور «پیمان کریپتو حرفه‌ای».
+         *
+         * پیش‌فرض `DISABLED` است: هیچ ارزیابی و هیچ تغییری در نتیجهٔ بک‌تست رخ نمی‌دهد.
+         * برای مقایسهٔ A/B کافی است `mode = PAPER_ENABLED` داده شود.
+         */
+        val peymanCryptoConfig: com.aurum.edge.core.peyman.PeymanCryptoConfig =
+            com.aurum.edge.core.peyman.PeymanCryptoConfig(),
     )
 
     /** یک معاملهٔ بک‌تست. جدا از `PaperTrade` نگه داشته می‌شود تا هیچ‌جا با ژورنال قاطی نشود. */
@@ -315,6 +323,7 @@ object BacktestReplayEngine {
             } else {
                 CompressionExpansionEngine.Config()
             },
+            peymanCrypto = config.peymanCryptoConfig,
         )
 
         val models: List<BitcoinStrategyModel> = if (config.runAllStrategies) {

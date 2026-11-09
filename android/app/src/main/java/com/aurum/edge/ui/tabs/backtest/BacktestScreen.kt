@@ -402,6 +402,10 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 ToggleRow("ماشهٔ فشردگی → انبساط (بیس)", settings.compressionExpansion) { on ->
                     vm.updateSettings { s -> s.copy(compressionExpansion = on) }
                 }
+                // موتور «پیمان کریپتو»: خاموش = رفتار قبلی؛ روشن = معاملهٔ کاغذی روی رمزارز.
+                ToggleRow("پیمان کریپتو حرفه‌ای (فقط رمزارز)", settings.peymanCryptoPaper) { on ->
+                    vm.updateSettings { s -> s.copy(peymanCryptoPaper = on) }
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "بک‌تست روی ${fmtCount(endIndex)} کندلِ تا این نقطه اجرا می‌شود؛ کندل‌های آیندهٔ " +

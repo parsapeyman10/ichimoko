@@ -1,5 +1,9 @@
 package com.aurum.edge.core
 
+import com.aurum.edge.core.peyman.PeymanCryptoConfig
+import com.aurum.edge.core.peyman.PeymanCryptoDecision
+import com.aurum.edge.core.peyman.PeymanCryptoEngine
+import com.aurum.edge.core.peyman.PeymanCryptoInput
 import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.domain.SignalAction
@@ -667,6 +671,12 @@ data class BaseStrategyConfig(
      */
     val compressionExpansion: CompressionExpansionEngine.Config =
         CompressionExpansionEngine.Config(),
+    /**
+     * استراتژی پیمان کریپتو (رژیم + شمارش اصلی/جایگزین + BOS/Retest + کیفیت اجرا + ریسک خوشه).
+     *
+     * پیش‌فرض `DISABLED` است: هیچ ارزیابی و هیچ تغییری در رفتار قبلی رخ نمی‌دهد.
+     */
+    val peymanCrypto: PeymanCryptoConfig = PeymanCryptoConfig(),
     /** لایهٔ اختیاری نئوویو (NeoWave). پیش‌فرض خاموش ⇒ خروجی موتور بدون تغییر. */
     val neoWaveEnabled: Boolean = false,
     /** حداقل قواعد نیلی که باید پاس شود تا شمارش «معتبر» شمرده شود. */
@@ -1294,6 +1304,12 @@ data class StrategyEvaluationReport(
      * نگه داشته می‌شود تا شرط‌های مستثنا با `passed=true` جعلی نمایش داده نشوند.
      */
     val compressionExpansion: CompressionExpansionEngine.Analysis? = null,
+    /**
+     * تصمیم موتور «پیمان کریپتو حرفه‌ای» با Trace کامل.
+     *
+     * `null` یعنی حالت این موتور `DISABLED` بوده و هیچ ارزیابی‌ای انجام نشده است.
+     */
+    val peymanCrypto: PeymanCryptoDecision? = null,
     val confidence: Double,
     val livePrice: Double,
     val suggestedEntry: Double?,
@@ -4672,9 +4688,43 @@ object IchimokuStrategyEngine {
             hasValidPlan = finalStopLoss != null && finalTakeProfit != null && sniperOptimal != null &&
                 rr >= 1.5,
         )
-        val cryptoNeoWaveEntry = cryptoEntryDecision.eligible &&
-            baseReadiness != StrategyReadinessState.SIGNAL_BUY &&
-            baseReadiness != StrategyReadinessState.SIGNAL_SELL
+        // ── موتور «پیمان کریپتو حرفه‌ای» ─────────────────────────────────────
+        // فقط برای استراتژی ۱۶ و فقط روی رمزارز. در حالت DISABLED هیچ محاسبه‌ای
+        // انجام نمی‌شود (هزینهٔ صفر و رفتار قبلی دست‌نخورده). در حالت SHADOW تصمیم
+        // کامل ثبت می‌شود ولی معامله‌ای باز نمی‌شود؛ فقط PAPER_ENABLED اجازهٔ ورود دارد.
+        val isPeymanStrategyModel = activeModel == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER
+        val peymanDecision: PeymanCryptoDecision? = if (
+            isPeymanStrategyModel && isCryptoClass && effectiveConfig.peymanCrypto.isActive
+        ) {
+            runCatching {
+                PeymanCryptoEngine.decide(
+                    PeymanCryptoInput(
+                        symbol = normalizedSymbol,
+                        macroBars = alignedMacroCandles,
+                        strategyBars = alignedStrategyCandles,
+                        triggerBars = alignedTriggerCandles,
+                        openPositions = emptyList(),
+                        config = effectiveConfig.peymanCrypto,
+                        nowMillis = nowMillis,
+                        triggerInterval = config.triggerInterval,
+                    ),
+                )
+            }.getOrNull()
+        } else {
+            null
+        }
+
+        val cryptoNeoWaveEntry = if (peymanDecision != null) {
+            // موتور جدید جانشین مسیر نئوویوِ خام است، نه یک fallback دورزننده.
+            peymanDecision.isTradeAllowed &&
+                peymanDecision.action == (if (isLong) SignalAction.BUY else SignalAction.SELL) &&
+                baseReadiness != StrategyReadinessState.SIGNAL_BUY &&
+                baseReadiness != StrategyReadinessState.SIGNAL_SELL
+        } else {
+            cryptoEntryDecision.eligible &&
+                baseReadiness != StrategyReadinessState.SIGNAL_BUY &&
+                baseReadiness != StrategyReadinessState.SIGNAL_SELL
+        }
         val readiness = when {
             cryptoNeoWaveEntry && isLong -> StrategyReadinessState.SIGNAL_BUY
             cryptoNeoWaveEntry -> StrategyReadinessState.SIGNAL_SELL
@@ -4756,6 +4806,8 @@ object IchimokuStrategyEngine {
             isHiddenCrossModel -> "هیدن کراس: جهت از ابر مخفی (نوار تنکان/کیجون) و هدف از کراس برابری (تاج نصف‌اندازه)؛ " +
                 "جست‌وجوی آنالوگ تاریخی با ${trigSnap.hiddenCloudAnalogueSamples} نمونه و هم‌جهتی " +
                 "${(trigSnap.hiddenCloudAnalogueAgreement * 100).toInt()}٪؛ یادگیری عصبی خاموش"
+            peymanDecision != null ->
+                "🌊 پیمان کریپتو (${peymanDecision.mode.labelFa}): ${peymanDecision.summaryFa}"
             cryptoNeoWaveEntry -> "🌊 مسیر نئوویو (کریپتو): ${cryptoEntryDecision.reasonFa}"
             neoWaveOn && isCryptoClass && neoWaveVerdict != null ->
                 "🌊 کریپتو: ${cryptoEntryDecision.reasonFa}"
@@ -4788,6 +4840,7 @@ object IchimokuStrategyEngine {
             action = finalAction,
             triggerType = effectiveTriggerType,
             compressionExpansion = compressionAnalysis,
+            peymanCrypto = peymanDecision,
             confidence = gatedConfidence,
             livePrice = round2(livePrice),
             suggestedEntry = sniperOptimal,
