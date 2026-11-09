@@ -496,9 +496,9 @@ object BacktestReplayEngine {
 
         val perStrategy = models.map { model ->
             val own = allTrades.filter { it.strategyId == model.id }
-            buildStats(model.id, model.titleFa, own)
+            buildStats(model.id, model.titleFa, own, config.startEquityUsd)
         }
-        val stats = if (models.size > 1) perStrategy + buildStats("__ALL__", "مجموع همهٔ استراتژی‌ها", allTrades) else perStrategy
+        val stats = if (models.size > 1) perStrategy + buildStats("__ALL__", "مجموع همهٔ استراتژی‌ها", allTrades, config.startEquityUsd) else perStrategy
 
         IchimokuStrategyEngine.disableBacktestSnapshotCache()
         return Result(
@@ -729,7 +729,12 @@ object BacktestReplayEngine {
 
     // ─────────────────────── آمار ───────────────────────
 
-    private fun buildStats(id: String, titleFa: String, trades: List<Trade>): Stats {
+    internal fun buildStats(
+        id: String,
+        titleFa: String,
+        trades: List<Trade>,
+        startEquityUsd: Double = 1_000.0,
+    ): Stats {
         val closed = trades.filter { !it.isOpen }
         val wins = closed.filter { it.netPnlUsd > 0.0 }
         val losses = closed.filter { it.netPnlUsd <= 0.0 }
@@ -741,8 +746,15 @@ object BacktestReplayEngine {
         val variance = if (rs.size > 1) rs.sumOf { (it - avgR) * (it - avgR) } / (rs.size - 1) else 0.0
         val sd = kotlin.math.sqrt(max(variance, 0.0))
 
-        var peak = 0.0
-        var equity = 0.0
+        // ── افت سرمایه روی «سرمایهٔ حساب» ────────────────────────────────────────
+        // قبلاً منحنی از صفر شروع می‌شد و مخرج کسر «بیشترین سود انباشته» بود؛ دو نتیجهٔ غلط:
+        //   ۱. منحنی‌ای که فقط ضرر می‌دهد هرگز سقف تازه نمی‌سازد، پس افت ۰٪ گزارش می‌شد
+        //      (`peak` صفر می‌ماند و شرط `peak > 1e-9` رد می‌شد).
+        //   ۲. با سود انباشتهٔ کوچک، افت نسبی منفجر می‌شد: BTC/USD واقعی → «افت ۵۲۷٪».
+        // حالا equity و peak هر دو از سرمایهٔ شروع حساب می‌شوند، یعنی همان چیزی که کاربر
+        // روی حسابش می‌بیند.
+        var equity = startEquityUsd
+        var peak = startEquityUsd
         var maxDd = 0.0
         for (trade in closed.sortedBy { it.exitTime ?: Long.MAX_VALUE }) {
             equity += trade.netPnlUsd

@@ -47,6 +47,28 @@ private fun medianRangeBp(candles: List<Candle>): Double {
 
 private fun f2(v: Double): String = String.format(Locale.US, "%.2f", v)
 
+/** هر معامله را در یک CSV می‌ریزد تا بشود پرسید «کدام ساعت/سشن/دلیل خروج پول می‌سوزاند». */
+private fun dumpTrades(labelFa: String, symbol: String, res: BacktestReplayEngine.Result) {
+    val safe = symbol.replace('/', '_').replace(" ", "")
+    val file = File("/tmp/lab_trades_${safe}_${labelFa.replace('/', '_')}.csv")
+    val sb = StringBuilder("entryTime,exitTime,action,entry,stopLoss,takeProfit,plannedRR,exitReason,rMultiple,confidence,barsHeld\n")
+    for (t in res.trades) {
+        sb.append(t.entryTime).append(',')
+            .append(t.exitTime ?: 0L).append(',')
+            .append(t.action).append(',')
+            .append(f2(t.entryPrice)).append(',')
+            .append(f2(t.stopLoss)).append(',')
+            .append(f2(t.takeProfit)).append(',')
+            .append(f2(t.plannedRiskReward)).append(',')
+            .append(t.exitReason).append(',')
+            .append(f2(t.rMultiple)).append(',')
+            .append(f2(t.confidence)).append(',')
+            .append(t.barsHeld).append('\n')
+    }
+    file.writeText(sb.toString())
+    println("        معامله‌ها برای تحلیل: ${file.path}")
+}
+
 private fun runOne(labelFa: String, candles: List<Candle>, base: BacktestReplayEngine.Config) {
     val started = System.currentTimeMillis()
     val res = BacktestReplayEngine.run(candles, base)
@@ -64,6 +86,7 @@ private fun runOne(labelFa: String, candles: List<Candle>, base: BacktestReplayE
             st.expectancyR, st.netPnlUsd, st.maxDrawdownPct, st.avgBarsHeld,
         ),
     )
+    dumpTrades(labelFa, base.symbol, res)
     println(
         String.format(
             Locale.US,
@@ -112,16 +135,6 @@ fun main(args: Array<String>) {
         ),
     )
 
-    // ۲) بیس خالص، بدون لایهٔ هیدن کراس — همان A/B که فقط با داده معنا دارد.
-    runOne(
-        "بدون-هیدن",
-        trigger.candles,
-        BacktestReplayEngine.Config(
-            symbol = symbol,
-            includeHiddenCrossLayer = false,
-        ),
-    )
-
     // ۳) تایم‌فریم‌های بالا از فایل واقعی خودشان (اگر کاربر داده باشد).
     //    این تنها حالتی است که «چند تایم‌فریمی» واقعاً چند تایم‌فریمی است.
     if (strategy != null && macro != null) {
@@ -134,18 +147,7 @@ fun main(args: Array<String>) {
                 strategyCandlesOverride = strategy.candles,
                 macroCandlesOverride = macro.candles,
             ),
-        )
-        runOne(
-            "HTF-واقعی/بدون-هیدن",
-            trigger.candles,
-            BacktestReplayEngine.Config(
-                symbol = symbol,
-                includeHiddenCrossLayer = false,
-                strategyCandlesOverride = strategy.candles,
-                macroCandlesOverride = macro.candles,
-            ),
-        )
-    } else {
+        )    } else {
         println("[HTF-واقعی] اجرا نشد — فایل ۱ ساعته و ۴ ساعته داده نشد.")
     }
 }
