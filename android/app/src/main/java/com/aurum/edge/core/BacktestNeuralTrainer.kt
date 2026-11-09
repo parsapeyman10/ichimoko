@@ -2,6 +2,7 @@ package com.aurum.edge.core
 
 import android.content.Context
 import com.aurum.edge.domain.Interval
+import com.aurum.edge.domain.SignalAction
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.round
