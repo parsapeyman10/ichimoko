@@ -3800,9 +3800,17 @@ object IchimokuStrategyEngine {
         } else {
             hcCloud.tenkanSlopeAtrPerBar < 0.0 && hcCloud.kijunSlopeAtrPerBar <= 0.06
         }
-        val hiddenCrossReady = hcDirectionOk && hcCloudBalancedOk && hcCrossFreshOk &&
-            hcCrossSideOk && hcAnalogueOk && hcTargetRoomOk && hcImpulseOk &&
-            hcNotOverextended && hcMtfOk && hcChikouOk && hcSlopeOk
+        // ماشهٔ هیدن کراس = همان پنج قاعدهٔ آموزش اصلی (ابر مخفی باریک، جهت، چیکو، کراس
+        // برابری، تاج). پیش از این، شرط وابسته به آنالوگ آماری، تازگی، بدنهٔ کندل،
+        // هم‌سویی تایم‌فریم و شیب بود — یعنی شرط‌هایی که در عکس‌ها نیستند و در عمل باعث
+        // می‌شدند `HIDDEN_CROSS` هیچ‌وقت ماشه نخورد.
+        val hcSpecForTrigger = HiddenCrossEngine.spec(
+            hcCloud,
+            long = isLong,
+            tenkanAboveKijun = hcTkBullish,
+            chikouFree = hcChikouOk,
+        )
+        val hiddenCrossReady = hcSpecForTrigger.allPassed && hcDirectionOk
 
         val triggerType = when {
             isBtc52Model && btc52Ready -> StrategyTriggerType.BTC_52_STRUCTURE_BREAK
@@ -4299,101 +4307,55 @@ object IchimokuStrategyEngine {
             StrategyConditionCheck(8, "۸. سمت قیمت و نبود تضاد تایم‌فریم بالاتر", parsaCloudOk, "قیمت نسبت به Kijun و تایم‌فریم بالاتر با جهت معامله سنجیده شد."),
             StrategyConditionCheck(9, "۹. پلن نهایی و R:R حداقل ۱:۱٫۵", cond12Passed && guardedPlan.isUsable, cond12Detail),
         )
+        // ── هیدن کراس: دقیقاً همان چیزی که در آموزش اصلی هست، بدون افزودن شرط ──────
+        // پیش از این ۱۰ شرط روی هم سوار شده بود (ضخامت ابر، تازگی کراس، آنالوگ آماری،
+        // تاج در مسیر، بدنهٔ کندل، همسویی تایم‌فریم، شیب، چیکو، پلن) — یعنی چیزی که در
+        // عکس‌ها نبود. عکس‌ها فقط سه چیز می‌گویند:
+        //
+        //  ۱. ابر مخفی = فاصلهٔ تنکان از کیجون؛ اگر «باریک» باشد جهت را می‌دهد. در عکس‌ها
+        //     همیشه یک ویژگی دیگر هم دیده می‌شود: آزادی چیکو (چیکوی سبز و جدا از قیمت).
+        //  ۲. کراس برابری = تنکان و کیجون که «مدتی روی هم افتاده‌اند». اندازهٔ همین
+        //     هم‌پوشانی نصف می‌شود و سقف/کف آینده را می‌سازد (خط‌چین قرمز عکس‌ها).
+        //  ۳. تاج = از سطح کراس به‌اندازهٔ نصف هم‌پوشانی، در جهت شکست — سطح هدف.
+        //
+        // پس پنج شرط: ابر مخفی باریک، جهت از بیرون‌زدن قیمت، چیکوی آزاد، کراس برابری
+        // موجود (تازگی‌اش)، و تاج واقعاً در مسیر باشد. بقیه حذف شدند.
+        val hcSpec = HiddenCrossEngine.spec(
+            hcCloud,
+            long = isLong,
+            tenkanAboveKijun = hcTkBullish,
+            chikouFree = hcChikouOk,
+        )
         val hiddenCrossConditions = listOf(
             StrategyConditionCheck(
-                1,
-                "۱. جهت از ابر مخفی (قیمت بیرون از نوار تنکان/کیجون و ترتیب TK هم‌جهت)",
-                hcDirectionOk,
-                String.format(
-                    Locale.US,
-                    "نوار=%.2f..%.2f · کلوز=%.2f · TK=%s · شیب نوار=%+.2f ATR/کندل",
-                    hcCloud.hiddenCloudBottom,
-                    hcCloud.hiddenCloudTop,
-                    hcCloud.close,
-                    if (hcTkBullish) "تنکان بالای کیجون" else "تنکان زیر کیجون",
-                    hcCloud.hiddenCloudSlopeAtrPerBar,
-                ),
+                hcSpec.conditions[0].index,
+                hcSpec.conditions[0].titleFa,
+                hcSpec.conditions[0].passed,
+                hcSpec.conditions[0].detailFa,
             ),
             StrategyConditionCheck(
-                2,
-                "۲. ابر مخفی معتبر (ضخامت نوار ≤ ۰٫۵۵ ATR و باز نشده)",
-                hcCloudBalancedOk,
-                String.format(Locale.US, "ضخامت نوار=%.2f ATR · سقف مجاز %.2f ATR", hcCloud.hiddenCloudThicknessAtr, HiddenCrossEngine.HIDDEN_CLOUD_MAX_THICKNESS_ATR),
+                hcSpec.conditions[1].index,
+                hcSpec.conditions[1].titleFa,
+                hcSpec.conditions[1].passed,
+                hcSpec.conditions[1].detailFa,
             ),
             StrategyConditionCheck(
-                3,
-                "۳. کراس برابری شکل گرفته (دست‌کم ۳ کندل هم‌پوشانی تنکان/کیجون)",
-                hcCrossExistsOk,
-                if (hcCrossExistsOk) {
-                    String.format(Locale.US, "سطح برابری=%.2f · %d کندل هم‌پوشانی · اندازه=%.2f ATR", hcCloud.equalCrossLevel, hcCloud.equalCrossBars, hcCloud.equalCrossSizeAtr)
-                } else {
-                    "هم‌پوشانی کافی تنکان/کیجون یافت نشد (در پنجره: ${hcCloud.equalCrossCount} مورد)."
-                },
+                hcSpec.conditions[2].index,
+                hcSpec.conditions[2].titleFa,
+                hcSpec.conditions[2].passed,
+                hcSpec.conditions[2].detailFa,
             ),
             StrategyConditionCheck(
-                4,
-                "۴. تازگی کراس برابری (حداکثر ۳۰ کندل پس از پایان هم‌پوشانی)",
-                hcCrossFreshOk,
-                if (hcCrossExistsOk) {
-                    "${hcCloud.equalCrossBarsSinceEnd} کندل از پایان هم‌پوشانی گذشته؛ سقف مجاز ${HiddenCrossEngine.MAX_EQUAL_CROSS_AGE_BARS} کندل."
-                } else {
-                    "کراس برابری برای سنجش تازگی وجود ندارد."
-                },
+                hcSpec.conditions[3].index,
+                hcSpec.conditions[3].titleFa,
+                hcSpec.conditions[3].passed,
+                hcSpec.conditions[3].detailFa,
             ),
             StrategyConditionCheck(
-                5,
-                "۵. هم‌جهتی قیمت با سطح برابری (بیرون‌زدن از ناحیهٔ تعادل)",
-                hcCrossSideOk,
-                if (hcCrossExistsOk) {
-                    String.format(Locale.US, "کلوز %.2f در برابر سطح برابری %.2f", hcCloud.close, hcCloud.equalCrossLevel)
-                } else {
-                    "سطح برابری هنوز تعیین نشده است."
-                },
-            ),
-            StrategyConditionCheck(
-                6,
-                "۶. تأیید آماری آنالوگ ابر مخفی (نمونهٔ هم‌شکل تاریخی)",
-                hcAnalogueOk,
-                if (hcAnalogueMeasured) {
-                    String.format(
-                        Locale.US,
-                        "%d نمونهٔ هم‌شکل · میانگین حرکت %+.2f ATR · هم‌جهت %.0f%% (حد لازم %.0f%%)",
-                        hcCloud.hiddenCloudAnalogueSamples,
-                        hcCloud.hiddenCloudAnalogueForwardAtr,
-                        hcCloud.hiddenCloudAnalogueAgreement * 100.0,
-                        HiddenCrossEngine.ANALOGUE_MIN_AGREEMENT * 100.0,
-                    )
-                } else {
-                    "نمونهٔ کافی نیست (${hcCloud.hiddenCloudAnalogueSamples}/${HiddenCrossEngine.ANALOGUE_MIN_SAMPLES})؛ تصمیم فقط بر پایهٔ ابر مخفی و کراس می‌ماند."
-                },
-            ),
-            StrategyConditionCheck(
-                7,
-                "۷. هدف «تاج» در مسیر و در دالان R:R (≥ ۱٫۵R)",
-                hcTargetRoomOk,
-                if (hcCrownAheadOk) {
-                    String.format(Locale.US, "تاج=%.2f · فاصله=%.2fR (حد لازم %.2fR)", hcCloud.crownLevel, hcCrownDistanceR, HiddenCrossEngine.HIDDEN_CROSS_MIN_TARGET_R)
-                } else {
-                    "تاجی در مسیر معامله وجود ندارد؛ سطح برابری یا هدف بهینه جانشین می‌شود."
-                },
-            ),
-            StrategyConditionCheck(
-                8,
-                "۸. کیفیت کندل ماشه (بدنه/محل کلوز) و نبود کشیدگی از نوار",
-                hcImpulseOk && hcNotOverextended,
-                String.format(Locale.US, "بدنه=%.0f%% · CLV=%.0f%% · فاصله از کیجون=%.2f ATR", hcCloud.candleBodyRatio * 100.0, hcCloud.closeLocationValue * 100.0, hcCloud.distanceToKijunAtr),
-            ),
-            StrategyConditionCheck(
-                9,
-                "۹. همسویی تایم‌فریم بالاتر و شیب خطوط",
-                hcMtfOk && hcSlopeOk,
-                String.format(Locale.US, "شیب تنکان=%+.2f · کیجون=%+.2f ATR/کندل · ابر تایم بالاتر=%s", hcCloud.tenkanSlopeAtrPerBar, hcCloud.kijunSlopeAtrPerBar, if (macroSnap == null) "بدون داده" else if (macroSnap.isPriceBelowKumo) "قیمت زیر ابر" else if (macroSnap.isPriceAboveKumo) "قیمت بالای ابر" else "داخل ابر"),
-            ),
-            StrategyConditionCheck(
-                10,
-                "۱۰. آزادی Chikou و پلن نهایی با R:R حداقل ۱:۱٫۵",
-                hcChikouOk && cond12Passed && guardedPlan.isUsable,
-                "$cond12Detail · چیکو ${if (hcChikouOk) "آزاد" else "درگیر"}",
+                hcSpec.conditions[4].index,
+                hcSpec.conditions[4].titleFa,
+                hcSpec.conditions[4].passed,
+                hcSpec.conditions[4].detailFa,
             ),
         )
 

@@ -6,6 +6,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.round
+import java.util.Locale
 
 /**
  * # موتور «هیدن کراس» (Hidden Cross) و «ابر مخفی» (Hidden Cloud)
@@ -37,6 +38,137 @@ import kotlin.math.round
 private data class AnalogueMatch(val distance: Double, val idx: Int, val forwardAtr: Double)
 
 object HiddenCrossEngine {
+
+    /**
+     * نتیجهٔ ارزیابی «فقط همان قواعد آموزش اصلی».
+     *
+     * یک شرط با متن فارسی و وضعیت، تا هم موتور و هم صفحهٔ بک‌تست یک منبع حقیقت داشته باشند.
+     */
+    data class Rule(
+        val index: Int,
+        val titleFa: String,
+        val passed: Boolean,
+        val detailFa: String,
+    )
+
+    data class Spec(val conditions: List<Rule>) {
+        val allPassed: Boolean get() = conditions.all { it.passed }
+    }
+
+    /**
+     * ارزیابی هیدن کراس **بدون افزودن شرط**.
+     *
+     * این تابع عمداً کوچک است. هر شرطی که این‌جا نیست، در آموزش اصلی هم نبوده:
+     *
+     * | منبع در عکس‌ها | شرط این‌جا |
+     * |---|---|
+     * | «فاصلهٔ قرمز و آبی همان ابر مخفی است» + دایره‌هایی که نوار باریک است | ۱. ابر مخفی باریک |
+     * | «جهت روند را از ابر مخفی می‌فهمیم» | ۲. قیمت بیرون نوار، هم‌جهت با ترتیب تنکان/کیجون |
+     * | چیکوی سبز و جدا از قیمت در همهٔ نمونه‌ها | ۳. چیکو آزاد |
+     * | «مدتی روی هم افتاده‌اند … کراس برابری» | ۴. کراس برابری موجود و تازه |
+     * | «نصف اندازهٔ کراس … تاج» | ۵. تاج در مسیر و همان‌سو |
+     *
+     * @param cloud هندسهٔ ابر مخفی و کراس برابری برای همین کندل.
+     * @param long جهت معامله (خرید/فروش).
+     * @param tenkanAboveKijun ترتیب تنکان/کیجون؛ باید با جهت هم‌سو باشد.
+     * @param chikouFree آیا چیکو آزاد است (از قیمتِ n کندل قبل جدا مانده).
+     */
+    fun spec(
+        cloud: IchimokuBarSnapshot,
+        long: Boolean,
+        tenkanAboveKijun: Boolean,
+        chikouFree: Boolean,
+    ): Spec {
+        // ۱. ابر مخفی باریک — در عکس‌ها نوار در همهٔ نمونه‌های معامله‌شده باریک است.
+        val thin = cloud.hiddenCloudThicknessAtr <= HIDDEN_CLOUD_MAX_THICKNESS_ATR
+        // ۲. جهت از ابر مخفی: قیمت باید از نوار بیرون زده باشد و ترتیب TK هم‌سو باشد.
+        val outside = if (long) cloud.close > cloud.hiddenCloudTop else cloud.close < cloud.hiddenCloudBottom
+        val tkAligned = tenkanAboveKijun == long
+        // ۳. چیکو آزاد — در هر ۹ تصویر، خط تأخیر جدا از قیمت رسم شده است.
+        // ۴. کراس برابری: هم‌پوشانی باید وجود داشته باشد و از پایانش زیاد نگذشته باشد
+        //    (عکس‌ها همه بلافاصله پس از خروج از هم‌پوشانی را نشان می‌دهند).
+        val crossExists = cloud.equalCrossBars >= MIN_EQUAL_CROSS_BARS && cloud.equalCrossLevel > 0.0
+        val crossFresh = cloud.equalCrossBarsSinceEnd <= MAX_EQUAL_CROSS_AGE_BARS
+        // ۵. تاج در جهت معامله باشد (بالای قیمت برای خرید، پایین برای فروش).
+        //
+        // دقت: `crownLevel` یک **قیمت** است و همیشه مثبت؛ صفر یعنی «کراس برابری ساخته نشده».
+        // نسخهٔ اول این شرط را برای فروش «تاج < قیمت» نوشته بود و چون تاج صفر هم از آن رد
+        // می‌شد، ۸۶٪ کندل‌ها به‌غلط رد می‌شدند. حالا صفر صریحاً «تاج وجود ندارد» است.
+        // نکتهٔ مهم: `crownLevel` در موتور **همیشه در جهت شکست کراس** ساخته می‌شود
+        // (`level ± extension` بسته به `bullishBreakout`) — یعنی خودش یک سطح هدف است، نه
+        // یک سطح دلخواه. شرط‌گذاشتن روی «بالا/پایین بودنش نسبت به قیمت»طبق عکس‌ها نیست و
+        // بدتر: هر معاملهٔ فروش را حذف می‌کرد (چون برای فروش هم تاج مثبت و بالای صفر است).
+        // پس معیار درست همان است که در عکس‌ها دیده می‌شود: تاج باید **وجود داشته باشد**.
+        val crownExists = cloud.crownLevel > 0.0
+        val crownAhead = crownExists
+
+        return Spec(
+            listOf(
+                Rule(
+                    1,
+                    "۱. ابر مخفی باریک (فاصلهٔ تنکان از کیجون)",
+                    thin,
+                    String.format(
+                        Locale.US,
+                        "ضخامت نوار=%.2f ATR · سقف %.2f ATR",
+                        cloud.hiddenCloudThicknessAtr,
+                        HIDDEN_CLOUD_MAX_THICKNESS_ATR,
+                    ),
+                ),
+                Rule(
+                    2,
+                    "۲. جهت از ابر مخفی (قیمت بیرون نوار + ترتیب تنکان/کیجون)",
+                    outside && tkAligned,
+                    String.format(
+                        Locale.US,
+                        "نوار=%.2f..%.2f · کلوز=%.2f · TK=%s",
+                        cloud.hiddenCloudBottom,
+                        cloud.hiddenCloudTop,
+                        cloud.close,
+                        if (tenkanAboveKijun) "تنکان بالای کیجون" else "تنکان زیر کیجون",
+                    ),
+                ),
+                Rule(
+                    3,
+                    "۳. آزادی چیکو (خط تأخیر جدا از قیمت)",
+                    chikouFree,
+                    if (chikouFree) "چیکو آزاد است" else "چیکو به قیمت گذشته چسبیده",
+                ),
+                Rule(
+                    4,
+                    "۴. کراس برابری موجود و تازه (هم‌پوشانی تنکان/کیجون)",
+                    crossExists && crossFresh,
+                    if (crossExists) {
+                        String.format(
+                            Locale.US,
+                            "سطح برابری=%.2f · %d کندل هم‌پوشانی · %d کندل از پایان",
+                            cloud.equalCrossLevel,
+                            cloud.equalCrossBars,
+                            cloud.equalCrossBarsSinceEnd,
+                        )
+                    } else {
+                        "هم‌پوشانی کافی تنکان/کیجون یافت نشد"
+                    },
+                ),
+                Rule(
+                    5,
+                    "۵. وجود تاج (نصف اندازهٔ کراس، در جهت شکست)",
+                    crownAhead,
+                    if (crownExists) {
+                        String.format(
+                            Locale.US,
+                            "تاج=%.2f · فاصله از قیمت=%.2f",
+                            cloud.crownLevel,
+                            abs(cloud.crownLevel - cloud.close),
+                        )
+                    } else {
+                        "کراس برابری ساخته نشده، پس تاجی هم نیست"
+                    },
+                ),
+            ),
+        )
+    }
+
 
     /** آستانهٔ «برابری» تنکان و کیجون بر حسب ATR. */
     const val EQUAL_CROSS_TOLERANCE_ATR: Double = 0.06
