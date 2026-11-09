@@ -71,6 +71,10 @@ fun main(args: Array<String>) {
     val readyScores = ArrayList<Double>()
     val readyRr = ArrayList<Double>()
     val byBos = LinkedHashMap<String, Int>()
+    // شبیه‌سازی رو‌به‌جلو برای هر ورود مجاز: بدون این، «تعداد ورود» بی‌معناست.
+    data class Sim(val time: Long, val rNet: Double)
+    val sims = ArrayList<Sim>()
+    var lastSetupId: String? = null
 
     val start = minOf(trigger.size - 1, 300)
     // دو اشاره‌گر یک‌طرفه: برای هر کندل ماشه، آخرین کندل بسته‌شدهٔ ۱ساعته/۴ساعته.
@@ -100,7 +104,36 @@ fun main(args: Array<String>) {
             ),
         )
         evaluated++
-        if (decision.isTradeAllowed) allowed++
+        if (decision.isTradeAllowed) {
+            allowed++
+            val entry = decision.entry
+            val sl = decision.stopLoss
+            val tp = decision.takeProfit
+            if (entry != null && sl != null && tp != null && decision.setupId != lastSetupId) {
+                lastSetupId = decision.setupId
+                val risk = kotlin.math.abs(entry - sl)
+                if (risk > 1e-9) {
+                    val long = decision.action == com.aurum.edge.domain.SignalAction.BUY
+                    val tpR = kotlin.math.abs(tp - entry) / risk
+                    val costR = entry * 0.0022 / risk
+                    val horizon = if (triggerInterval == Interval.M5) 288 else 192
+                    val limit = minOf(trigger.size - 1, i + horizon)
+                    var rGross: Double? = null
+                    for (k in (i + 1)..limit) {
+                        val b = trigger[k]
+                        val hitSl = if (long) b.low <= sl else b.high >= sl
+                        val hitTp = if (long) b.high >= tp else b.low <= tp
+                        if (hitSl) { rGross = -1.0; break }
+                        if (hitTp) { rGross = tpR; break }
+                    }
+                    if (rGross == null) {
+                        val b = trigger[limit]
+                        rGross = (if (long) b.close - entry else entry - b.close) / risk
+                    }
+                    sims.add(Sim(t, rGross - costR))
+                }
+            }
+        }
         byStatus[decision.setupStatus.name] = (byStatus[decision.setupStatus.name] ?: 0) + 1
         byBos[decision.trace.bosStatusFa.take(44)] = (byBos[decision.trace.bosStatusFa.take(44)] ?: 0) + 1
         bySetup[decision.setupType.labelFa] = (bySetup[decision.setupType.labelFa] ?: 0) + 1
@@ -132,6 +165,24 @@ fun main(args: Array<String>) {
         println("  ستاپِ «آماده»=${sc.size} · امتیاز: میانه=${f1(sc[sc.size / 2])} بیشینه=${f1(sc.last())}" +
             (if (rr.isEmpty()) "" else " · R:R مؤثر: میانه=${f1(rr[rr.size / 2])} بیشینه=${f1(rr.last())}"))
         dump("گیت‌های سخت در لحظهٔ آماده", readyGates, 10)
+    }
+    if (sims.isNotEmpty()) {
+        fun stats(list: List<Sim>, tag: String) {
+            if (list.isEmpty()) { println("  $tag: خالی"); return }
+            val sorted = list.map { it.rNet }.sorted()
+            val wins = list.count { it.rNet > 0 }
+            val gw = list.filter { it.rNet > 0 }.sumOf { it.rNet }
+            val gl = -list.filter { it.rNet <= 0 }.sumOf { it.rNet }
+            println("  $tag: n=${list.size} · برد=${wins * 100 / list.size}٪ · " +
+                "انتظار میانگین=" + String.format(Locale.US, "%+.2f", list.map { it.rNet }.average()) +
+                "R · میانه=" + String.format(Locale.US, "%+.2f", sorted[sorted.size / 2]) +
+                "R · PF=" + String.format(Locale.US, "%.2f", if (gl > 1e-9) gw / gl else 99.0) +
+                " · مجموع=" + String.format(Locale.US, "%+.1fR", list.sumOf { it.rNet }))
+        }
+        stats(sims, "همهٔ ورودها (خالصِ هزینه)")
+        val mid = trigger.first().time + (trigger.last().time - trigger.first().time) / 2
+        stats(sims.filter { it.time <= mid }, "نیمهٔ اول (in-sample)")
+        stats(sims.filter { it.time > mid }, "نیمهٔ دوم (holdout)")
     }
     if (rrNear.isNotEmpty()) {
         val s = rrNear.sorted()

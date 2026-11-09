@@ -202,11 +202,31 @@ data class PeymanCryptoConfig(
      */
     val allowUnknownRegimeCompression: Boolean = false,
     /** سقف صدک ATR برای پذیرش «فشردگی» در رژیم نامشخص. */
-    val unknownCompressionMaxAtrPercentile: Double = 45.0,
+    val unknownCompressionMaxAtrPercentile: Double = 65.0,
     /** سقف نسبت دامنه برای پذیرش «فشردگی» در رژیم نامشخص. */
-    val unknownCompressionMaxRangeRatio: Double = 0.80,
+    val unknownCompressionMaxRangeRatio: Double = 0.85,
     /** سقف کارایی مسیر (ER14) برای پذیرش «فشردگی» در رژیم نامشخص. */
-    val unknownCompressionMaxEr14: Double = 0.40,
+    val unknownCompressionMaxEr14: Double = 0.45,
+    /**
+     * مسیر پویا: اگر مسیر سخت‌گیرِ BOS رد شد، «شکستِ محدودهٔ فشرده با کلوز»
+     * با آستانه‌های تطبیقی پذیرفته شود. پیش‌فرض `false` = رفتار قبلی.
+     */
+    val dynamicBreakoutEnabled: Boolean = false,
+    /** حداقل حجم نسبی در مسیر پویا (۱٫۰ = بدون وتوی حجم). */
+    val dynamicMinRvol: Double = 0.80,
+    /** حداقل بدنهٔ کندل شکست در مسیر پویا. */
+    val dynamicMinBodyRatio: Double = 0.15,
+    /** حداکثر پهنای محدودهٔ قبل از شکست برحسب ATR (پیش‌شرط «رنج بودن»). */
+    val rangeBreakoutMaxRangeAtr: Double = 6.0,
+    /**
+     * ابطال ساختاری: شکست فقط وقتی «ناموفق» است که قیمت به این کسر از محدودهٔ
+     * قبلِ شکست برگردد (۰٫۵ = وسط رنج). پیش‌فرض `false` = قاعدهٔ قدیم.
+     */
+    val useStructuralRetestInvalidation: Boolean = false,
+    /** عمقِ برگشت به داخل رنج که «شکست ناموفق» حساب می‌شود (۰٫۵ = میانهٔ رنج). */
+    val retestInvalidationRangeFraction: Double = 0.50,
+    /** رواداری کلوزِ کندل بازآزمایی نسبت به سطح، برحسب ATR (۰ = بدون رواداری). */
+    val retestCloseToleranceAtr: Double = 0.0,
 ) {
     val isActive: Boolean get() = mode != PeymanExecutionMode.DISABLED
     val canTrade: Boolean get() = mode == PeymanExecutionMode.PAPER_ENABLED
@@ -247,6 +267,13 @@ data class PeymanCryptoConfig(
                 minRvolReversal = 1.40,
                 compressionMinRvol = 1.25,
                 allowUnknownRegimeCompression = true,
+                dynamicBreakoutEnabled = true,
+                rangeBreakoutMaxRangeAtr = 6.0,
+                dynamicMinRvol = 0.80,
+                dynamicMinBodyRatio = 0.15,
+                useStructuralRetestInvalidation = true,
+                retestInvalidationRangeFraction = 0.50,
+                retestCloseToleranceAtr = 0.25,
             )
         }
     }

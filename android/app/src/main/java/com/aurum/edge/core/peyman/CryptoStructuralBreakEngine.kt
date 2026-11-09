@@ -127,6 +127,7 @@ object CryptoStructuralBreakEngine {
         var failureReason: String? = null
         var failureStatus = PeymanSetupStatus.NONE
 
+        var relaxedUsed = false
         var back = 0
         while (back < maxScan && breakoutIdx < 0) {
             val j = i - back
@@ -198,6 +199,50 @@ object CryptoStructuralBreakEngine {
             breakoutAtr = barAtr
         }
 
+        // ۲-ب) مسیر پویا: اگر مسیر سخت‌گیر رد شد، «شکستِ محدودهٔ فشرده با کلوز»
+        // با آستانهٔ تطبیقی پذیرفته می‌شود. منطق: وقتی بازار رنج است کندل شکست
+        // معمولاً بدنه/CLV/حجم کامل ندارد؛ رد کردنش یعنی از دست دادن کل حرکت.
+        // شرط‌های اجباری: سطح از کندل‌های بستهٔ قبل، شکست فقط با کلوز، تنگیِ
+        // محدودهٔ قبل (پیش‌شرط رنج بودن) و هم‌جهتی بدنه. کیفیت کندل → امتیاز.
+        if (breakoutIdx < 0 && config.dynamicBreakoutEnabled) {
+            var back2 = 0
+            while (back2 < maxScan && breakoutIdx < 0) {
+                val j = i - back2
+                if (j < lookback + 1) break
+                val lvl = levelAt(j)
+                if (lvl.isNaN()) break
+                val bar = closed[j]
+                val barAtr = PeymanMath.atr(closed, j)
+                if (!PeymanMath.isFinitePositive(barAtr)) { back2++; continue }
+                val buffer = max(config.breakoutBufferAtr * barAtr, noiseFloorPrice)
+                val beyond = if (isLong) bar.close > lvl + buffer else bar.close < lvl - buffer
+                if (!beyond) { back2++; continue }
+                var hi = Double.NEGATIVE_INFINITY
+                var lo = Double.POSITIVE_INFINITY
+                val from = max(0, j - lookback)
+                for (k in from until j) {
+                    if (closed[k].high > hi) hi = closed[k].high
+                    if (closed[k].low < lo) lo = closed[k].low
+                }
+                val priorRange = hi - lo
+                if (!PeymanMath.isFinitePositive(priorRange)) { back2++; continue }
+                if (priorRange / barAtr > config.rangeBreakoutMaxRangeAtr) { back2++; continue }
+                val body = PeymanMath.bodyRatio(bar)
+                val dirOk = if (isLong) PeymanMath.bullish(bar) else PeymanMath.bearish(bar)
+                if (!dirOk || body < config.dynamicMinBodyRatio) { back2++; continue }
+                val rvol2 = PeymanMath.relativeVolume(closed, j)
+                if (rvol2 != null && rvol2 < config.dynamicMinRvol) { back2++; continue }
+                breakoutIdx = j
+                breakoutLevel = lvl
+                breakoutAtr = barAtr
+                relaxedUsed = true
+            }
+            if (breakoutIdx < 0) {
+                failureReason = (failureReason ?: "شکست معتبری رخ نداده است.") +
+                    " (مسیر پویا هم شکستِ محدودهٔ فشرده پیدا نکرد.)"
+            }
+        }
+
         if (breakoutIdx < 0) {
             return StructuralBreakResult.none(direction, failureReason ?: "شکست معتبری رخ نداده است.", failureStatus)
         }
@@ -235,7 +280,7 @@ object CryptoStructuralBreakEngine {
             clv = PeymanMath.clv(breakoutBar),
             barsSinceBreakout = i - breakoutIdx,
             setupId = setupId,
-            bosNoteFa = "BOS با کلوز تأیید شد.",
+            bosNoteFa = if (relaxedUsed) "BOS پویا: کلوز بیرون محدودهٔ فشرده تأیید شد." else "BOS با کلوز تأیید شد.",
             reasonsFa = emptyList(),
         )
 
@@ -270,9 +315,37 @@ object CryptoStructuralBreakEngine {
             )
         }
 
+        // مرزِ «شکست واقعاً ناموفق»:
+        // • حالت کلاسیک: هر کلوز عقب‌تر از سطح اجرا ⇒ ابطال (سخت‌گیر؛ در عمل
+        //   هر بازآزمایی معمولی هم ستاپ را می‌کشت).
+        // • حالت ساختاری (پویا): تا وقتی قیمت به عمقِ `retestInvalidationRangeFraction`
+        //   از محدودهٔ قبلِ شکست برنگشته، شکست زنده است. بازآزمایی یعنی «برگشتن به
+        //   سطح»، نه «سقوط به وسط رنج»؛ یکی‌کردن این دو، همان دیواری بود که ورودها را
+        //   به صفر می‌رساند.
+        var priorHi = Double.NEGATIVE_INFINITY
+        var priorLo = Double.POSITIVE_INFINITY
+        if (config.useStructuralRetestInvalidation) {
+            val from = max(0, breakoutIdx - lookback)
+            for (k in from until breakoutIdx) {
+                if (closed[k].high > priorHi) priorHi = closed[k].high
+                if (closed[k].low < priorLo) priorLo = closed[k].low
+            }
+        }
+        val priorRange = priorHi - priorLo
+        val hasPriorRange = config.useStructuralRetestInvalidation && PeymanMath.isFinitePositive(priorRange)
+        val structuralFailLevel = if (!hasPriorRange) {
+            Double.NaN
+        } else if (isLong) {
+            priorHi - config.retestInvalidationRangeFraction * priorRange
+        } else {
+            priorLo + config.retestInvalidationRangeFraction * priorRange
+        }
+        val deepLimit = if (hasPriorRange) structuralFailLevel
+        else if (isLong) execLevel - buffer else execLevel + buffer
+
         // بسته‌شدن عمیق داخل ساختار شکسته ⇒ ابطال.
         for (k in breakoutIdx + 1..i) {
-            val deep = if (isLong) closed[k].close < execLevel - buffer else closed[k].close > execLevel + buffer
+            val deep = if (isLong) closed[k].close < deepLimit else closed[k].close > deepLimit
             if (deep) {
                 return base.copy(
                     status = PeymanSetupStatus.INVALIDATED,
@@ -287,14 +360,26 @@ object CryptoStructuralBreakEngine {
         val touchBand = config.retestTouchAtrFraction * breakoutAtr
         val touched = if (isLong) retest.low <= execLevel + touchBand
         else retest.high >= execLevel - touchBand
-        val closedBack = if (isLong) retest.close >= execLevel else retest.close <= execLevel
+        // در حالت ساختاری، «برگشت به آن‌طرف سطح» با خودِ سطح سنجیده می‌شود، نه با
+        // سطح اجرا + بافر؛ وگرنه یک بافرِ کوچک همان بازآزماییِ سالم را رد می‌کند.
+        val backLevel = if (hasPriorRange) breakoutLevel else execLevel
+        // رواداریِ کلوز نسبت به سطح: «برگشتن به آن‌طرف سطح» با یک حاشیهٔ کوچک
+        // (کسری از ATR) سنجیده می‌شود تا لمسِ سالمِ سطح با یک کلوزِ چند صدم
+        // پایین‌تر رد نشود. پیش‌فرض ۰ = رفتار قبلی.
+        val closeTol = config.retestCloseToleranceAtr * breakoutAtr
+        val backLevelTol = if (isLong) backLevel - closeTol else backLevel + closeTol
+        val closedBack = if (isLong) retest.close >= backLevelTol else retest.close <= backLevelTol
         val bodyOk = PeymanMath.bodyRatio(retest) >= config.minRetestBodyRatio
         val dirOk = if (isLong) PeymanMath.bullish(retest) else PeymanMath.bearish(retest)
         val retestRvol = PeymanMath.relativeVolume(closed, i)
         val volOk = retestRvol != null && retestRvol >= config.minRetestVolumeRatio
         val volLessThanBreakout = !config.requireRetestVolumeBelowBreakout ||
             retestRvol == null || rvolAtBreakout == null || retestRvol < rvolAtBreakout
-        val invertedLevel = if (isLong) retest.close < breakoutLevel else retest.close > breakoutLevel
+        val invertedLevel = if (hasPriorRange) {
+            if (isLong) retest.close < deepLimit else retest.close > deepLimit
+        } else {
+            if (isLong) retest.close < breakoutLevel else retest.close > breakoutLevel
+        }
 
         return when {
             invertedLevel -> base.copy(

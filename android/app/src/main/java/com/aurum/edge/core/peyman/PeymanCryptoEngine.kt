@@ -115,10 +115,21 @@ object PeymanCryptoEngine {
         }
 
         // ۴) انتخاب ستاپ: اگر کندل قبلی در فشردگی بوده، ستاپ «فشردگی → انبساط» است.
-        val setup = if (priorCompression) {
+        val baseSetup = if (priorCompression) {
             PeymanSetupType.COMPRESSION_EXPANSION
         } else {
             selectSetup(regime.regime, cfg, regime.atrPercentile, regime.rangeRatio, regime.efficiencyRatio14)
+        }
+        // انتخاب ستاپ «ساختاری» به‌جای «برچسبی»: اگر رژیم اسمی برای معامله نداشت
+        // ولی بازار واقعاً در حال فشرده‌شدن است، ستاپ فشردگی→انبساط مجاز می‌شود.
+        // این همان نکتهٔ «فرصت‌سوزی» است: برچسبِ رژیم نباید جای ساختار تصمیم بگیرد.
+        val setup = if (baseSetup == PeymanSetupType.NONE && cfg.dynamicBreakoutEnabled) {
+            val coiled = regime.atrPercentile <= cfg.unknownCompressionMaxAtrPercentile &&
+                regime.rangeRatio <= cfg.unknownCompressionMaxRangeRatio &&
+                regime.efficiencyRatio14 <= cfg.unknownCompressionMaxEr14
+            if (coiled) PeymanSetupType.COMPRESSION_EXPANSION else baseSetup
+        } else {
+            baseSetup
         }
         if (setup == PeymanSetupType.NONE) {
             return reject(
@@ -146,7 +157,7 @@ object PeymanCryptoEngine {
         val noiseFloor = 0.05 * atr
         val strategyClosed = PeymanMath.closed(input.strategyBars)
         val strategyAtr = PeymanMath.atr(strategyClosed, strategyClosed.size - 1)
-        val breakResult = CryptoStructuralBreakEngine.detect(
+        var breakResult = CryptoStructuralBreakEngine.detect(
             bars = triggerClosed,
             symbol = symbol,
             rulesVersion = cfg.rulesVersion,
@@ -158,6 +169,28 @@ object PeymanCryptoEngine {
             noiseFloorPrice = noiseFloor,
             referenceAtr = strategyAtr,
         )
+        // اگر جهتِ شمارش نئوویو شکست را تأیید نکرد، جهت مخالف هم بررسی می‌شود.
+        // دلیل: شمارش یک «فرض» است و بازار می‌تواند برخلافش بشکند؛ رد کردنِ بی‌قیدِ
+        // جهت مخالف یعنی از دست دادن همان حرکتی که «رنج قرار است تمام شود».
+        // تمرکز روی لحظهٔ خروج از رنجیمی‌ماند: هر دو جهت با همان گیت‌های سخت
+        // (کلوز بیرون سطح، تنگیِ محدوده، بازآزمایی) سنجیده می‌شوند.
+        if (cfg.dynamicBreakoutEnabled && !breakResult.isEntryCandidate) {
+            val opposite = if (primary.direction == SignalAction.BUY) SignalAction.SELL else SignalAction.BUY
+            val alt = CryptoStructuralBreakEngine.detect(
+                bars = triggerClosed,
+                symbol = symbol,
+                rulesVersion = cfg.rulesVersion,
+                intervalLabel = input.triggerInterval.label,
+                direction = opposite,
+                config = cfg,
+                minRvol = minRvol,
+                minBodyRatio = minBody,
+                noiseFloorPrice = noiseFloor,
+                referenceAtr = strategyAtr,
+            )
+            if (alt.isEntryCandidate) breakResult = alt
+        }
+        val tradeDirection = breakResult.direction
 
         if (!breakResult.isEntryCandidate) {
             val status = when (breakResult.status) {
@@ -178,7 +211,7 @@ object PeymanCryptoEngine {
 
         // ۶) زمینهٔ BTC برای آلت‌ها
         val isAlt = !symbol.startsWith("BTC")
-        val btcGate = BtcContextGate.evaluate(symbol, isAlt, input.btcContext, primary.direction, input.nowMillis)
+        val btcGate = BtcContextGate.evaluate(symbol, isAlt, input.btcContext, tradeDirection, input.nowMillis)
         if (!btcGate.passed) {
             return reject(
                 input, btcGate.reasonFa, setup = setup, status = PeymanSetupStatus.BLOCKED,
@@ -194,7 +227,7 @@ object PeymanCryptoEngine {
             regime = regime, health = health, ensemble = ensemble, breakResult = breakResult,
         )
         val buffer = max(cfg.breakoutBufferAtr * atr, noiseFloor)
-        val candidateStop = if (primary.direction == SignalAction.BUY) {
+        val candidateStop = if (tradeDirection == SignalAction.BUY) {
             val structuralStop = structural - buffer
             val barStop = if (breakResult.entryMode == PeymanEntryMode.RETEST_CONFIRMED) {
                 minOf(lastBar.low, breakResult.breakoutLevel ?: structural) - 0.10 * atr
@@ -231,10 +264,10 @@ object PeymanCryptoEngine {
         var plan: com.aurum.edge.core.GuardedTradePlan? = null
         var effectiveRr: Double? = null
         for (rrStep in listOf(desiredRr, desiredRr + 0.4, TradePlanGuard.MAX_RR)) {
-            val target = if (primary.direction == SignalAction.BUY) entry + rrStep * risk else entry - rrStep * risk
+            val target = if (tradeDirection == SignalAction.BUY) entry + rrStep * risk else entry - rrStep * risk
             val attempt = TradePlanGuard.sanitizePlan(
                 symbol = symbol,
-                action = primary.direction,
+                action = tradeDirection,
                 entryPrice = entry,
                 candidateStopLoss = candidateStop,
                 candidateTakeProfit = target,
@@ -267,7 +300,7 @@ object PeymanCryptoEngine {
         val minRr = if (isReversal) cfg.minRiskRewardReversal else cfg.minRiskReward
         val quality = CryptoExecutionQualityGate.evaluate(
             symbol = symbol,
-            direction = primary.direction,
+            direction = tradeDirection,
             entry = acceptedPlan.entryPrice,
             stopLoss = acceptedPlan.stopLoss,
             takeProfit = acceptedPlan.takeProfit,
@@ -288,7 +321,7 @@ object PeymanCryptoEngine {
 
         // ۹) ریسک پرتفوی و خوشه
         val portfolio = CryptoPortfolioRiskGate.evaluate(
-            direction = primary.direction,
+            direction = tradeDirection,
             openPositions = input.openPositions,
             config = cfg,
             todayLossPct = input.todayLossPct,
@@ -356,7 +389,7 @@ object PeymanCryptoEngine {
             finalFa = if (ensembleConflictNote.isBlank()) decisionFa else "$decisionFa ($ensembleConflictNote)",
         )
         return PeymanCryptoDecision(
-            action = if (allowed) primary.direction else SignalAction.NO_TRADE,
+            action = if (allowed) tradeDirection else SignalAction.NO_TRADE,
             readinessFa = decisionFa,
             setupType = setup,
             setupStatus = breakResult.status,
