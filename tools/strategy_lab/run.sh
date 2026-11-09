@@ -81,10 +81,13 @@ echo "[lab] کامپایل آزمایشگاه…"
 
 echo "[lab] اجرا (bars=$BARS seed=$SEED)…"
 MAIN="LabKt"
+EXTRA=("${@:3}")
 if [[ "${3:-}" == "probe" ]]; then MAIN="ProbeKt"; fi
 if [[ "${3:-}" == "tf" ]]; then MAIN="TfKt"; fi
 if [[ "${3:-}" == "stop" ]]; then MAIN="StopKt"; fi
 if [[ "${3:-}" == "sym" ]]; then MAIN="SymKt"; fi
 if [[ "${3:-}" == "robust" ]]; then MAIN="RobustKt"; fi
 if [[ "${3:-}" == "btc" ]]; then MAIN="BtcKt"; fi
-"$JAVA_HOME/bin/java" -Dfile.encoding=UTF-8 -cp "$WORK/out:$STDLIB" "$MAIN" "$BARS" "$SEED" "${@:3}"
+# حالت «csv»: مسیر فایل‌ها از آرگومان چهارم شروع می‌شود (سوم خودِ کلیدواژه است).
+if [[ "${3:-}" == "csv" ]]; then MAIN="CsvLabKt"; EXTRA=("${@:4}"); fi
+"$JAVA_HOME/bin/java" -Dfile.encoding=UTF-8 -cp "$WORK/out:$STDLIB" "$MAIN" "$BARS" "$SEED" "${EXTRA[@]}"
