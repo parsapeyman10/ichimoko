@@ -398,6 +398,10 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 ToggleRow("لایهٔ هیدن کراس در بیس فعال باشد", settings.includeHiddenCrossLayer) { on ->
                     vm.updateSettings { s -> s.copy(includeHiddenCrossLayer = on) }
                 }
+                // ماشهٔ «فشردگی → انبساط» فقط روی «بیس». خاموش = خروجی بیس مو‌به‌مو مثل قبل.
+                ToggleRow("ماشهٔ فشردگی → انبساط (بیس)", settings.compressionExpansion) { on ->
+                    vm.updateSettings { s -> s.copy(compressionExpansion = on) }
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "بک‌تست روی ${fmtCount(endIndex)} کندلِ تا این نقطه اجرا می‌شود؛ کندل‌های آیندهٔ " +

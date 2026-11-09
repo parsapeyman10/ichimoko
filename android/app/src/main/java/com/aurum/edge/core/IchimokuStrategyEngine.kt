@@ -659,6 +659,14 @@ data class BaseStrategyConfig(
      * A/B در بک‌تست و تنظیمات استراتژی است.
      */
     val includeHiddenCrossLayer: Boolean = true,
+    /**
+     * ماشهٔ «فشردگی → انبساط» — فقط برای استراتژی بیس.
+     *
+     * پیش‌فرض **خاموش** است: با خاموش‌بودن هیچ محاسبه‌ای انجام نمی‌شود و خروجی موتور
+     * بیت‌به‌بیت مثل قبل است. این کلید همان Feature Flag لازم برای مقایسهٔ A/B است.
+     */
+    val compressionExpansion: CompressionExpansionEngine.Config =
+        CompressionExpansionEngine.Config(),
     /** لایهٔ اختیاری نئوویو (NeoWave). پیش‌فرض خاموش ⇒ خروجی موتور بدون تغییر. */
     val neoWaveEnabled: Boolean = false,
     /** حداقل قواعد نیلی که باید پاس شود تا شمارش «معتبر» شمرده شود. */
@@ -1037,6 +1045,8 @@ enum class StrategyTriggerType(val titleFa: String) {
     BTC_52_STRUCTURE_BREAK("شکست/بازآزمایی ساختار ۵۲ کندلی بیت‌کوین"),
     PARSA_52_LINE_TURN("چرخش Senkou A پس از فلت ۱۸+ کندلی SSB و کراس Tenkan/Kijun"),
     HIDDEN_CROSS("کراس برابری تنکان/کیجون هم‌جهت با ابر مخفی و شکست سطح تاج"),
+    COMPRESSION_EXPANSION_BREAKOUT("شکست انبساطی ناحیهٔ فشردگی (ورود مستقیم روی شکست)"),
+    COMPRESSION_EXPANSION_RETEST("بازآزمایی موفق شکست ناحیهٔ فشردگی"),
     NONE("در انتظار ماشهٔ بسته‌شده"),
 }
 
@@ -1277,6 +1287,13 @@ data class StrategyEvaluationReport(
     val readiness: StrategyReadinessState,
     val action: SignalAction,
     val triggerType: StrategyTriggerType,
+    /**
+     * تحلیل ماشهٔ «فشردگی → انبساط».
+     *
+     * `null` یعنی این ماشه برای این مدل/تنظیمات خاموش است. عمداً جدا از `conditions`
+     * نگه داشته می‌شود تا شرط‌های مستثنا با `passed=true` جعلی نمایش داده نشوند.
+     */
+    val compressionExpansion: CompressionExpansionEngine.Analysis? = null,
     val confidence: Double,
     val livePrice: Double,
     val suggestedEntry: Double?,
@@ -3482,6 +3499,10 @@ object IchimokuStrategyEngine {
         val isBtc52Model = activeModel == BitcoinStrategyModel.BTC_52_CANDLE_REGIME
         val isParsaModel = activeModel == BitcoinStrategyModel.PARSA_52_LINE_TURN
         val isHiddenCrossModel = activeModel == BitcoinStrategyModel.HIDDEN_CROSS
+        // «استراتژی بیس» = همان چیزی که نه روش مستقل ۱۷/۱۸/۱۹ است و نه پیمان.
+        // ماشهٔ فشردگی–انبساط فقط برای همین مدل مجاز است و به بقیه سرایت نمی‌کند.
+        val isBaseStrategyModel = !isBtc52Model && !isParsaModel &&
+            !isHiddenCrossModel && !activeModel.isDrivePdfStrategy
         val long52Context = trigSnap.regressionSlope52AtrPerBar >= 0.025 &&
             trigSnap.closeChange52Atr >= 1.0 && trigSnap.close >= (trigSnap.prior52High + trigSnap.prior52Low) / 2.0
         val short52Context = trigSnap.regressionSlope52AtrPerBar <= -0.025 &&
@@ -4186,6 +4207,7 @@ object IchimokuStrategyEngine {
             round2(computedOptimalRr.coerceIn(1.50, 3.00))
         }
         val effectiveOptimalRr = round2(max(computedOptimalRr, rr).coerceIn(1.50, 3.00))
+
         val obstacleClear = if (nearestObstacle == null) {
             true
         } else {
@@ -4303,6 +4325,63 @@ object IchimokuStrategyEngine {
             round2(sniperHigh).toString(),
             sniperEntryScore,
         )
+
+        // ── ماشهٔ «فشردگی → انبساط» (فقط بیس و فقط با Feature Flag) ─────────────
+        // چرا این‌جا: تحلیل برای تصمیم ورود به `planUsable` و `R:R` نیاز دارد و آن‌ها
+        // فقط بعد از `TradePlanGuard` معلوم می‌شوند. پیش از این نقطه هیچ محاسبه‌ای
+        // انجام نمی‌شود، پس با `compressionExpansion.enabled = false` هزینهٔ صفر دارد.
+        val compressionAnalysis: CompressionExpansionEngine.Analysis? = if (
+            isBaseStrategyModel && effectiveConfig.compressionExpansion.enabled
+        ) {
+            val spaceToObstacleR = nearestObstacle?.let {
+                min(abs(it - livePrice), abs(it - sniperOptimal)) /
+                    finalStopDist.coerceAtLeast(1e-8)
+            }
+            CompressionExpansionEngine.analyze(
+                closedTriggerBars = closedTriggerBars,
+                snapshot = trigSnap,
+                config = effectiveConfig.compressionExpansion,
+                isLong = isDirectionalLong,
+                gates = CompressionExpansionEngine.Gates(
+                    higherTfOpposes = macroSnap != null && if (isDirectionalLong) {
+                        macroSnap.isPriceBelowKumo
+                    } else {
+                        macroSnap.isPriceAboveKumo
+                    },
+                    chikouBlocked = if (isDirectionalLong) {
+                        !trigSnap.chikouBullishOpenSpace
+                    } else {
+                        !trigSnap.chikouBearishOpenSpace
+                    },
+                    futureKumoOpposes = if (isDirectionalLong) {
+                        trigSnap.isFutureKumoBearish
+                    } else {
+                        trigSnap.isFutureKumoBullish
+                    },
+                    lateExhaustion = trendPhase == TrendPhase.LATE_EXHAUSTION,
+                    spaceToObstacleR = spaceToObstacleR,
+                    // R:R پلن ایمن‌شده — هزینه‌ها در همان لایه لحاظ شده‌اند.
+                    riskRewardAfterCosts = rr,
+                    planUsable = guardedPlan.isUsable,
+                ),
+                noiseFloorPrice = 0.0,
+                symbol = normalizedSymbol,
+                strategyId = effectiveId,
+                triggerIntervalLabel = config.triggerInterval.label,
+            )
+        } else {
+            null
+        }
+        // اقتصاد اجرا (شرط ۱۷) هرگز بایپس نمی‌شود؛ اگر هزینه ۱R را بخورد، ورود ممنوع است.
+        val compressionEntry = compressionAnalysis?.isEntryAllowed == true && cond17Passed
+        val compressionTrigger = when {
+            !compressionEntry -> null
+            compressionAnalysis?.entryMode == CompressionExpansionEngine.EntryMode.RETEST_CONFIRMED ->
+                StrategyTriggerType.COMPRESSION_EXPANSION_RETEST
+            else -> StrategyTriggerType.COMPRESSION_EXPANSION_BREAKOUT
+        }
+        // اولویت: اگر ماشهٔ فشردگی معتبر است همان انتخاب می‌شود، وگرنه ماشهٔ قبلی دست‌نخورده.
+        val effectiveTriggerType = compressionTrigger ?: triggerType
 
         val baseSixteenConditions = listOf(
             StrategyConditionCheck(1, "۱. رژیم کوموی ۳ تایم‌فریم (${config.macroInterval.label}/${config.strategyInterval.label}/${config.triggerInterval.label})", cond1Passed, cond1Detail),
@@ -4458,7 +4537,7 @@ object IchimokuStrategyEngine {
         }
         val kijunGatePassed = (kijunGate?.passed ?: true) && (kijunStopRule?.blocked != true)
         val firstFifteenPassed = modelCoreConditions.filter { it.index != 16 }.all { it.passed }
-        val triggerFired = triggerType != StrategyTriggerType.NONE
+        val triggerFired = effectiveTriggerType != StrategyTriggerType.NONE
         val passedCount = conditions.count { it.passed }
         val phaseBonus = when (trendPhase) {
             TrendPhase.GENESIS -> 8.0
@@ -4555,6 +4634,9 @@ object IchimokuStrategyEngine {
             )
         val baseReadiness = when {
             !peymanWaveConfirmed -> StrategyReadinessState.BLOCKED
+            // مسیر مستقل «فشردگی → انبساط»؛ همهٔ وتوها و اقتصاد اجرا از پیش سنجیده شده‌اند.
+            compressionEntry && kijunGatePassed && isLong -> StrategyReadinessState.SIGNAL_BUY
+            compressionEntry && kijunGatePassed && !isLong -> StrategyReadinessState.SIGNAL_SELL
             neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) -> StrategyReadinessState.BLOCKED
             // مسیر کلاسیک: هر ۱۷ شرط هم‌زمان (سخت‌گیرترین حالت، هنوز معتبر است).
             allSixteenPassed && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
@@ -4704,7 +4786,8 @@ object IchimokuStrategyEngine {
             triggerInterval = config.triggerInterval,
             readiness = readiness,
             action = finalAction,
-            triggerType = triggerType,
+            triggerType = effectiveTriggerType,
+            compressionExpansion = compressionAnalysis,
             confidence = gatedConfidence,
             livePrice = round2(livePrice),
             suggestedEntry = sniperOptimal,

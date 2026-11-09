@@ -123,6 +123,13 @@ class BacktestViewModel(
         val maxBars: Int = 0,
         /** لایهٔ هیدن کراس در «بیس» فعال باشد (برای مقایسهٔ A/B). */
         val includeHiddenCrossLayer: Boolean = true,
+        /**
+         * ماشهٔ «فشردگی → انبساط» برای «بیس» فعال باشد.
+         *
+         * پیش‌فرض خاموش است تا خروجی بیس دقیقاً مثل قبل بماند؛ روشن‌کردنش مسیر تازهٔ
+         * ورود (شکست تأییدشده / بازآزمایی تأییدشده) را فعال می‌کند.
+         */
+        val compressionExpansion: Boolean = false,
     )
 
     private val _settings = MutableStateFlow(Settings())
@@ -308,6 +315,7 @@ class BacktestViewModel(
                 optimisticSameBarFill = s.optimisticSameBarFill,
                 maxBars = s.maxBars,
                 includeHiddenCrossLayer = s.includeHiddenCrossLayer,
+                compressionExpansionEnabled = s.compressionExpansion,
                 captureEntryReports = true,
                 // ── گیت عصبی = همان کلید «مانع» در بخش هوش عصبی ──────────────────
                 // پیش از این، بک‌تست هیچ‌گاه گیت را نمی‌پرسید؛ بنابراین روشن‌وخاموش

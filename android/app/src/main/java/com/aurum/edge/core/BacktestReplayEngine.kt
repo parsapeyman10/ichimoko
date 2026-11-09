@@ -84,6 +84,24 @@ object BacktestReplayEngine {
          * ساخته و از `BacktestViewModel` اینجا تزریق می‌شود.
          */
         val neuralGate: NeuralGatePolicy.EntryGate? = null,
+        /**
+         * فعال‌سازی ماشهٔ «فشردگی → انبساط» برای استراتژی بیس.
+         *
+         * پیش‌فرض `false` است و با آن، نتیجهٔ بک‌تست بیت‌به‌بیت مثل قبل می‌ماند (این ادعا
+         * با مقایسهٔ تک‌به‌تک معاملات سنجیده شده است).
+         */
+        val compressionExpansionEnabled: Boolean = false,
+        val compressionExpansionConfig: CompressionExpansionEngine.Config =
+            CompressionExpansionEngine.Config(),
+        /**
+         * کندل‌های تایم‌فریم ماکرو که کاربر جداگانه داده است.
+         *
+         * اگر خالی باشد، موتور مثل قبل همان سری ماشه را resample می‌کند. اگر پر باشد،
+         * **همان دادهٔ کاربر** استفاده می‌شود و هیچ بازسازی مصنوعی انجام نمی‌شود.
+         */
+        val macroCandlesOverride: List<com.aurum.edge.domain.Candle> = emptyList(),
+        /** کندل‌های تایم‌فریم استراتژی که کاربر جداگانه داده است. */
+        val strategyCandlesOverride: List<com.aurum.edge.domain.Candle> = emptyList(),
     )
 
     /** یک معاملهٔ بک‌تست. جدا از `PaperTrade` نگه داشته می‌شود تا هیچ‌جا با ژورنال قاطی نشود. */
@@ -266,8 +284,20 @@ object BacktestReplayEngine {
             "کندل کافی نیست: ${source.size} کندل خوانده شد ولی حداقل ${config.warmupBars} لازم است."
         }
         val ordered = source.sortedBy { it.time }
-        val macroBars = BacktestSeries.resample(ordered, config.macroInterval)
-        val strategyBars = BacktestSeries.resample(ordered, config.strategyInterval)
+        // ── دادهٔ چند تایم‌فریمی ────────────────────────────────────────────────
+        // اگر کاربر دادهٔ ۴ساعته/۱ساعتهٔ واقعی داده باشد، همان استفاده می‌شود؛ در غیر این
+        // صورت (رفتار قبلی) سری ماشه resample می‌شود. دلیل: resample از ۱۵m نمی‌تواند
+        // های/لوهای واقعی تایم بالاتر را بسازد و سایه‌های همان تایم را از دست می‌دهد.
+        val macroBars = if (config.macroCandlesOverride.isNotEmpty()) {
+            config.macroCandlesOverride.sortedBy { it.time }
+        } else {
+            BacktestSeries.resample(ordered, config.macroInterval)
+        }
+        val strategyBars = if (config.strategyCandlesOverride.isNotEmpty()) {
+            config.strategyCandlesOverride.sortedBy { it.time }
+        } else {
+            BacktestSeries.resample(ordered, config.strategyInterval)
+        }
         val triggerBars = BacktestSeries.resample(ordered, config.triggerInterval)
 
         // دادهٔ بک‌تست تغییرناپذیر است، پس اسنپ‌شات‌های یک کندل را می‌توان بین استراتژی‌ها
@@ -280,6 +310,11 @@ object BacktestReplayEngine {
             triggerIntervalLabel = config.triggerInterval.label,
             enablePreserveMode = config.usePreserveMode,
             includeHiddenCrossLayer = config.includeHiddenCrossLayer,
+            compressionExpansion = if (config.compressionExpansionEnabled) {
+                config.compressionExpansionConfig.copy(enabled = true)
+            } else {
+                CompressionExpansionEngine.Config()
+            },
         )
 
         val models: List<BitcoinStrategyModel> = if (config.runAllStrategies) {
