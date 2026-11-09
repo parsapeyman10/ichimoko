@@ -2,6 +2,7 @@ package com.aurum.edge.core
 
 import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.SignalAction
+import kotlinx.serialization.Serializable
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
@@ -42,7 +43,11 @@ object CompressionExpansionEngine {
      *
      * پیش‌فرض `enabled = false` است تا رفتار هیچ کاربری بدون درخواست صریح عوض نشود و
      * مقایسهٔ A/B (روشن/خاموش روی دادهٔ یکسان) ممکن باشد.
+     *
+     * `@Serializable` لازم است چون `BaseStrategyConfig` سریال می‌شود و هر فیلد تازه باید
+     * سریالایزر داشته باشد؛ نبودِ آن کامپایل اندروید را می‌شکند (خطای ۶۶۸ در CI).
      */
+    @Serializable
     data class Config(
         val enabled: Boolean = false,
         val lookbackBars: Int = 20,

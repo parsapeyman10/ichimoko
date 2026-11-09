@@ -60,7 +60,10 @@ FILES=(
 )
 for f in "${FILES[@]}"; do
   mkdir -p "$WORK/shadow/$(dirname "$f")"
-  sed -e 's/^import kotlinx\.serialization\.Serializable$//' -e 's/^@Serializable$//' "$SRC/$f" > "$WORK/shadow/$f"
+  # تو رفتگی هم پاک می‌شود: انوتیشن روی فیلد/کلاس تودرتو با فاصله می‌آید و اگر بماند،
+  # کامپایل آزمایشگاه با «internal typealias Serializable» می‌شکند.
+  sed -e 's/^[[:space:]]*import kotlinx\.serialization\.Serializable$//' \
+      -e 's/^[[:space:]]*@Serializable$//' "$SRC/$f" > "$WORK/shadow/$f"
 done
 # WatchCatalog (وابستگی دادهٔ اپ) با یک فهرست کوچک جایگزین می‌شود.
 sed -i 's|com\.aurum\.edge\.data\.WatchCatalog\.scannerSymbols|listOf("BTC/USDT")|' "$WORK/shadow/core/Models.kt"
