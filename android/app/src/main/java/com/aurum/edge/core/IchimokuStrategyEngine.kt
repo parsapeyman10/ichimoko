@@ -677,6 +677,16 @@ data class BaseStrategyConfig(
      * پیش‌فرض `DISABLED` است: هیچ ارزیابی و هیچ تغییری در رفتار قبلی رخ نمی‌دهد.
      */
     val peymanCrypto: PeymanCryptoConfig = PeymanCryptoConfig(),
+    /**
+     * روی نمادهای رمزارز فقط موتور «پیمان کریپتو» اجازهٔ ورود دارد.
+     *
+     * تصمیم صریح کاربر: «فقط پیمان کریپتو باید روی نمادهای کریپتو کار کند.» با `true`
+     * (پیش‌فرض) هیچ استراتژی دیگری — بیس، مدل‌های تکی، ترکیب‌ها — روی رمزارز ورود نمی‌سازد
+     * و تنها مسیر مجاز، تصمیم `isTradeAllowed` موتور پیمان است. اگر پیمان خاموش باشد
+     * (پیش‌فرض `DISABLED`)، رمزارز هیچ ورودی ندارد؛ این عمدی است، نه باگ.
+     * برای آزمون‌های رفتاریِ قدیمی می‌توان آن را `false` داد.
+     */
+    val cryptoSymbolsOnlyPeyman: Boolean = true,
     /** لایهٔ اختیاری نئوویو (NeoWave). پیش‌فرض خاموش ⇒ خروجی موتور بدون تغییر. */
     val neoWaveEnabled: Boolean = false,
     /** حداقل قواعد نیلی که باید پاس شود تا شمارش «معتبر» شمرده شود. */
@@ -4725,13 +4735,23 @@ object IchimokuStrategyEngine {
                 baseReadiness != StrategyReadinessState.SIGNAL_BUY &&
                 baseReadiness != StrategyReadinessState.SIGNAL_SELL
         }
+        // ── سیاست «فقط پیمان روی رمزارز» ─────────────────────────────────────
+        // تنها مسیر ورودِ رمزارز، تصمیم موتور پیمان است. اگر پیمان ورود را مجاز نداند
+        // (یا خاموش باشد) هیچ استراتژی دیگری روی رمزارز معامله نمی‌کند.
+        val peymanPolicyActive = isCryptoClass && effectiveConfig.cryptoSymbolsOnlyPeyman
+        val peymanAllowsEntry = peymanDecision?.isTradeAllowed == true
+        val blockedByPeymanPolicy = peymanPolicyActive && !peymanAllowsEntry
+
         val readiness = when {
             cryptoNeoWaveEntry && isLong -> StrategyReadinessState.SIGNAL_BUY
             cryptoNeoWaveEntry -> StrategyReadinessState.SIGNAL_SELL
+            blockedByPeymanPolicy -> StrategyReadinessState.WATCH_SETUP
             else -> baseReadiness
         }
 
-        val finalAction = if (neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto)) {
+        val finalAction = if (blockedByPeymanPolicy) {
+            SignalAction.NO_TRADE
+        } else if (neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto)) {
             SignalAction.NO_TRADE
         } else if (!kijunGatePassed && !cryptoNeoWaveEntry) {
             // استراتژی ۱۶ فقط با تأیید کراس ۹/۲۶، خطوط پیش‌بینی و ابر معامله می‌کند.

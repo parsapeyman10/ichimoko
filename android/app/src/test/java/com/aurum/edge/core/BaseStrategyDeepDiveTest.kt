@@ -102,14 +102,42 @@ class BaseStrategyDeepDiveTest {
         macro: List<Candle> = bullishPullbackSeries(Interval.H4.millis),
         strategy: List<Candle> = bullishPullbackSeries(Interval.H1.millis),
         trigger: List<Candle> = bullishPullbackSeries(Interval.M15.millis),
-        config: BaseStrategyConfig = BaseStrategyConfig(),
+        // سری مرجع این تست‌ها رمزارزی است و رفتار «بیس» را می‌سنجد؛ سیاست «فقط پیمان روی
+        // رمزارز» عمداً خاموش می‌شود تا خودِ شروط بیس آزموده شوند (سیاست در
+        // PeymanStrategyTest جداگانه تست می‌شود).
+        config: BaseStrategyConfig = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = false),
+        symbol: String = "BTC/USDT",
     ) = IchimokuStrategyEngine.evaluateBitcoinStrategy(
         activeModel = BitcoinStrategyModel.BASE_ICHIMOKU,
         config = config,
         macroCandles = macro,
         strategyCandles = strategy,
         triggerCandles = trigger,
+        symbolInput = symbol,
     )
+
+    @Test
+    fun `crypto symbols never trade the base strategy while the peyman policy is on`() {
+        // سیاست صریح: «فقط پیمان کریپتو باید روی نمادهای کریپتو کار کند.»
+        val blocked = evaluate(config = BaseStrategyConfig())
+        assertEquals(SignalAction.NO_TRADE, blocked.action)
+        assertTrue(blocked.readiness != StrategyReadinessState.SIGNAL_BUY)
+
+        // اثبات اینکه تفاوت از سیاست است نه از داده: همان سری، همان استراتژی، سیاست خاموش.
+        val allowed = evaluate(config = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = false))
+        assertEquals(SignalAction.BUY, allowed.action)
+    }
+
+    @Test
+    fun `the peyman-only policy changes nothing on non crypto symbols`() {
+        val withPolicy = evaluate(config = BaseStrategyConfig(), symbol = "XAU/USD")
+        val withoutPolicy = evaluate(
+            config = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = false),
+            symbol = "XAU/USD",
+        )
+        assertEquals(withoutPolicy.action, withPolicy.action)
+        assertEquals(withoutPolicy.readiness, withPolicy.readiness)
+    }
 
     // ─────────────────────────── مبنا ───────────────────────────
 
@@ -237,8 +265,8 @@ class BaseStrategyDeepDiveTest {
 
     @Test
     fun `hidden cross layer can be removed from the base strategy`() {
-        val withLayer = evaluate(config = BaseStrategyConfig(includeHiddenCrossLayer = true))
-        val pureBase = evaluate(config = BaseStrategyConfig(includeHiddenCrossLayer = false))
+        val withLayer = evaluate(config = BaseStrategyConfig(includeHiddenCrossLayer = true, cryptoSymbolsOnlyPeyman = false))
+        val pureBase = evaluate(config = BaseStrategyConfig(includeHiddenCrossLayer = false, cryptoSymbolsOnlyPeyman = false))
 
         val withDetail = withLayer.conditions.first { it.index == 9 }.detailFa
         val pureDetail = pureBase.conditions.first { it.index == 9 }.detailFa

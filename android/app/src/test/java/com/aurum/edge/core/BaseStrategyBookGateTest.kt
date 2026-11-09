@@ -46,7 +46,10 @@ class BaseStrategyBookGateTest {
         macro: List<Candle> = series(Interval.H4.millis),
         strategy: List<Candle> = series(Interval.H1.millis),
         trigger: List<Candle> = series(Interval.M15.millis),
-        config: BaseStrategyConfig = BaseStrategyConfig(),
+        // سری مرجع این تست‌ها رمزارزی است و رفتار «بیس» را می‌سنجد؛ سیاست «فقط پیمان روی
+        // رمزارز» عمداً خاموش می‌شود تا خودِ شروط بیس آزموده شوند (سیاست در
+        // PeymanStrategyTest جداگانه تست می‌شود).
+        config: BaseStrategyConfig = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = false),
         symbol: String = IchimokuStrategyEngine.BTC_SYMBOL,
     ) = IchimokuStrategyEngine.evaluateBitcoinStrategy(
         activeModel = BitcoinStrategyModel.BASE_ICHIMOKU,

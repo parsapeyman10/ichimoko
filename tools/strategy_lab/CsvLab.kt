@@ -97,6 +97,57 @@ private fun runOne(labelFa: String, candles: List<Candle>, base: BacktestReplayE
     )
 }
 
+/**
+ * «پیمان کریپتو» را روی همان داده اجرا می‌کند و «چرتکهٔ تصمیم» را چاپ می‌کند.
+ *
+ * چرا لازم است؟ تعداد معامله به‌تنهایی نمی‌گوید موتور کجا ایستاده. اگر ۵۰٬۰۰۰ کندل
+ * ارزیابی شود و صفر ورود بدهد، باید بدانیم کدام وضعیت (FORMING/WAITING_RETEST/BLOCKED…)
+ * آن را بسته است، وگرنه «بهینه‌سازی» می‌شود حدس زدن.
+ */
+private fun runPeyman(labelFa: String, candles: List<Candle>, base: BacktestReplayEngine.Config) {
+    val res = BacktestReplayEngine.run(candles, base)
+    val st = res.stats.firstOrNull()
+    if (st == null) {
+        println("[$labelFa] آماری برنگشت")
+        return
+    }
+    println(
+        String.format(
+            Locale.US,
+            "[%s] معامله=%d (خرید %d / فروش %d) · برد=%.1f%% · PF=%.2f · انتظار=%+.3fR · خالص=%+.2f$ · حداکثر افت=%.2f%% · نگه‌داری=%.1f کندل",
+            labelFa, st.trades, st.longTrades, st.shortTrades, st.winRatePct, st.profitFactor,
+            st.expectancyR, st.netPnlUsd, st.maxDrawdownPct, st.avgBarsHeld,
+        ),
+    )
+    dumpTrades(labelFa, base.symbol, res)
+
+    val decisions = res.entryReports.values.mapNotNull { it.peymanCrypto }
+    if (decisions.isEmpty()) {
+        println("        چرتکهٔ تصمیم: هیچ تصمیمی ثبت نشد (حالت خاموش یا نماد رمزارز نیست).")
+        return
+    }
+    val byStatus = decisions.groupingBy { it.setupStatus.labelFa }.eachCount().entries.sortedByDescending { it.value }
+    val bySetup = decisions.groupingBy { it.setupType.labelFa }.eachCount().entries.sortedByDescending { it.value }
+    val byDecision = decisions.groupingBy { it.trace.finalDecisionFa }.eachCount().entries.sortedByDescending { it.value }
+    val allowed = decisions.count { it.isTradeAllowed }
+    println("        تصمیم‌های ثبت‌شده=${decisions.size} · مجاز=$allowed")
+    println("        وضعیت ستاپ: " + byStatus.take(8).joinToString(" · ") { "${it.key}=${it.value}" })
+    println("        نوع ستاپ:   " + bySetup.take(6).joinToString(" · ") { "${it.key}=${it.value}" })
+    println("        تصمیم نهایی: " + byDecision.take(8).joinToString(" · ") { "${it.key}=${it.value}" })
+    // گیت‌های سختی که واقعاً می‌بندند — نه حدس، نه 「حس می‌کنم سخت‌گیر است」.
+    val gates = decisions.flatMap { it.trace.hardGateFailures }
+        .groupingBy { it.take(48) }.eachCount().entries.sortedByDescending { it.value }
+    if (gates.isNotEmpty()) {
+        println("        گیت‌های سخت: " + gates.take(8).joinToString(" · ") { "${it.value}×${it.key}" })
+    }
+    val nearMiss = decisions.filter { it.qualityScore >= 60.0 }
+    val rr = nearMiss.mapNotNull { it.riskRewardAfterCosts }.sorted()
+    println(
+        "        نزدیک‌به‌ورود (امتیاز≥۶۰)=${nearMiss.size}" +
+            (if (rr.isEmpty()) "" else " · میانهٔ R:R مؤثرِ آن‌ها=" + f2(rr[rr.size / 2])),
+    )
+}
+
 fun main(args: Array<String>) {
     // قرارداد run.sh: آرگومان اول bars و دوم seed است؛ از سوم به بعد مال ماست.
     val triggerPath = args.getOrNull(2)
@@ -149,5 +200,22 @@ fun main(args: Array<String>) {
             ),
         )    } else {
         println("[HTF-واقعی] اجرا نشد — فایل ۱ ساعته و ۴ ساعته داده نشد.")
+    }
+
+    // ۴) موتور «پیمان کریپتو» — فقط با پرچم peyman و فقط روی نماد رمزارز.
+    if (args.getOrNull(6) == "peyman") {
+        runPeyman(
+            "پیمان-PAPER",
+            trigger.candles,
+            BacktestReplayEngine.Config(
+                strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+                symbol = symbol,
+                includeHiddenCrossLayer = true,
+                strategyCandlesOverride = strategy?.candles.orEmpty(),
+                macroCandlesOverride = macro?.candles.orEmpty(),
+                peymanCryptoConfig = com.aurum.edge.core.peyman.PeymanCryptoConfig.PAPER,
+                captureEntryReports = true,
+            ),
+        )
     }
 }
