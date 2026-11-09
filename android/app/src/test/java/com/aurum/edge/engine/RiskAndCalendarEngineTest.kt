@@ -371,7 +371,9 @@ class RiskAndCalendarEngineTest {
         val trigBars = buildBullishPullbackSeries(Interval.M15.millis)
         val trig5mBars = buildBullishPullbackSeries(Interval.M5.millis)
 
-        val config = BaseStrategyConfig()
+        // این تست رفتار «بیس» را روی سری رمزارزی می‌سنجد؛ سیاست «فقط پیمان روی رمزارز»
+        // عمداً خاموش است تا خودِ شروط بیس آزموده شوند (سیاست جای دیگری تست شده است).
+        val config = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = false)
         val dualReport = IchimokuStrategyEngine.evaluateDualTimeframeStrategy(
             activeModel = BitcoinStrategyModel.BASE_ICHIMOKU,
             config = config,
