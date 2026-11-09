@@ -78,7 +78,12 @@ object PeymanCryptoEngine {
         if (regime.regime == CryptoMarketRegime.ILLIQUID_SHOCK) {
             return reject(input, "رژیم شوک بی‌نقدشوندگی؛ ورود قطعاً ممنوع است.", status = PeymanSetupStatus.BLOCKED, regime = regime, health = health)
         }
-        if (regime.regime == CryptoMarketRegime.UNKNOWN && !priorCompression) {
+        // رژیم نامشخص به‌تنهایی یعنی «حدس نزن». ولی بلوکه‌کردنِ کاملِ ۵۸٪ کندل‌ها
+        // (اندازه‌گیری‌شده روی BTC/USDT 15m) یعنی موتور عملاً معامله نمی‌کند. با
+        // `allowUnknownRegimeCompression` تنها ستاپِ مستقل از رژیم (فشردگی → انبساط)
+        // با آستانهٔ سخت‌گیرانه‌تر اجازهٔ ارزیابی دارد؛ بقیهٔ ستاپ‌ها همان‌طور بسته‌اند.
+        val unknownAllowed = cfg.allowUnknownRegimeCompression
+        if (regime.regime == CryptoMarketRegime.UNKNOWN && !priorCompression && !unknownAllowed) {
             return reject(input, "رژیم بازار نامشخص است؛ حدس زدن ممنوع.", status = PeymanSetupStatus.BLOCKED, regime = regime, health = health)
         }
 
@@ -113,7 +118,7 @@ object PeymanCryptoEngine {
         val setup = if (priorCompression) {
             PeymanSetupType.COMPRESSION_EXPANSION
         } else {
-            selectSetup(regime.regime, cfg)
+            selectSetup(regime.regime, cfg, regime.atrPercentile, regime.rangeRatio, regime.efficiencyRatio14)
         }
         if (setup == PeymanSetupType.NONE) {
             return reject(
@@ -127,7 +132,8 @@ object PeymanCryptoEngine {
         // ۵) BOS/بازآزمایی در جهت شمارش اصلی
         val minRvol = when (setup) {
             PeymanSetupType.CAPITULATION_REVERSAL -> cfg.minRvolReversal
-            PeymanSetupType.COMPRESSION_EXPANSION -> max(cfg.minRvolContinuation, 1.5)
+            // قبلاً یک عدد جادویی ۱٫۵ این‌جا هاردکد بود و هر تنظیمی را بی‌اثر می‌کرد.
+            PeymanSetupType.COMPRESSION_EXPANSION -> cfg.compressionMinRvol
             else -> cfg.minRvolContinuation
         }
         val minBody = if (setup == PeymanSetupType.COMPRESSION_EXPANSION) {
@@ -370,13 +376,34 @@ object PeymanCryptoEngine {
 
     // ─────────────────────────── انتخاب و امتیازدهی ───────────────────────────
 
-    fun selectSetup(regime: CryptoMarketRegime, config: PeymanCryptoConfig): PeymanSetupType = when (regime) {
+    /**
+     * انتخاب ستاپ از روی رژیم. برای رژیم «نامشخص» تنها ستاپ مستقل از رژیم
+     * (فشردگی → انبساط) و آن هم فقط وقتی ساختار واقعاً فشرده است مجاز می‌شود؛
+     * یعنی به‌جای «حدس»، شرط ساختاری چک می‌شود.
+     */
+    fun selectSetup(
+        regime: CryptoMarketRegime,
+        config: PeymanCryptoConfig,
+        atrPercentile: Double = 100.0,
+        rangeRatio: Double = 1.0,
+        er14: Double = 1.0,
+    ): PeymanSetupType = when (regime) {
         CryptoMarketRegime.COMPRESSION -> PeymanSetupType.COMPRESSION_EXPANSION
         CryptoMarketRegime.TREND_EXPANSION -> PeymanSetupType.WAVE3_CONTINUATION
         CryptoMarketRegime.CORRECTION -> PeymanSetupType.CORRECTION_COMPLETE
         CryptoMarketRegime.PANIC_CAPITULATION,
         CryptoMarketRegime.DISTRIBUTION,
         -> if (config.reversalEnabled) PeymanSetupType.CAPITULATION_REVERSAL else PeymanSetupType.NONE
+        CryptoMarketRegime.UNKNOWN -> if (
+            config.allowUnknownRegimeCompression &&
+            atrPercentile <= config.unknownCompressionMaxAtrPercentile &&
+            rangeRatio <= config.unknownCompressionMaxRangeRatio &&
+            er14 <= config.unknownCompressionMaxEr14
+        ) {
+            PeymanSetupType.COMPRESSION_EXPANSION
+        } else {
+            PeymanSetupType.NONE
+        }
         else -> PeymanSetupType.NONE
     }
 

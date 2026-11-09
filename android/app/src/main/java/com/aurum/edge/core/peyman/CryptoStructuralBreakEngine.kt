@@ -284,14 +284,16 @@ object CryptoStructuralBreakEngine {
         }
 
         val retest = closed[i]
-        val touched = if (isLong) retest.low <= execLevel + 0.10 * breakoutAtr
-        else retest.high >= execLevel - 0.10 * breakoutAtr
+        val touchBand = config.retestTouchAtrFraction * breakoutAtr
+        val touched = if (isLong) retest.low <= execLevel + touchBand
+        else retest.high >= execLevel - touchBand
         val closedBack = if (isLong) retest.close >= execLevel else retest.close <= execLevel
         val bodyOk = PeymanMath.bodyRatio(retest) >= config.minRetestBodyRatio
         val dirOk = if (isLong) PeymanMath.bullish(retest) else PeymanMath.bearish(retest)
         val retestRvol = PeymanMath.relativeVolume(closed, i)
         val volOk = retestRvol != null && retestRvol >= config.minRetestVolumeRatio
-        val volLessThanBreakout = retestRvol == null || rvolAtBreakout == null || retestRvol < rvolAtBreakout
+        val volLessThanBreakout = !config.requireRetestVolumeBelowBreakout ||
+            retestRvol == null || rvolAtBreakout == null || retestRvol < rvolAtBreakout
         val invertedLevel = if (isLong) retest.close < breakoutLevel else retest.close > breakoutLevel
 
         return when {

@@ -41,11 +41,23 @@ fun main(args: Array<String>) {
     val macro = readCsv(macroPath)
     // اختیاری: پنجرهٔ انتظار بازآزمایی (کندل) — برای سنجش حساسیت، نه تغییر پیش‌فرض.
     val waitOverride = args.getOrNull(7)?.toIntOrNull()
+    // آرگومان هشتم: دقیقه‌های تایم‌فریم ماشه (۵ یا ۱۵). نهم: پکیج قواعد.
+    val triggerMinutes = args.getOrNull(8)?.toIntOrNull() ?: 15
+    val preset = args.getOrNull(9)?.lowercase() ?: "paper"
+    val triggerInterval = when (triggerMinutes) {
+        5 -> Interval.M5
+        15 -> Interval.M15
+        30 -> Interval.M30
+        60 -> Interval.H1
+        else -> Interval.M15
+    }
     println("نماد=$symbol · ماشه=${trigger.size} · ۱ساعته=${strategy.size} · ۴ساعته=${macro.size} · گام=$step" +
         (if (waitOverride != null) " · پنجرهٔ بازآزمایی=$waitOverride" else ""))
 
-    val baseCfg = PeymanCryptoConfig.PAPER
+    val baseCfg = if (preset == "trading") PeymanCryptoConfig.tradingFor(triggerMinutes)
+    else PeymanCryptoConfig.PAPER
     val cfg = if (waitOverride != null) baseCfg.copy(maxRetestWaitBars = waitOverride) else baseCfg
+    println("  پکیج=$preset · تایم‌فریم ماشه=${triggerInterval.label} · rulesVersion=${cfg.rulesVersion} · پنجرهٔ بازآزمایی=${cfg.maxRetestWaitBars}")
     var evaluated = 0
     var allowed = 0
     val byStatus = LinkedHashMap<String, Int>()
@@ -58,6 +70,7 @@ fun main(args: Array<String>) {
     val readyGates = LinkedHashMap<String, Int>()
     val readyScores = ArrayList<Double>()
     val readyRr = ArrayList<Double>()
+    val byBos = LinkedHashMap<String, Int>()
 
     val start = minOf(trigger.size - 1, 300)
     // دو اشاره‌گر یک‌طرفه: برای هر کندل ماشه، آخرین کندل بسته‌شدهٔ ۱ساعته/۴ساعته.
@@ -82,13 +95,14 @@ fun main(args: Array<String>) {
                 triggerBars = trig,
                 openPositions = emptyList(),
                 config = cfg,
-                nowMillis = t + Interval.M15.millis,
-                triggerInterval = Interval.M15,
+                nowMillis = t + triggerInterval.millis,
+                triggerInterval = triggerInterval,
             ),
         )
         evaluated++
         if (decision.isTradeAllowed) allowed++
-        byStatus[decision.setupStatus.labelFa] = (byStatus[decision.setupStatus.labelFa] ?: 0) + 1
+        byStatus[decision.setupStatus.name] = (byStatus[decision.setupStatus.name] ?: 0) + 1
+        byBos[decision.trace.bosStatusFa.take(44)] = (byBos[decision.trace.bosStatusFa.take(44)] ?: 0) + 1
         bySetup[decision.setupType.labelFa] = (bySetup[decision.setupType.labelFa] ?: 0) + 1
         byDecision[decision.trace.finalDecisionFa] = (byDecision[decision.trace.finalDecisionFa] ?: 0) + 1
         byRegime[decision.trace.regimeFa] = (byRegime[decision.trace.regimeFa] ?: 0) + 1
@@ -107,6 +121,7 @@ fun main(args: Array<String>) {
             .joinToString(" · ") { "${it.key}=${it.value}" })
     }
     dump("وضعیت ستاپ", byStatus)
+    dump("وضعیت BOS", byBos, 8)
     dump("نوع ستاپ", bySetup)
     dump("تصمیم نهایی", byDecision, 10)
     dump("رژیم", byRegime, 6)

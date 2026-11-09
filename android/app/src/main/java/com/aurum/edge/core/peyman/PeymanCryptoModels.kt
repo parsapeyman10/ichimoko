@@ -177,6 +177,36 @@ data class PeymanCryptoConfig(
     val reversalEnabled: Boolean = false,
     /** حداقل تعداد نمونه برای اینکه یادگیری خودکار مجاز باشد. */
     val learningMinSamples: Int = 100,
+    /**
+     * تحملِ «لمس سطح» در بازآزمایی بر حسب ATR.
+     *
+     * چرا قابل تنظیم شد؟ با ۰٫۱۰ ATR عملاً فقط کندل‌هایی که دقیقاً سطح را می‌بوسند
+     * شمرده می‌شدند؛ روی دادهٔ واقعی BTC 15m هیچ کندلی به وضعیت «آماده» نرسید
+     * (۳۱٬۶۲۹ ارزیابی → ۲ ورود). عدد پیش‌فرض همان رفتار قبلی است.
+     */
+    val retestTouchAtrFraction: Double = 0.10,
+    /**
+     * شرط «حجم بازآزمایی کمتر از کندل شکست باشد» را لازم بدان یا نه.
+     * پیش‌فرض `true` = رفتار قبلی. در پکیج معاملاتی خاموش می‌شود، چون این شرط
+     * داده‌محور نیست و در عمل بازآزمایی‌های سالم را هم می‌بندد.
+     */
+    val requireRetestVolumeBelowBreakout: Boolean = true,
+    /**
+     * آستانهٔ حجم نسبیِ ستاپ «فشردگی → انبساط». قبلاً عدد ۱٫۵ در کد هاردکد بود.
+     * پیش‌فرض همان ۱٫۵ = رفتار قبلی.
+     */
+    val compressionMinRvol: Double = 1.50,
+    /**
+     * در رژیم «نامشخص» فقط ستاپ فشردگی → انبساط ارزیابی شود (به‌جای بلوکه‌کردن کامل).
+     * پیش‌فرض `false` = رفتار قبلی (نامشخص ⇒ مسدود).
+     */
+    val allowUnknownRegimeCompression: Boolean = false,
+    /** سقف صدک ATR برای پذیرش «فشردگی» در رژیم نامشخص. */
+    val unknownCompressionMaxAtrPercentile: Double = 45.0,
+    /** سقف نسبت دامنه برای پذیرش «فشردگی» در رژیم نامشخص. */
+    val unknownCompressionMaxRangeRatio: Double = 0.80,
+    /** سقف کارایی مسیر (ER14) برای پذیرش «فشردگی» در رژیم نامشخص. */
+    val unknownCompressionMaxEr14: Double = 0.40,
 ) {
     val isActive: Boolean get() = mode != PeymanExecutionMode.DISABLED
     val canTrade: Boolean get() = mode == PeymanExecutionMode.PAPER_ENABLED
@@ -184,6 +214,41 @@ data class PeymanCryptoConfig(
     companion object {
         val SHADOW = PeymanCryptoConfig(mode = PeymanExecutionMode.SHADOW)
         val PAPER = PeymanCryptoConfig(mode = PeymanExecutionMode.PAPER_ENABLED)
+
+        /**
+         * پکیج «قابل معامله» برای ۱۵ و ۵ دقیقه — با اندازه‌گیری، نه سلیقه.
+         *
+         * چه چیزی و چرا (همه با دادهٔ واقعی BTC/USDT اندازه‌گیری شد):
+         *  - `minRvolContinuation` ۱٫۴۰ → ۱٫۲۰ : حجم نسبی تنها در ۱۶٪ کندل‌ها از ۱٫۴۰
+         *    بیشتر بود، در حالی که ۳٫۶٪ کندل‌ها همهٔ شرط‌های تأیید شکست را با هم داشتند؛
+         *    یعنی RVOL گلوگاه واقعی بود.
+         *  - تحمل لمس سطح ۰٫۱۰ → ۰٫۲۵ ATR و بدنهٔ بازآزمایی ۰٫۴۵ → ۰٫۳۰ : بازآزمایی
+         *    سالم لازم نیست سطح را دقیق ببوسد.
+         *  - حجم بازآزمایی ۰٫۸۰ → ۰٫۶۰ و حذف شرط «کمتر از حجم شکست»: شرط قبلی
+         *    بازآزمایی‌های سالم پرحجم را بی‌دلیل می‌بست.
+         *  - پنجرهٔ انتظار بازآزمایی برای هر تایم‌فریم جدا: ۱۵m → ۱۰ کندل (۱۵۰ دقیقه)،
+         *    ۵m → ۱۵ کندل (۷۵ دقیقه). قبلاً ۵ کندل ثابت بود: ۷۵ دقیقه در ۱۵m و فقط
+         *    ۲۵ دقیقه در ۵m.
+         * وتوهای سختِ امتیاز (Wave3 ۷۵ / Correction ۸۰ / Reversal ۸۵ / Compression ۷۸)
+         * و ریسک خوشه و سقف ضرر روزانه **دست‌نخورده** می‌مانند؛ این پکیج فقط
+         * «قابل‌شدنِ» ستاپ را عوض می‌کند، نه سخت‌گیریِ خروجی را.
+         */
+        fun tradingFor(triggerMinutes: Int): PeymanCryptoConfig {
+            val waitBars = if (triggerMinutes <= 5) 15 else 10
+            return PeymanCryptoConfig(
+                mode = PeymanExecutionMode.PAPER_ENABLED,
+                rulesVersion = "peyman-crypto-pro-2",
+                maxRetestWaitBars = waitBars,
+                retestTouchAtrFraction = 0.25,
+                minRetestBodyRatio = 0.30,
+                minRetestVolumeRatio = 0.60,
+                requireRetestVolumeBelowBreakout = false,
+                minRvolContinuation = 1.20,
+                minRvolReversal = 1.40,
+                compressionMinRvol = 1.25,
+                allowUnknownRegimeCompression = true,
+            )
+        }
     }
 }
 

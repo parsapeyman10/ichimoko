@@ -486,6 +486,47 @@ class PeymanCryptoEngineTest {
     }
 
     @Test
+    fun `unknown regime only allows compression setup when structure is actually coiled`() {
+        val cfg = PeymanCryptoConfig.tradingFor(15)
+        // ساختار واقعاً فشرده → ستاپ فشردگی → انبساط مجاز است.
+        assertEquals(
+            PeymanSetupType.COMPRESSION_EXPANSION,
+            PeymanCryptoEngine.selectSetup(
+                CryptoMarketRegime.UNKNOWN, cfg,
+                atrPercentile = 30.0, rangeRatio = 0.55, er14 = 0.20,
+            ),
+        )
+        // رژیم نامشخص و ساختار فشرده نیست → همان «حدس نزن».
+        assertEquals(
+            PeymanSetupType.NONE,
+            PeymanCryptoEngine.selectSetup(
+                CryptoMarketRegime.UNKNOWN, cfg,
+                atrPercentile = 90.0, rangeRatio = 1.40, er14 = 0.70,
+            ),
+        )
+        // پیش‌فرض‌ها و PAPER هم دست‌نخورده‌اند.
+        assertEquals(
+            PeymanSetupType.NONE,
+            PeymanCryptoEngine.selectSetup(
+                CryptoMarketRegime.UNKNOWN, PeymanCryptoConfig.PAPER,
+                atrPercentile = 30.0, rangeRatio = 0.55, er14 = 0.20,
+            ),
+        )
+    }
+
+    @Test
+    fun `compression rvol threshold is configurable and defaults keep old behaviour`() {
+        assertEquals(1.50, PeymanCryptoConfig.SHADOW.compressionMinRvol, 1e-9)
+        assertEquals(1.50, PeymanCryptoConfig.PAPER.compressionMinRvol, 1e-9)
+        val trading = PeymanCryptoConfig.tradingFor(15)
+        assertTrue("آستانهٔ فشردگی باید قابل تنظیم و کمتر از سقف قدیمی باشد", trading.compressionMinRvol < 1.50)
+        assertTrue(trading.allowUnknownRegimeCompression)
+        // پیش‌فرضِ رفتارِ قبلی: نامشخص ⇒ مسدود.
+        assertFalse(PeymanCryptoConfig.PAPER.allowUnknownRegimeCompression)
+        assertFalse(PeymanCryptoConfig.SHADOW.allowUnknownRegimeCompression)
+    }
+
+    @Test
     fun `btc panic blocks alt longs and missing context blocks alts`() {
         val panic = BtcContextGate.evaluate(
             symbol = "SOL/USDT",
