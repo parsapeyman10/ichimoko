@@ -44,6 +44,7 @@ import com.aurum.edge.core.BacktestReplayEngine
 import com.aurum.edge.core.BacktestTradeArchive
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.IchimokuStrategyEngine
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.theme.AurumColors
@@ -79,6 +80,7 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
     val archive by vm.archive.collectAsStateWithLifecycle()
     val archiveFiles by vm.archiveFiles.collectAsStateWithLifecycle()
     val appliedEntry by vm.appliedEntry.collectAsStateWithLifecycle()
+    val htfCandles by vm.htfCandles.collectAsStateWithLifecycle()
 
     var toastText by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
@@ -92,6 +94,15 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
             vm.importCsv(uri, symbolOverride = "", dropFlatBars = true)
         }
     }
+
+    // تایم‌فریم‌های بالای «واقعی» — جدا از فایل ماشه. اگر خالی بمانَد، رفتار قبلی است.
+    val csvMime = arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*")
+    val htf1hLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) vm.importHtfCsv(uri, role = Interval.H1, dropFlatBars = true) }
+    val htf4hLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) vm.importHtfCsv(uri, role = Interval.H4, dropFlatBars = true) }
 
     val selectedSet = dataSets.firstOrNull { it.id == selectedId }
 
@@ -116,12 +127,34 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 lineHeight = 16.sp,
             )
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 ActionButton(
                     label = if (busy) "…" else "➕ افزودن CSV",
                     enabled = !busy,
                     color = AurumColors.Gold,
                     onClick = { importLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*")) },
+                )
+                /** یک دکمه برای هر نقش: خالی = انتخاب فایل، پر = حذف فایل. */
+                ActionButton(
+                    label = if (htfCandles.containsKey(Interval.H1)) "✖ ۱ساعته" else "＋ ۱ساعته",
+                    enabled = !busy,
+                    color = if (htfCandles.containsKey(Interval.H1)) AurumColors.Green else AurumColors.TextSecondary,
+                    onClick = {
+                        if (htfCandles.containsKey(Interval.H1)) vm.clearHtf(Interval.H1)
+                        else htf1hLauncher.launch(csvMime)
+                    },
+                )
+                ActionButton(
+                    label = if (htfCandles.containsKey(Interval.H4)) "✖ ۴ساعته" else "＋ ۴ساعته",
+                    enabled = !busy,
+                    color = if (htfCandles.containsKey(Interval.H4)) AurumColors.Green else AurumColors.TextSecondary,
+                    onClick = {
+                        if (htfCandles.containsKey(Interval.H4)) vm.clearHtf(Interval.H4)
+                        else htf4hLauncher.launch(csvMime)
+                    },
                 )
                 ActionButton(
                     label = "↻ بازخوانی",
@@ -143,6 +176,20 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 text = "دستور ساخت فایل روی کامپیوتر:\n" +
                     "npx dukascopy-node -i xauusd -from 2024-01-01 -to 2024-06-01 -t m15 -f csv -v",
                 color = AurumColors.TextMuted,
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = if (htfCandles.isEmpty()) {
+                    "تایم‌فریم‌های بالا از خودِ فایل ۱۵دقیقه‌ای ساخته می‌شوند. برای «چند تایم‌فریمیِ واقعی» " +
+                        "فایل ۱ساعته و ۴ساعتهٔ همان نماد را هم اضافه کنید."
+                } else {
+                    "چند تایم‌فریمیِ واقعی: " + htfCandles.entries
+                        .sortedBy { it.key.minutes }
+                        .joinToString(" · ") { "${it.key.label}=${it.value.size} کندل" }
+                },
+                color = if (htfCandles.isEmpty()) AurumColors.TextMuted else AurumColors.Green,
                 fontSize = 10.sp,
                 lineHeight = 14.sp,
             )

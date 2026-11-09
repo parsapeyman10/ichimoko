@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aurum.edge.app.AppContainer
 import com.aurum.edge.core.BacktestNeuralTrainer
+import com.aurum.edge.core.BacktestCsvReader
 import com.aurum.edge.core.BacktestReplayEngine
 import com.aurum.edge.core.BacktestTradeArchive
 import com.aurum.edge.core.BitcoinStrategyModel
@@ -89,6 +90,17 @@ class BacktestViewModel(
     val resultIsStale: StateFlow<Boolean> = kotlinx.coroutines.flow.combine(_result, _resultCursor, _cursor) { res, resCursor, cur ->
         res != null && resCursor != cur
     }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000L), false)
+
+    /**
+     * کندل‌های تایم‌فریم بالای **واقعی** (۱ ساعته/۴ ساعته) که کاربر جداگانه وارد کرده است.
+     *
+     * چرا لازم بود؟ موتور از قبل `macroCandlesOverride`/`strategyCandlesOverride` را
+     * پشتیبانی می‌کرد ولی هیچ‌جای اپ آن‌ها را پر نمی‌کرد؛ یعنی «۴ساعت → ۱ساعت → ۱۵دقیقه»
+     * در عمل از بازنمونه‌گیری همان فایل ۱۵دقیقه‌ای ساخته می‌شد. اگر کاربر فایل واقعی بدهد
+     * همان استفاده می‌شود، و اگر ندهد این نگاشت خالی می‌مانَد و رفتار **دقیقاً** مثل قبل است.
+     */
+    private val _htfCandles = MutableStateFlow<Map<Interval, List<Candle>>>(emptyMap())
+    val htfCandles: StateFlow<Map<Interval, List<Candle>>> = _htfCandles.asStateFlow()
 
     private val _training = MutableStateFlow<BacktestNeuralTrainer.TrainingReport?>(null)
     val training: StateFlow<BacktestNeuralTrainer.TrainingReport?> = _training.asStateFlow()
@@ -212,6 +224,57 @@ class BacktestViewModel(
         }
     }
 
+    /**
+     * وارد کردن فایل تایم‌فریم بالای **واقعی** (۱ ساعته/۴ ساعته) برای همان نماد.
+     *
+     * اعتبارسنجی عمدی: اگر تایم‌فریم تشخیص‌داده‌شدهٔ فایل با نقشی که کاربر انتخاب کرده یکی
+     * نباشد، فایل **رد** می‌شود. دلیل: جفت‌شدن بی‌صدای m30 به‌جای h1 نتیجهٔ بک‌تست را عوض
+     * می‌کند و کاربر هیچ‌وقت نمی‌فهمد چرا.
+     */
+    fun importHtfCsv(uri: Uri, role: Interval, dropFlatBars: Boolean) {
+        if (_busy.value) {
+            emit("یک کار در جریان است؛ چند لحظه صبر کنید.")
+            return
+        }
+        _busy.value = true
+        _statusFa.value = "خواندن فایل ${role.label}…"
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val text = getApplication<Application>().contentResolver.openInputStream(uri)
+                    ?.use { it.readBytes().toString(Charsets.UTF_8) }
+                    ?: error("فایل باز نشد؛ دسترسی به مسیر فایل داده نشد.")
+                BacktestCsvReader.parse(raw = text, fileName = "", dropFlatBars = dropFlatBars)
+            }.onSuccess { parsed ->
+                withContext(Dispatchers.Main) {
+                    if (parsed.inferredInterval != role) {
+                        _statusFa.value = "⚠️ این فایل ${parsed.inferredInterval.label} است، نه ${role.label}؛ " +
+                            "برای جلوگیری از نتیجهٔ اشتباه وارد نشد."
+                        emit("⚠️ تایم‌فریم فایل نمی‌خوانَد")
+                    } else {
+                        _htfCandles.update { it + (role to parsed.candles) }
+                        _result.value = null
+                        _statusFa.value = "✅ ${role.label} واقعی: ${parsed.candles.size} کندل · " +
+                            String.format(java.util.Locale.US, "%.1f", parsed.spanDays) + " روز"
+                        emit("✅ تایم‌فریم ${role.label} اضافه شد")
+                    }
+                }
+            }.onFailure { err ->
+                withContext(Dispatchers.Main) {
+                    _statusFa.value = "⚠️ " + (err.message ?: "فایل تایم‌فریم بالا خوانده نشد")
+                    emit("⚠️ فایل اضافه نشد")
+                }
+            }
+            _busy.value = false
+        }
+    }
+
+    /** حذف فایل تایم‌فریم بالا؛ بلافاصله رفتار به «بازنمونه‌گیری از فایل ماشه» برمی‌گردد. */
+    fun clearHtf(role: Interval) {
+        _htfCandles.update { it - role }
+        _result.value = null
+        _statusFa.value = "تایم‌فریم ${role.label} حذف شد؛ از این به بعد از فایل ماشه ساخته می‌شود."
+    }
+
     fun select(id: String?) {
         if (id == null) {
             _selectedId.value = null
@@ -307,6 +370,8 @@ class BacktestViewModel(
         )
         _statusFa.value = "در حال اجرای بک‌تست روی ${cut.size} کندل… ($estimateFa)"
         viewModelScope.launch(Dispatchers.Default) {
+            // تایم‌فریم‌های بالای واقعی؛ نگاشت خالی = بازنمونه‌گیری از فایل ماشه (رفتار قبلی).
+            val htfNow = _htfCandles.value
             val config = BacktestReplayEngine.Config(
                 strategyId = s.strategyId,
                 symbol = s.symbol.ifBlank { set?.symbol ?: "XAU/USD" },
@@ -320,6 +385,8 @@ class BacktestViewModel(
                 optimisticSameBarFill = s.optimisticSameBarFill,
                 maxBars = s.maxBars,
                 includeHiddenCrossLayer = s.includeHiddenCrossLayer,
+                macroCandlesOverride = htfNow[Interval.H4].orEmpty(),
+                strategyCandlesOverride = htfNow[Interval.H1].orEmpty(),
                 compressionExpansionEnabled = s.compressionExpansion,
                 peymanCryptoConfig = if (s.peymanCryptoPaper) {
                     com.aurum.edge.core.peyman.PeymanCryptoConfig.PAPER
