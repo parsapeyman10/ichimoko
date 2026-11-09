@@ -548,8 +548,11 @@ class RiskAndCalendarEngineTest {
             val rep5 = dualReport.reportFor(Interval.M5, model.id)
             assertNotNull(rep15)
             assertNotNull(rep5)
-            // 3.9.57: شرط ۱۷ «اقتصاد اجرا» اضافه شد؛ هر استراتژی همان ۱۷ شرط مشترک را می‌سازد.
-            assertEquals(17, rep15!!.conditions.size)
+            // 3.9.57: شرط ۱۷ «اقتصاد اجرا» اضافه شد؛ هر استراتژی همان ۱۷ شرط مشترک را می‌سازد —
+            // به‌جز استراتژی پیمان که چک‌لیست اختصاصی الیوت–نئوویو دارد (۸ شرط + قواعد
+            // نئوویو برای نمایش). پیش از این پیمان خاموش بود و این حلقه هرگز به آن نمی‌رسید.
+            val expectedConditions = if (model.isDrivePdfStrategy) 8 else 17
+            assertEquals(expectedConditions, rep15!!.conditions.size)
             assertNotNull(rep15.rrBreakdown)
             assertTrue((rep15.optimalRiskReward ?: 0.0) >= 1.5)
             assertTrue((rep15.riskReward ?: 0.0) >= 1.5)
