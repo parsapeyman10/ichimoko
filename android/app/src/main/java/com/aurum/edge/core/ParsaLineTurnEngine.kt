@@ -84,6 +84,10 @@ object ParsaLineTurnEngine {
             }
     }
 
+    /** ارقام لاتین → فارسی. متن‌های برنامه فارسی‌اند و «18» در آن‌ها ناهمخوان دیده می‌شود. */
+    internal fun faDigits(value: Int): String =
+        value.toString().map { ch -> if (ch in '0'..'9') '۰' + (ch - '0') else ch }.joinToString("")
+
     /**
      * سنجش روش پارسا.
      *
@@ -119,7 +123,7 @@ object ParsaLineTurnEngine {
                 1,
                 "۱. فلت واقعی Senkou Span B (خط دورهٔ ۵۲)",
                 flatOk,
-                "SSB به‌مدت $flatBars کندل بسته تخت؛ حد لازم $MIN_FLAT_BARS کندل.",
+                "SSB به‌مدت ${faDigits(flatBars)} کندل بسته تخت؛ حد لازم ${faDigits(MIN_FLAT_BARS)} کندل.",
                 isCore = true,
             ),
             Rule(
@@ -139,7 +143,8 @@ object ParsaLineTurnEngine {
                 3,
                 "۳. کراس هم‌جهت Tenkan/Kijun در ۸ کندل",
                 crossOk,
-                "سن کراس: ${if (crossAgeBars == Int.MAX_VALUE) "یافت نشد" else "$crossAgeBars کندل"}؛ مهلت مجاز $MAX_CROSS_AGE_BARS کندل.",
+                "سن کراس: ${if (crossAgeBars == Int.MAX_VALUE) "یافت نشد" else "${faDigits(crossAgeBars)} کندل"}؛ " +
+                    "مهلت مجاز ${faDigits(MAX_CROSS_AGE_BARS)} کندل.",
                 isCore = true,
             ),
             Rule(
