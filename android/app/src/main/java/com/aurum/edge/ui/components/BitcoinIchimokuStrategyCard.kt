@@ -494,7 +494,7 @@ private fun Live12ConditionChecklistPage(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             allItems.forEach { item ->
-                // استراتژی ۱۶ (پیمان) موقتاً غیرفعال است؛ گزارش جایگزین اشتباه نمایش داده نمی‌شود.
+                // استراتژی خاموش: گزارش جایگزین اشتباه نمایش داده نمی‌شود.
                 val repStrat = if (item.isTemporarilyDisabled) null else dualReport?.reportFor(focusedInterval, item.id)
                 val shortState = if (item.isTemporarilyDisabled) "موقتاً غیرفعال" else repStrat?.readinessShortFa() ?: ""
                 Pill(

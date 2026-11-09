@@ -220,24 +220,25 @@ enum class BitcoinStrategyModel(
         baseOptimalRr = 2.40,
     ),
 
-    // ── ۵. استراتژی پیمان — نسخهٔ الیوت–نئوویو (موقتاً غیرفعال) ─────────────────
+    // ── ۵. استراتژی پیمان — نسخهٔ الیوت–نئوویو ─────────────────────────────────
     // بنا به درخواست کاربر، از متود جامع قبلی فقط «لایهٔ الیوت–نئوویو» باقی مانده است؛ بقیهٔ
     // لایه‌ها (اجماع لایه‌های ساختاری، گیت کیجون و …) حذف شده و خود استراتژی هم تا اطلاع بعدی
     // خاموش است تا معامله‌ای با آن باز نشود. شناسهٔ داخلی برای حفظ آموخته‌های شبکه تغییر نکرده.
     DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER(
         id = "DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER",
-        titleFa = "استراتژی ۱۶ · استراتژی پیمان (الیوت–نئوویو) · موقتاً غیرفعال",
-        badgeFa = "استراتژی پیمان · الیوت · غیرفعال",
+        titleFa = "استراتژی ۱۶ · استراتژی پیمان (الیوت–نئوویو)",
+        badgeFa = "استراتژی پیمان · الیوت · نئوویو",
         authorRefFa = "Elliott Wave + NeoWave (Glenn Neely) — هندسهٔ موجی",
-        summaryFa = "استراتژی پیمان — نسخهٔ الیوت‌محور و موقتاً غیرفعال. " +
+        summaryFa = "استراتژی پیمان — نسخهٔ الیوت‌محور. " +
             "۱) تنها لایهٔ باقی‌مانده، هندسهٔ امواج الیوت و قواعد نئوویو است: جهت موج جاری، " +
             "معتبر بودن نقطهٔ چرخش (S)، تکمیل‌نشدن موج مخالف و فضای اهداف موجی V/N/E. " +
             "۲) ورود فقط وقتی مجاز است که موج جهت‌دار تأییدشده باشد، نقطهٔ S نشکسته باشد و " +
             "چرخهٔ زمانی در نقطهٔ تغییر نباشد. " +
             "۳) خروج بر پایهٔ اتمام موج/ابطال شمارش انجام می‌شود. " +
             "۴) لایه‌های ساختاری، اجماع چندلایه و گیت کیجونِ نسخهٔ قبلی از این استراتژی حذف شده‌اند. " +
-            "۵) این استراتژی فعلاً در هیچ ارزیابی و معامله‌ای شرکت نمی‌کند؛ با روشن‌کردن دوباره از " +
-            "تنظیمات، فقط همان لایهٔ الیوت فعال می‌شود.",
+            "۵) شکستن هر قاعدهٔ **سخت** نئوویو (مثل نسبت ۳۳ تا ۶۱٫۸٪ موج b یا زمان موج b) " +
+            "شمارش را باطل می‌کند و ورود را وتو می‌کند — همان قانون نیلی. " +
+            "۶) خروج بر پایهٔ ابطال شمارش/اتمام موج و پلن ایمن‌شدهٔ R:R انجام می‌شود.",
         hasPatel = false,
         hasTuttle = false,
         hasHosoda = true,
@@ -316,7 +317,7 @@ enum class BitcoinStrategyModel(
 
     val combinationCategoryFa: String
         get() = if (this == DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
-            "الیوت–نئوویو (موقتاً غیرفعال)"
+            "الیوت–نئوویو (لایهٔ موجی)"
         } else {
             when (combinationCount) {
                 1 -> "تک‌استراتژی (۱گانه)"
@@ -339,8 +340,13 @@ enum class BitcoinStrategyModel(
             "KOONITZ_TRIPLE_SCREEN_FAST_7_22_44",
         )
 
-        /** استراتژی‌های موقتاً خاموش (فعلاً فقط استراتژی پیمان / جایگاه ۱۶). */
-        val temporarilyDisabledIds: Set<String> = setOf(DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+        /**
+         * استراتژی‌های موقتاً خاموش.
+         *
+         * الان هیچ‌کدام. استراتژی پیمان (جایگاه ۱۶) از این فهرست بیرون آمد و دوباره در
+         * ارزیابی و بک‌تست شرکت می‌کند. سازوکار خاموش‌کردن برای آینده حفظ می‌شود.
+         */
+        val temporarilyDisabledIds: Set<String> = emptySet()
 
         /** مدل‌هایی که یادگیری آنلاین و تیونینگ عصبی برایشان مجاز است. */
         val neuralLearningModels: List<BitcoinStrategyModel>
@@ -511,7 +517,7 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
     return when (this) {
         BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> String.format(
             Locale.US,
-            "استراتژی پیمان (الیوت–نئوویو) · فقط لایهٔ موج فعال است · ADX=%.1f · RSI7=%.1f · این استراتژی موقتاً غیرفعال است",
+            "استراتژی پیمان (الیوت–نئوویو) · فقط لایهٔ موج فعال است · ADX=%.1f · RSI7=%.1f · قاعدهٔ سخت نئوویو وتو می‌کند",
             trigSnap.adx14,
             trigSnap.rsi7,
         )
@@ -3723,8 +3729,45 @@ object IchimokuStrategyEngine {
         } else {
             trigSnap.close < trigSnap.kijun && (macroSnap == null || !macroSnap.isPriceAboveKumo)
         }
-        val parsaReady = parsaFlatOk && parsaSpanATurnOk && parsaCrossAge <= 8 &&
-            parsaSlopeOk && parsaLineSpacingOk && parsaChikouOk && parsaSharpMoveOk && parsaCloudOk
+        // ── پارسا: سه‌لایه به‌جای «نُه شرط AND» ─────────────────────────────────
+        // اندازه‌گیری پیش از این تغییر: ۰ معامله در سه سری ۲۵۰۰ کندلی و هیچ‌وقت
+        // بیش از ۸ شرط از ۹. حاصل‌ضرب نُه احتمال یعنی عملاً هیچ ستاپی کامل نمی‌شود.
+        // اکنون: هویت روش (فلت SSB + چرخش Span A + کراس تازه) وتوی سخت است و
+        // پنج تأیید کیفیتی با امتیاز سنجیده می‌شوند — همان الگوی لایه‌بندی موتور.
+        val parsaSpec = ParsaLineTurnEngine.spec(
+            flatBars = trigSnap.senkouSpanBFlatBars,
+            spanAPrevSlopeAtr = trigSnap.previousSenkouSpanASlopeAtrPerBar,
+            spanASlopeAtr = trigSnap.senkouSpanASlopeAtrPerBar,
+            crossAgeBars = parsaCrossAge,
+            slopeOk = parsaSlopeOk,
+            lineSpacingOk = parsaLineSpacingOk,
+            chikouOpen = parsaChikouOk,
+            cloudSideOk = parsaCloudOk,
+            sharpMoveOk = parsaSharpMoveOk,
+            isLong = isDirectionalLong,
+            slopeDetailFa = String.format(
+                Locale.US,
+                "شیب Tenkan=%+.2f · Kijun=%+.2f · Senkou A=%+.2f ATR/کندل",
+                trigSnap.tenkanSlopeAtrPerBar,
+                trigSnap.kijunSlopeAtrPerBar,
+                trigSnap.senkouSpanASlopeAtrPerBar,
+            ),
+            spacingDetailFa = String.format(
+                Locale.US,
+                "فاصله=%.2f ATR · تغییر فاصله=%+.2f ATR · قیمت تا Kijun=%.2f ATR",
+                trigSnap.tenkanKijunGapAtr,
+                trigSnap.tenkanKijunGapExpansionAtr,
+                trigSnap.distanceToKijunAtr,
+            ),
+            sharpDetailFa = String.format(
+                Locale.US,
+                "بدنه=%.0f%% · حجم=%.2fx · گسترش ATR=%.2fx",
+                trigSnap.candleBodyRatio * 100.0,
+                trigSnap.volumeRatio20,
+                trigSnap.atrExpansionRatio52,
+            ),
+        )
+        val parsaReady = parsaSpec.passed
 
         // ── روش مستقل «هیدن کراس»: ابر مخفی جهت می‌دهد، کراس برابری هدف می‌سازد ──
         // دادهٔ لازم از لایهٔ snapshot می‌آید تا محاسبات یک‌بار و مشترک انجام شوند.
@@ -4298,15 +4341,11 @@ object IchimokuStrategyEngine {
             StrategyConditionCheck(9, "۹. فاصلهٔ قابل‌تعقیب از Kijun", trigSnap.distanceToKijunAtr <= 1.65, String.format(Locale.US, "%.2f ATR (حداکثر ۱٫۶۵)", trigSnap.distanceToKijunAtr)),
             StrategyConditionCheck(10, "۱۰. پلن نهایی و R:R حداقل ۱:۱٫۵", cond12Passed && guardedPlan.isUsable, cond12Detail),
         )
-        val parsaConditions = listOf(
-            StrategyConditionCheck(1, "۱. فلت واقعی Senkou Span B (خط دورهٔ ۵۲)", parsaFlatOk, "SSB به‌مدت ${trigSnap.senkouSpanBFlatBars} کندل بسته تخت؛ حد لازم ۱۸ کندل (بیش از ۱۷)."),
-            StrategyConditionCheck(2, "۲. چرخش Senkou Span A برای ابر آینده", parsaSpanATurnOk, String.format(Locale.US, "شیب قبلی=%+.2f ATR، اکنون=%+.2f ATR در جهت معامله.", trigSnap.previousSenkouSpanASlopeAtrPerBar, trigSnap.senkouSpanASlopeAtrPerBar)),
-            StrategyConditionCheck(3, "۳. کراس هم‌جهت Tenkan/Kijun در ۸ کندل", parsaCrossAge <= 8, "سن کراس: ${if (parsaCrossAge == Int.MAX_VALUE) "یافت نشد" else "$parsaCrossAge کندل"}؛ مهلت مجاز ۸ کندل بسته."),
-            StrategyConditionCheck(4, "۴. شیب همسو و نبود مخالفت شدید Kijun", parsaSlopeOk, String.format(Locale.US, "شیب Tenkan=%+.2f · Kijun=%+.2f · Senkou A=%+.2f ATR/کندل", trigSnap.tenkanSlopeAtrPerBar, trigSnap.kijunSlopeAtrPerBar, trigSnap.senkouSpanASlopeAtrPerBar)),
-            StrategyConditionCheck(5, "۵. فاصله و گسترش سنجیدهٔ Tenkan/Kijun", parsaLineSpacingOk, String.format(Locale.US, "فاصله=%.2f ATR · تغییر فاصله=%+.2f ATR · قیمت تا Kijun=%.2f ATR", trigSnap.tenkanKijunGapAtr, trigSnap.tenkanKijunGapExpansionAtr, trigSnap.distanceToKijunAtr)),
-            StrategyConditionCheck(6, "۶. آزادی Chikou", parsaChikouOk, if (parsaChikouOk) "چیکو از کندل، TK و ابر در مسیر معامله آزاد است." else "چیکو هنوز درگیر ساختار متناظر است."),
-            StrategyConditionCheck(7, "۷. کیفیت حرکت شارپ و تأیید حجم/ATR", parsaSharpMoveOk, String.format(Locale.US, "بدنه=%.0f%% · حجم=%.2fx · گسترش ATR=%.2fx", trigSnap.candleBodyRatio * 100.0, trigSnap.volumeRatio20, trigSnap.atrExpansionRatio52)),
-            StrategyConditionCheck(8, "۸. سمت قیمت و نبود تضاد تایم‌فریم بالاتر", parsaCloudOk, "قیمت نسبت به Kijun و تایم‌فریم بالاتر با جهت معامله سنجیده شد."),
+        val parsaConditions = parsaSpec.rules.map {
+            StrategyConditionCheck(it.index, it.titleFa, it.passed, it.detailFa)
+        } + listOf(
+            // شرط نهم به پلن واقعی گره خورده است؛ اگر «همیشه تیک» بود، یک شرط بی‌معنا
+            // در گزارش می‌ماند.
             StrategyConditionCheck(9, "۹. پلن نهایی و R:R حداقل ۱:۱٫۵", cond12Passed && guardedPlan.isUsable, cond12Detail),
         )
         // ── هیدن کراس: دقیقاً همان چیزی که در آموزش اصلی هست، بدون افزودن شرط ──────
@@ -4384,8 +4423,11 @@ object IchimokuStrategyEngine {
 
         val requiredIndicesForModel: Set<Int> = when {
             isBtc52Model -> btc52Conditions.indices.map { it + 1 }.toSet()
-            isParsaModel -> parsaConditions.indices.map { it + 1 }.toSet()
             isHiddenCrossModel -> hiddenCrossConditions.indices.map { it + 1 }.toSet()
+            // پارسا: تنها شرایط «هویت روش» (فلت SSB + چرخش Span A + کراس تازه) و شرط
+            // نهم (پلن) برای سیگنال لازم‌اند. پنج تأیید کیفیتی با امتیاز در `parsaReady`
+            // سنجیده می‌شوند، نه با AND خالص — وگرنه همان «۰ معامله» برمی‌گردد.
+            isParsaModel -> parsaSpec.coreRules.map { it.index }.toSet() + 9
             else -> (1..17).toSet()
         }
         val modelCoreConditions = conditions.filter { it.index in requiredIndicesForModel }
@@ -4500,7 +4542,19 @@ object IchimokuStrategyEngine {
             baseConfig = effectiveConfig,
         )
 
+        // ── پیمان: شمارش موج باید **کامل و هم‌جهت** باشد ────────────────────────
+        // پیش از این، معامله با شمارش نیمه‌کاره هم باز می‌شد: هشت شرط الیوت
+        // (جهت موج، نقطهٔ S، فضای هدف، چرخهٔ زمان، R:R، ER14، شدو، اسنایپر) پاس
+        // می‌شدند ولی هیچ‌کدام نمی‌پرسید «آیا شمارش موج تمام شده است؟». در متد
+        // نئوویو، ورود پیش از تکمیل مونوویو یعنی ورود به وادی حدس — همان چیزی که
+        // بازده این استراتژی را منفی می‌کرد.
+        val peymanWaveConfirmed = !activeModel.isNeoWaveElliottStrategy || (
+            neoWaveVerdict != null &&
+                neoWaveVerdict.isComplete &&
+                neoWaveVerdict.isAlignedWith(isLong)
+            )
         val baseReadiness = when {
+            !peymanWaveConfirmed -> StrategyReadinessState.BLOCKED
             neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) -> StrategyReadinessState.BLOCKED
             // مسیر کلاسیک: هر ۱۷ شرط هم‌زمان (سخت‌گیرترین حالت، هنوز معتبر است).
             allSixteenPassed && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY

@@ -1659,7 +1659,8 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
      */
     fun activateSingleBitcoinStrategy(strategyId: String, enableExecution: Boolean = true) {
         if (strategyId in BitcoinStrategyModel.temporarilyDisabledIds) {
-            _toast.value = "⏸ استراتژی پیمان (الیوت–نئوویو) موقتاً غیرفعال است و فعلاً قابل فعال‌سازی نیست"
+            // این شاخه برای استراتژی‌های خاموش آینده است؛ پیمان دیگر در آن فهرست نیست.
+            _toast.value = "⏸ این استراتژی موقتاً غیرفعال است و فعلاً قابل فعال‌سازی نیست"
             return
         }
         container.settingsStore.update {
@@ -1697,7 +1698,8 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
 
     fun toggleStrategyEnabledInMultiMode(strategyId: String, enabled: Boolean) {
         if (strategyId in BitcoinStrategyModel.temporarilyDisabledIds) {
-            _toast.value = "⏸ استراتژی پیمان (الیوت–نئوویو) موقتاً غیرفعال است و فعلاً قابل فعال‌سازی نیست"
+            // این شاخه برای استراتژی‌های خاموش آینده است؛ پیمان دیگر در آن فهرست نیست.
+            _toast.value = "⏸ این استراتژی موقتاً غیرفعال است و فعلاً قابل فعال‌سازی نیست"
             return
         }
         container.settingsStore.update { current ->

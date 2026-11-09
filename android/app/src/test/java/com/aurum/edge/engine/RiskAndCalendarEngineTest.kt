@@ -536,10 +536,12 @@ class RiskAndCalendarEngineTest {
             assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.fromId(legacyId))
             assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id, BitcoinStrategyModel.normalizeStrategyId(legacyId))
         }
-        assertTrue(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.isTemporarilyDisabled)
-        assertEquals(15, BitcoinStrategyModel.activeStrategyIds.size)
-        assertFalse(
-            dualReport.reports15mByStrategy.containsKey(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+        // استراتژی پیمان (جایگاه ۱۶) به درخواست کاربر دوباره فعال شد: دیگر در فهرست
+        // موقتاً خاموش نیست و مثل بقیهٔ روش‌ها در ارزیابی و بک‌تست شرکت می‌کند.
+        assertFalse(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.isTemporarilyDisabled)
+        assertEquals(16, BitcoinStrategyModel.activeStrategyIds.size)
+        assertNotNull(
+            dualReport.reports15mByStrategy[BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id]
         )
         BitcoinStrategyModel.entries.filter { it.id in BitcoinStrategyModel.activeStrategyIds }.forEach { model ->
             val rep15 = dualReport.reportFor(Interval.M15, model.id)

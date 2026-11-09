@@ -1176,7 +1176,32 @@ object NeoWaveEngine {
         /** وزن آموخته‌شدهٔ هوش عصبی برای هر قاعده (خالی = بدون وزن‌دهی، رفتار قبلی). */
         ruleWeights: Map<Int, Double> = emptyMap(),
     ): NeoWaveGate {
-        if (verdict == null || !verdict.isUsable) {
+        if (verdict == null) {
+            return NeoWaveGate(
+                enabled = true,
+                veto = false,
+                confidenceDelta = 0.0,
+                noteFa = "ساختار نئوویو برای این تایم‌فریم هنوز معتبر نیست (داور خنثی).",
+                verdict = null,
+            )
+        }
+        // ── شکستن قاعدهٔ سخت نیلی باید **وتو** کند، نه سکوت ─────────────────────
+        // پیش از این، `isUsable` شکستِ قاعدهٔ سخت را هم شامل می‌شد، پس مسیر
+        // `!isUsable → داور خنثی` باعث می‌شد شکستن سخت‌ترین قاعدهٔ الگو، وتو را
+        // **خاموش** کند و معامله راحت‌تر رد شود. این دقیقاً برعکس قانون نیلی است:
+        // قاعدهٔ سخت یعنی «این شمارش باطل است، حتی اگر بقیهٔ قاعده‌ها زیبا باشند».
+        if (verdict.hardBreach) {
+            val breached = verdict.rules.filter { it.isHard && !it.passed }
+                .joinToString(" · ") { "${it.index}. ${it.titleFa}" }
+            return NeoWaveGate(
+                enabled = true,
+                veto = true,
+                confidenceDelta = -15.0,
+                noteFa = "⛔ نئوویو وتو کرد: قاعدهٔ سخت نقض شده است ($breached) — شمارش موج باطل است",
+                verdict = verdict,
+            )
+        }
+        if (!verdict.isUsable) {
             return NeoWaveGate(
                 enabled = true,
                 veto = false,
