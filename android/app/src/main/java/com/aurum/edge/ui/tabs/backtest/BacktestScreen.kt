@@ -987,7 +987,19 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     Spacer(Modifier.height(2.dp))
                 }
                 Spacer(Modifier.height(6.dp))
-                Pill(text = "پاک کردن این گزارش", color = AurumColors.TextSecondary, modifier = Modifier.clickable { vm.clearTraining() })
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Pill(text = "پاک کردن این گزارش", color = AurumColors.TextSecondary, modifier = Modifier.clickable { vm.clearTraining() })
+                    // پاک‌کردن حافظه: حالا که نمونه‌ها انباشته می‌شوند، بدون این دکمه یک
+                    // دورهٔ دادهٔ بد برای همیشه در حافظه می‌ماند.
+                    Pill(
+                        text = "🧠 پاک کردن حافظهٔ یادگیری",
+                        color = AurumColors.Orange,
+                        modifier = Modifier.clickable { vm.resetNeuralMemory() },
+                    )
+                }
             }
         }
 

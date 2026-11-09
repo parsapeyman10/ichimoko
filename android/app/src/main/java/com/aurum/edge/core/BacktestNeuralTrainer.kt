@@ -22,9 +22,19 @@ import kotlin.math.round
  * نرخ برد پیش‌بینی‌شده، وزن یادگرفته‌شدهٔ ستون‌های ایچیموکو و پارامترهای پیشنهادی.
  * هیچ‌کدام از این اعداد خودکار روی موتور زنده اعمال نمی‌شوند؛ تصمیمش با کاربر است.
  */
-class BacktestNeuralTrainer(context: Context? = null) {
+class BacktestNeuralTrainer(
+    context: Context? = null,
+    /**
+     * مسیر صریح فایل حافظه — فقط برای آزمون.
+     *
+     * بدون این پارامتر، آزمون JUnit برای دست‌زدن به فایل به `Context` اندروید نیاز داشت که
+     * در تست واحد وجود ندارد؛ نتیجه این بود که منطق «حافظه انباشته» هیچ‌وقت آزموده نمی‌شد.
+     */
+    storageFileOverride: File? = null,
+) {
 
-    private val storageFile: File? = context?.let { File(it.filesDir, "backtest/backtest_neural_v1.json") }
+    private val storageFile: File? = storageFileOverride
+        ?: context?.let { File(it.filesDir, "backtest/backtest_neural_v1.json") }
 
     /** خلاصهٔ آنچه شبکه در این اجرا یاد گرفت. */
     data class TrainingReport(
@@ -39,6 +49,17 @@ class BacktestNeuralTrainer(context: Context? = null) {
         val columns: List<ColumnWeight>,
         val parameters: List<ParameterSuggestion>,
         val notesFa: List<String>,
+        /**
+         * نمونه‌هایی که از **بک‌تست‌های قبلی** در حافظه بودند. صفر = این اولین آموزش است.
+         *
+         * قبلاً همیشه صفر بود، چون فایل حافظه پیش از هر آموزش پاک می‌شد؛ یعنی هر اجرا از
+         * صفر شروع می‌شد و «یادگیری» در عمل فقط «اندازه‌گیری همان اجرا» بود.
+         */
+        val carriedSamples: Int = 0,
+        /** کل نمونه‌های آموخته‌شده تا امروز (قبلی + همین اجرا). */
+        val totalLearnedSamples: Int = 0,
+        /** آیا حافظه با موفقیت ذخیره شد (اگر نه، اجرای بعدی دوباره از صفر شروع می‌شود). */
+        val persisted: Boolean = false,
     )
 
     data class ColumnWeight(val titleFa: String, val weight: Double, val directionFa: String)
@@ -63,6 +84,15 @@ class BacktestNeuralTrainer(context: Context? = null) {
         symbol: String,
         reports: Map<Long, StrategyEvaluationReport> = emptyMap(),
         baseConfig: BaseStrategyConfig = BaseStrategyConfig(),
+        /**
+         * آیا پول (دلار) در یادگیری اثر بگذارد؟
+         *
+         * پیش‌فرض **نه** — و این عمدی است: دانش شبکه باید به «کیفیت ستاپ» وابسته باشد، نه
+         * به سرمایهٔ شروع یا درصد ریسکی که کاربر همان روز انتخاب کرده. با `false`، معیار
+         * آموزش از فاصلهٔ قیمتی (R) ساخته می‌شود و عوض‌کردن سرمایه، دانش قبلی را بی‌اعتبار
+         * نمی‌کند. `true` فقط برای آزمون A/B نگه داشته شده است.
+         */
+        moneyAffectsLearning: Boolean = false,
     ): TrainingReport {
         val closed = trades.filter { !it.isOpen }
         if (closed.isEmpty()) {
@@ -73,18 +103,38 @@ class BacktestNeuralTrainer(context: Context? = null) {
                 notesFa = listOf("هیچ معاملهٔ بسته‌شده‌ای در این بک‌تست نبود؛ چیزی برای یادگیری وجود ندارد."),
             )
         }
-        // هر اجرا از صفر تمرین می‌شود تا نتیجهٔ یک بازه با بازهٔ دیگر قاطی نشود.
+        // ── حافظهٔ انباشته ────────────────────────────────────────────────────
+        // قبلاً اینجا `storageFile.delete()` اجرا می‌شد: حافظه پیش از هر آموزش پاک می‌شد.
+        // نتیجه: هیچ‌وقت بیش از نمونه‌های «همین یک اجرا» چیزی یاد گرفته نمی‌شد و بک‌تست
+        // قدیمی هیچ کمکی به آموزش نمی‌کرد. حالا موتور، وضعیت ذخیره‌شده را می‌خواند و
+        // نمونه‌های تازه روی همان ساخته می‌شوند.
+        //
+        // چرا اکنون بی‌خطر است؟ شناسهٔ هر نمونه از خودِ معامله ساخته می‌شود (نماد، استراتژی،
+        // زمان ورود). پس اجرای دوبارهٔ همان CSV چیزی به دانش اضافه نمی‌کند و مدل را متورم
+        // نمی‌کند — همان قاعدهٔ «تکراری نمی‌تواند بنشیند» که برای اعمال سود هم گذاشتیم.
         storageFile?.parentFile?.mkdirs()
-        storageFile?.delete()
         val engine = NeuralSelfLearningEngine(context = null, storageFile = storageFile)
+        val carried = runCatching { engine.totalLearnedTradesCount() }.getOrDefault(0)
 
         var fed = 0
         closed.forEachIndexed { index, trade ->
             val report = reports[trade.entryTime]
             val pseudo = trade.toPseudoPaperTrade(symbol, report, index)
             val features = extract(engine, pseudo, report)
+            // ── پول، معیار یادگیری نیست ───────────────────────────────────────
+            // شبکه روی «برد/باخت» و «R» آموزش می‌بیند، و این دو با سود دلاری فرق دارند:
+            // با سرمایهٔ شروع بزرگ یا ریسک درصدی بالا، همان setups برنده می‌تواند در CSV
+            // دیگری دلار منفی بدهد. اگر آموزش به پول دلاری گره بخورد، هر بار که کاربر
+            // سرمایهٔ شروع یا ریسک را عوض کند، دانش قبلی «غلط» می‌شود.
+            //
+            // پس برای آموزش، R و برد/باخت از **فاصلهٔ قیمتی** بازسازی می‌شوند (حد ضرر
+            // اولیه، همان کاری که `toPseudoPaperTrade` می‌کند) و اعداد دلاری جای دیگری
+            // (آرشیو، آمار بک‌تست) می‌مانند. پارامتر `moneyAffectsLearning` این گزینه را
+            // صریح نگه می‌دارد تا اگر روزی کسی بخواهد آموزش وابسته به پول ببیند،
+            // بداند که دارد یک فرض را عوض می‌کند.
+            val learnPseudo = if (moneyAffectsLearning) pseudo else pseudo.asRiskNormalized()
             engine.recordCompletedTrade(
-                trade = pseudo,
+                trade = learnPseudo,
                 report = report,
                 featuresOverride = features?.first?.toDoubleArray(),
                 conditionKeyOverride = features?.second,
@@ -132,6 +182,16 @@ class BacktestNeuralTrainer(context: Context? = null) {
         val notes = ArrayList<String>()
         notes += "این تمرین در فایل جدا (${storageFile?.name ?: "حافظهٔ موقت"}) انجام شد؛ دفتر یادگیری، " +
             "شمارندهٔ نمونه و پارامترهای معاملات واقعی برنامه دست‌نخورده ماندند."
+        // حافظهٔ انباشته: کاربر باید ببیند بک‌تست‌های قبلی واقعاً کمک کرده‌اند یا نه.
+        if (carried > 0) {
+            notes += "🧠 حافظهٔ اتاق تمرین: $carried نمونه از بک‌تست‌های قبلی در حافظه بود و " +
+                "$fed نمونهٔ این اجرا روی همان‌ها ساخته شد (جمع: ${carried + fed})."
+        } else {
+            notes += "🧠 این اولین آموزش است (حافظه خالی بود). اجرای بعدی روی همین دانش ساخته می‌شود."
+        }
+        if (storageFile?.isFile != true) {
+            notes += "⚠️ حافظه ذخیره نشد؛ اجرای بعدی دوباره از صفر شروع می‌شود. فضای ذخیره‌سازی برنامه را بررسی کنید."
+        }
         if (closed.size < 10) {
             notes += "نمونه کم است (${closed.size} معامله). این اعداد را جدی نگیرید؛ بازهٔ بزرگ‌تری CSV بگیرید."
         }
@@ -178,7 +238,50 @@ class BacktestNeuralTrainer(context: Context? = null) {
                 ),
             ),
             notesFa = notes,
+            carriedSamples = carried,
+            totalLearnedSamples = runCatching { engine.totalLearnedTradesCount() }.getOrDefault(carried + fed),
+            persisted = storageFile?.isFile == true,
         )
+    }
+
+    /**
+     * پاک‌کردن حافظهٔ اتاق تمرین — با تصمیم صریح کاربر.
+     *
+     * چرا لازم است؟ حالا که نمونه‌ها انباشته می‌شوند، یک دورهٔ دادهٔ بد (مثلاً CSV نویزی یا
+     * بازار رِنج) برای همیشه در حافظه می‌ماند. بدون این دکمه، راه برگشتی وجود نداشت.
+     * فقط فایل تمرین پاک می‌شود؛ حافظهٔ شبکهٔ اصلی برنامه (`neural_self_learning_v1.json`)
+     * و ژورنال واقعی هیچ‌وقت لمس نمی‌شوند.
+     */
+    fun resetMemory(): Boolean {
+        val f = storageFile ?: return false
+        val existed = f.exists()
+        if (existed) f.delete()
+        return !f.exists()
+    }
+
+    /**
+     * همان معامله، اما معیار یادگیری‌اش از قیمت می‌آید نه از دلار.
+     *
+     * `pnlUsd` تنها جایی است که پول وارد آموزش می‌شود (برد/باخت و R از آن ساخته می‌شوند).
+     * با جایگزین‌کردنش با سود/زیان معادلِ R-محور — دقیقاً یک واحد ریسک برای برد و یک واحد
+     * برای باخت، به‌علاوهٔ همان نسبت R که در بازار واقعاً اتفاق افتاده — ساختار آموزش
+     * تغییر نمی‌کند ولی وابستگی به سرمایه از بین می‌رود.
+     *
+     * نکتهٔ مهم: اگر R صفر باشد (معامله در نقطهٔ سربه‌سر بسته شده) همان صفر می‌ماند و
+     * به‌عنوان باخت شمرده نمی‌شود؛ این عمدی است تا سربه‌سرها آمار را خراب نکنند.
+     */
+    private fun PaperTrade.asRiskNormalized(): PaperTrade {
+        val oneR = abs(entry - (initialStopLoss ?: stopLoss)).coerceAtLeast(1e-9)
+        val r = (pnlUsd ?: 0.0) / oneR
+        return copy(pnlUsd = r)
+    }
+
+    /** چند نمونه در حافظهٔ اتاق تمرین هست (بدون تغییر چیزی). */
+    fun memorySize(): Int {
+        val f = storageFile ?: return 0
+        if (!f.exists()) return 0
+        val engine = NeuralSelfLearningEngine(context = null, storageFile = f)
+        return runCatching { engine.totalLearnedTradesCount() }.getOrDefault(0)
     }
 
     private fun extract(

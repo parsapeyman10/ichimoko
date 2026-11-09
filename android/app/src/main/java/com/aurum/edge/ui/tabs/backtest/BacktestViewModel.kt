@@ -522,6 +522,26 @@ class BacktestViewModel(
 
     fun archiveNoteFa(): String = "آرشیو فقط خواندنی است و ژورنال/یادگیری واقعی را تغییر نمی‌دهد."
 
+    /** تعداد نمونه‌های ذخیره‌شده در حافظهٔ اتاق تمرین (برای نمایش). */
+    fun neuralMemorySize(): Int = runCatching { trainer.memorySize() }.getOrDefault(0)
+
+    /**
+     * پاک‌کردن حافظهٔ اتاق تمرین — با تصمیم صریح کاربر.
+     *
+     * حالا که نمونه‌ها انباشته می‌شوند، یک دورهٔ دادهٔ بد (CSV نویزی، بازار رِنج) برای همیشه
+     * در حافظه می‌ماند. این راه برگشت است. فقط فایل تمرین پاک می‌شود؛ حافظهٔ شبکهٔ اصلی
+     * برنامه و ژورنال واقعی دست نمی‌خورند.
+     */
+    fun resetNeuralMemory() {
+        val ok = runCatching { trainer.resetMemory() }.getOrDefault(false)
+        if (ok) {
+            _training.value = null
+            emit("🧠 حافظهٔ اتاق تمرین پاک شد؛ آموزش بعدی از صفر شروع می‌شود.")
+        } else {
+            emit("⚠️ پاک‌کردن حافظه ناموفق بود.")
+        }
+    }
+
     /** آموزش شبکهٔ عصبیِ اتاق تمرین با معامله‌های همین بک‌تست. */
     fun trainNeural() {
         val res = _result.value ?: run {
@@ -545,8 +565,19 @@ class BacktestViewModel(
             }.onSuccess { report ->
                 withContext(Dispatchers.Main) {
                     _training.value = report
-                    _statusFa.value = "🧠 تمرین تمام شد: ${report.samplesFed} نمونه · " +
-                        "دقت درون‌نمونه‌ای ${report.inSampleAccuracyPct}% (این اعداد روی معاملات واقعی اثر ندارند)"
+                    // کاربر باید ببیند «۲۰ نمونهٔ این اجرا» تنها چیزی نیست که یاد گرفته شده؛
+                    // اگر حافظهٔ قبلی داشته باشیم، جمع هم گفته می‌شود.
+                    val memoryFa = if (report.carriedSamples > 0) {
+                        " · حافظه: ${report.carriedSamples} نمونهٔ قبلی + ${report.samplesFed} تازه = ${report.totalLearnedSamples}"
+                    } else {
+                        " · اولین آموزش (حافظه خالی بود)"
+                    }
+                    // جملهٔ قبلی «این اعداد روی معاملات واقعی اثر ندارند» بود که هم مبهم بود
+                    // هم نیمی از واقعیت را پنهان می‌کرد: دانش همین‌جاست و با تیک «فعال‌سازی
+                    // گیت» می‌تواند ورود واقعی را مسدود کند. حالا صریح گفته می‌شود.
+                    _statusFa.value = "🧠 تمرین تمام شد: ${report.samplesFed} نمونه$memoryFa · " +
+                        "دقت درون‌نمونه‌ای ${report.inSampleAccuracyPct}% · دانش ذخیره شد و با " +
+                        "روشن‌بودن «فعال‌سازی گیت» روی معاملات واقعی اثر می‌گذارد"
                 }
             }.onFailure { err ->
                 withContext(Dispatchers.Main) {
