@@ -33,10 +33,25 @@ object Assert {
     @JvmStatic fun assertNull(message: String, actual: Any?) { if (actual != null) throw AssertionError(message) }
 
     @JvmStatic fun assertEquals(expected: Any?, actual: Any?) {
+        rejectDoubleWithoutDelta("assertEquals", expected, actual)
         if (expected != actual) throw AssertionError("expected <$expected> but was <$actual>")
     }
     @JvmStatic fun assertEquals(message: String, expected: Any?, actual: Any?) {
+        rejectDoubleWithoutDelta(message, expected, actual)
         if (expected != actual) throw AssertionError("$message: expected <$expected> but was <$actual>")
+    }
+
+    /**
+     * JUnit واقعی مقایسهٔ دو `Double` بدون `delta` را **رد می‌کند**؛ این شبیه‌ساز قبلاً
+     * بی‌صدا قبول می‌کرد و نتیجه‌اش یک CI قرمز با محلی سبز بود (دقیقاً همین اتفاق در
+     * `CompressionExpansionEngineTest` افتاد). حالا رفتار شبیه‌ساز مثل JUnit است.
+     */
+    private fun rejectDoubleWithoutDelta(message: String, expected: Any?, actual: Any?) {
+        val e = expected as? Double
+        val a = actual as? Double
+        if (e != null && a != null) {
+            throw AssertionError("$message: Use assertEquals(expected, actual, delta) to compare floating-point numbers")
+        }
     }
     @JvmStatic fun assertEquals(expected: Double, actual: Double, delta: Double) {
         if (kotlin.math.abs(expected - actual) > delta) throw AssertionError("expected <$expected> but was <$actual> (delta $delta)")

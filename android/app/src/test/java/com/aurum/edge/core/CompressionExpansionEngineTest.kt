@@ -177,10 +177,13 @@ class CompressionExpansionEngineTest {
         val bars = quiet(130)
         val a = analyze(bars)
         val expectedHigh = bars.subList(110, 130).maxOf { it.high } // [n-20 .. n-1] پیش از کندل جاری
+        // JUnit واقعی برای Double آرگومان delta می‌خواهد (شبیه‌ساز آزمایشگاه نه) — همین
+        // تفاوت باعث شد CI قرمز شود در حالی که تست محلی سبز بود.
         assertEquals(
             "سقف ناحیه باید فقط از کندل‌های قبل از کندل جاری ساخته شود",
             round2(expectedHigh),
             round2(a.compressionHigh ?: 0.0),
+            1e-9,
         )
     }
 
@@ -395,11 +398,12 @@ class CompressionExpansionEngineTest {
         val b = analyze(mutated, snap(100.30, atr = 0.30))
         assertEquals(
             "تحلیل باید فقط به دادهٔ گذشته و کندل جاری وابسته باشد",
-            a.compressionHigh,
-            b.compressionHigh,
+            a.compressionHigh ?: 0.0,
+            b.compressionHigh ?: 0.0,
+            1e-9,
         )
-        assertEquals(a.compressionLow, b.compressionLow)
-        assertEquals(a.compressionScorePct, b.compressionScorePct)
+        assertEquals(a.compressionLow ?: 0.0, b.compressionLow ?: 0.0, 1e-9)
+        assertEquals(a.compressionScorePct, b.compressionScorePct, 1e-9)
     }
 
     @Test
@@ -409,8 +413,8 @@ class CompressionExpansionEngineTest {
         val withFuture = base + quiet(20, from = 130)
         val a = analyze(base.take(130))
         val b = analyze(withFuture.take(130))
-        assertEquals(a.compressionHigh, b.compressionHigh)
-        assertEquals(a.compressionLow, b.compressionLow)
+        assertEquals(a.compressionHigh ?: 0.0, b.compressionHigh ?: 0.0, 1e-9)
+        assertEquals(a.compressionLow ?: 0.0, b.compressionLow ?: 0.0, 1e-9)
     }
 
     // ─────────────────────── ۸. خاموش‌بودن و مدل‌های دیگر ───────────────────────
