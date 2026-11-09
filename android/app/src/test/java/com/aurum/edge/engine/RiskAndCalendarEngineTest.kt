@@ -529,9 +529,9 @@ class RiskAndCalendarEngineTest {
         assertEquals(16, BitcoinStrategyModel.neuralLearningModels.size)
         assertEquals(1, BitcoinStrategyModel.drivePdfStrategies.size)
         assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.drivePdfStrategies.single())
-        // v3.9.47: استراتژی ۱۶ (پیمان) موقتاً غیرفعال است، پس فقط ۱۵ استراتژی ارزیابی می‌شوند.
-        assertEquals(15, dualReport.reports15mByStrategy.size)
-        assertEquals(15, dualReport.reports5mByStrategy.size)
+        // استراتژی ۱۶ (پیمان) دوباره فعال شد، پس هر ۱۶ روش ارزیابی می‌شوند.
+        assertEquals(16, dualReport.reports15mByStrategy.size)
+        assertEquals(16, dualReport.reports5mByStrategy.size)
         BitcoinStrategyModel.legacyIndividualDriveIds.forEach { legacyId ->
             assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.fromId(legacyId))
             assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id, BitcoinStrategyModel.normalizeStrategyId(legacyId))
