@@ -90,4 +90,6 @@ if [[ "${3:-}" == "robust" ]]; then MAIN="RobustKt"; fi
 if [[ "${3:-}" == "btc" ]]; then MAIN="BtcKt"; fi
 # حالت «csv»: مسیر فایل‌ها از آرگومان چهارم شروع می‌شود (سوم خودِ کلیدواژه است).
 if [[ "${3:-}" == "csv" ]]; then MAIN="CsvLabKt"; EXTRA=("${@:4}"); fi
+# چرتکهٔ کامل «پیمان کریپتو» روی هر کندل: راهنمای PeymanLab.kt
+if [[ "${3:-}" == "pey" ]]; then MAIN="PeymanLabKt"; EXTRA=("${@:4}"); fi
 "$JAVA_HOME/bin/java" -Dfile.encoding=UTF-8 -cp "$WORK/out:$STDLIB" "$MAIN" "$BARS" "$SEED" "${EXTRA[@]}"
