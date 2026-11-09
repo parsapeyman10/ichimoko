@@ -219,8 +219,8 @@ android {
         // ۳.۹.۵۸: آرشیو معاملاتی در پایان هر بک‌تست + دکمهٔ «اعمال یک‌بارهٔ سود» با قفل
         // شناسهٔ محتوایی، نمایش هزینهٔ اجرا در برابر ۱R، حافظهٔ اسنپ‌شات (۵.۳× سریع‌تر در
         // حالت «همهٔ استراتژی‌ها»)، زمان تقریبی باقی‌مانده و سقف کندل.
-        versionCode = 770
-        versionName = "3.9.61"
+        versionCode = 771
+        versionName = "3.9.62"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
@@ -302,6 +302,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
+    // بک‌تستِ پس‌زمینه: کار باید با بسته‌شدن اپ/صفحه زنده بماند و نتیجه‌اش ذخیره شود.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
     implementation(composeBom)

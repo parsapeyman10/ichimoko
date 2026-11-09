@@ -14,6 +14,10 @@ import com.aurum.edge.core.BacktestTradeArchive
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.data.BacktestArchiveStore
 import com.aurum.edge.data.BacktestDataStore
+import com.aurum.edge.data.BacktestJob
+import com.aurum.edge.data.BacktestJobSpec
+import com.aurum.edge.data.BacktestJobStore
+import com.aurum.edge.service.BacktestJobWorker
 import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.Interval
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +48,7 @@ class BacktestViewModel(
     private val store = BacktestDataStore(application)
     private val archiveStore = BacktestArchiveStore(application)
     private val trainer = BacktestNeuralTrainer(application)
+    private val jobStore = BacktestJobStore(application)
 
     private val _dataSets = MutableStateFlow<List<BacktestDataStore.DataSet>>(emptyList())
     val dataSets: StateFlow<List<BacktestDataStore.DataSet>> = _dataSets.asStateFlow()
@@ -182,6 +187,7 @@ class BacktestViewModel(
     }
 
     fun refresh() {
+        refreshJobs()
         viewModelScope.launch(Dispatchers.IO) {
             val list = runCatching { store.list() }.getOrDefault(emptyList())
             withContext(Dispatchers.Main) {
@@ -327,6 +333,120 @@ class BacktestViewModel(
 
     fun updateSettings(block: (Settings) -> Settings) {
         _settings.update(block)
+    }
+
+    // ─────────────────────────── بک‌تست پس‌زمینه ───────────────────────────
+    /**
+     * کارِ پس‌زمینه یعنی: «من از اپ بیرون می‌روم، تو کار کن و نتیجه را نگه دار.»
+     *
+     * چرا این‌طور پیاده شد؟ ViewModel با بسته‌شدن صفحه می‌میرد، پس اجرای داخل آن
+     * با خروج کاربر متوقف می‌شد. کار به `WorkManager` سپرده می‌شود (پایدار، حتی بعد
+     * از ری‌استارت گوشی) و تنظیماتِ کاملِ همان اجرا در `BacktestJobStore` ذخیره
+     * می‌شود؛ بنابراین بعداً می‌توانی فقط یک پارامتر را عوض کنی و دوباره اجرا.
+     */
+    private val _jobs = MutableStateFlow<List<BacktestJob>>(emptyList())
+    val jobs: StateFlow<List<BacktestJob>> = _jobs.asStateFlow()
+
+    fun refreshJobs() {
+        _jobs.value = runCatching { jobStore.list() }.getOrDefault(emptyList())
+    }
+
+    fun queueBackgroundRun(noteFa: String = "") {
+        val all = _candles.value
+        if (all.isEmpty()) {
+            emit("اول یک فایل CSV وارد کنید.")
+            return
+        }
+        val set = _dataSets.value.firstOrNull { it.id == _selectedId.value }
+        if (set == null) {
+            emit("دادهٔ انتخاب‌شده پیدا نشد.")
+            return
+        }
+        val s = _settings.value
+        val id = "job-" + System.currentTimeMillis().toString(36)
+        val spec = BacktestJobSpec(
+            id = id,
+            dataSetId = set.id,
+            dataSetName = set.displayName,
+            createdAt = System.currentTimeMillis(),
+            strategyId = s.strategyId,
+            symbol = s.symbol.ifBlank { set.symbol },
+            runAllStrategies = s.runAllStrategies,
+            startEquityUsd = s.startEquityUsd,
+            riskPercent = s.riskPercent,
+            useSmartExit = s.useSmartExit,
+            usePreserveMode = s.usePreserveMode,
+            useTimeStop = s.useTimeStop,
+            optimisticSameBarFill = s.optimisticSameBarFill,
+            maxBars = s.maxBars,
+            includeHiddenCrossLayer = s.includeHiddenCrossLayer,
+            compressionExpansion = s.compressionExpansion,
+            peymanCryptoPaper = s.peymanCryptoPaper,
+            cursorIndex = _cursor.value,
+            noteFa = noteFa,
+        )
+        jobStore.upsert(BacktestJob(spec = spec))
+        BacktestJobWorker.enqueue(getApplication(), id)
+        refreshJobs()
+        emit("بک‌تست در پس‌زمینه صف شد (${set.displayName}). می‌توانی از اپ بیرون بروی؛ نتیجه ذخیره می‌شود.")
+    }
+
+    fun cancelBackgroundJob(id: String) {
+        BacktestJobWorker.cancel(getApplication(), id)
+        jobStore.update(id) {
+            it.copy(status = BacktestJob.STATUS_CANCELLED, messageFa = "لغو شد.")
+        }
+        refreshJobs()
+        emit("کار پس‌زمینه لغو شد.")
+    }
+
+    fun deleteBackgroundJob(id: String) {
+        jobStore.remove(id)
+        refreshJobs()
+    }
+
+    /** تنظیمات یک کار را داخل فرم می‌ریزد تا کاربر عوض کند و دوباره اجرا کند. */
+    fun loadJobSettings(id: String) {
+        val job = jobStore.find(id) ?: return
+        val spec = job.spec
+        if (_dataSets.value.any { it.id == spec.dataSetId }) select(spec.dataSetId)
+        _settings.update {
+            it.copy(
+                strategyId = spec.strategyId,
+                symbol = spec.symbol,
+                runAllStrategies = spec.runAllStrategies,
+                startEquityUsd = spec.startEquityUsd,
+                riskPercent = spec.riskPercent,
+                useSmartExit = spec.useSmartExit,
+                usePreserveMode = spec.usePreserveMode,
+                useTimeStop = spec.useTimeStop,
+                optimisticSameBarFill = spec.optimisticSameBarFill,
+                maxBars = spec.maxBars,
+                includeHiddenCrossLayer = spec.includeHiddenCrossLayer,
+                compressionExpansion = spec.compressionExpansion,
+                peymanCryptoPaper = spec.peymanCryptoPaper,
+            )
+        }
+        if (spec.cursorIndex in 1.._candles.value.size) setCursor(spec.cursorIndex)
+        emit("تنظیمات کار «${spec.noteFa.ifBlank { spec.dataSetName }}» در فرم نشست؛ تغییر بده و اجرا کن.")
+    }
+
+    fun openJobResult(id: String) {
+        val job = jobStore.find(id) ?: return
+        val r = job.result
+        if (r == null) {
+            emit("این کار هنوز نتیجه‌ای ندارد (${job.messageFa}).")
+            return
+        }
+        _statusFa.value = "نتیجهٔ کار: ${r.summaryFa}\n" +
+            "کندل=${r.candlesUsed} · مدت=${r.elapsedMs / 1000}ثانیه\n" +
+            "آرشیو: ${r.archiveCsvPath}"
+        emit(r.summaryFa)
+    }
+
+    fun clearFinishedJobs() {
+        jobStore.clearFinished()
+        refreshJobs()
     }
 
     fun setCursor(index: Int) {

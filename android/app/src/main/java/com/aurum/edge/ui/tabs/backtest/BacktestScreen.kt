@@ -81,6 +81,7 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
     val archiveFiles by vm.archiveFiles.collectAsStateWithLifecycle()
     val appliedEntry by vm.appliedEntry.collectAsStateWithLifecycle()
     val htfCandles by vm.htfCandles.collectAsStateWithLifecycle()
+    val backgroundJobs by vm.jobs.collectAsStateWithLifecycle()
 
     var toastText by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
@@ -115,6 +116,23 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Spacer(Modifier.height(6.dp))
+
+        // ── ۰. بک‌آزمون پس‌زمینه ────────────────────────────────────────────
+        // «وقتی داخل اپ نیستم بک‌تست کار کنه و نتیجه را نگه داره تا تغییرش بدم.»
+        BackgroundJobsSection(
+            jobs = backgroundJobs,
+            enabled = candles.isNotEmpty() && !busy,
+            onQueue = { vm.queueBackgroundRun() },
+            onRefresh = { vm.refreshJobs() },
+            onOpen = { vm.openJobResult(it) },
+            onEdit = { vm.loadJobSettings(it) },
+            onCancel = { vm.cancelBackgroundJob(it) },
+            onDelete = { vm.deleteBackgroundJob(it) },
+            onClearFinished = { vm.clearFinishedJobs() },
+        )
+        // یک‌بار در هر ورود به صفحه، فهرست کارها از حافظه خوانده می‌شود تا وضعیت کارهایی
+        // که وقتی در اپ نبودی تمام شده‌اند تازه باشد.
+        LaunchedEffect(Unit) { vm.refreshJobs() }
 
         // ── ۰. سرصفحه و مرز جدایی ───────────────────────────────────────────
         SectionCard(initiallyExpanded = true, title = "🧪 آزمایشگاه بک‌تست (dukascopy-node)") {
@@ -1226,4 +1244,105 @@ private fun fmtPrice(v: Double): String = when {
     v >= 10.0 -> String.format(java.util.Locale.US, "%.3f", v)
     v >= 1.0 -> String.format(java.util.Locale.US, "%.4f", v)
     else -> String.format(java.util.Locale.US, "%.5f", v)
+}
+
+
+/**
+ * بخش «بک‌آزمون پس‌زمینه».
+ *
+ * هر کار یک ردیف است: نام داده/استراتژی، وضعیت، خلاصهٔ نتیجه و سه دکمه —
+ * «دیدن نتیجه»، «تغییر تنظیمات» (همان اجرا را در فرم می‌نشاند) و «لغو/حذف».
+ * نتیجه روی حافظهٔ داخلی می‌مانَد تا هر وقت خواستی برگردی و پارامتر را عوض کنی.
+ */
+@Composable
+private fun BackgroundJobsSection(
+    jobs: List<com.aurum.edge.data.BacktestJob>,
+    enabled: Boolean,
+    onQueue: () -> Unit,
+    onRefresh: () -> Unit,
+    onOpen: (String) -> Unit,
+    onEdit: (String) -> Unit,
+    onCancel: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onClearFinished: () -> Unit,
+) {
+    SectionCard(initiallyExpanded = true, title = "🌙 بک‌آزمون پس‌زمینه") {
+        Text(
+            text = "کار را این‌جا صف کن، از اپ بیرون برو؛ اجرا در پس‌زمینه ادامه پیدا می‌کند " +
+                "(شرط: باتری و حافظه کم نباشد) و نتیجه روی گوشی ذخیره می‌شود. بعداً همان کار را " +
+                "باز کن، تنظیماتش را تغییر بده و دوباره اجرا کن. این بخش به ژورنال و حساب واقعی دست نمی‌زند.",
+            color = AurumColors.TextSecondary,
+            fontSize = 11.sp,
+            lineHeight = 16.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton("🚀 صف‌کردن اجرا", enabled = enabled, color = AurumColors.Cyan) { onQueue() }
+            ActionButton("🔄 تازه‌سازی", enabled = true, color = AurumColors.TextSecondary) { onRefresh() }
+            if (jobs.any { it.isFinished }) {
+                ActionButton("🧹 پاک‌کردن تمام‌شده‌ها", enabled = true, color = AurumColors.TextSecondary) {
+                    onClearFinished()
+                }
+            }
+        }
+        if (jobs.isEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "هنوز کار پس‌زمینه‌ای ثبت نشده است.",
+                color = AurumColors.TextMuted,
+                fontSize = 11.sp,
+            )
+            return@SectionCard
+        }
+        Spacer(Modifier.height(8.dp))
+        val statusFa = mapOf(
+            com.aurum.edge.data.BacktestJob.STATUS_QUEUED to "در صف",
+            com.aurum.edge.data.BacktestJob.STATUS_RUNNING to "در حال اجرا",
+            com.aurum.edge.data.BacktestJob.STATUS_DONE to "تمام‌شده",
+            com.aurum.edge.data.BacktestJob.STATUS_FAILED to "ناموفق",
+            com.aurum.edge.data.BacktestJob.STATUS_CANCELLED to "لغوشده",
+        )
+        jobs.forEach { job ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.SurfaceAlt)
+                    .border(1.dp, AurumColors.Line, RoundedCornerShape(10.dp))
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Pill("${statusFa[job.status] ?: job.status}", taskStatusColor(job.status))
+                    Pill(job.spec.dataSetName.take(26), AurumColors.TextSecondary)
+                    Pill(job.spec.strategyId.take(22), AurumColors.TextMuted)
+                }
+                val r = job.result
+                Text(
+                    text = r?.summaryFa ?: job.messageFa.ifBlank { "—" },
+                    color = if (r != null) AurumColors.TextPrimary else AurumColors.TextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ActionButton("👁 نتیجه", enabled = r != null, color = AurumColors.Gold) { onOpen(job.spec.id) }
+                    ActionButton("✏️ تغییر تنظیمات", enabled = true, color = AurumColors.Cyan) { onEdit(job.spec.id) }
+                    if (!job.isFinished) {
+                        ActionButton("✖ لغو", enabled = true, color = AurumColors.TextSecondary) { onCancel(job.spec.id) }
+                    } else {
+                        ActionButton("🗑 حذف", enabled = true, color = AurumColors.TextSecondary) { onDelete(job.spec.id) }
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+    }
+}
+
+/** رنگ وضعیت کار پس‌زمینه؛ فقط برای خوانایی فهرست، بدون معنی استراتژیک. */
+private fun taskStatusColor(status: String): Color = when (status) {
+    com.aurum.edge.data.BacktestJob.STATUS_DONE -> AurumColors.Green
+    com.aurum.edge.data.BacktestJob.STATUS_RUNNING -> AurumColors.Gold
+    com.aurum.edge.data.BacktestJob.STATUS_FAILED -> AurumColors.Red
+    else -> AurumColors.TextSecondary
 }
