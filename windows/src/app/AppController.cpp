@@ -128,7 +128,7 @@ void AppController::loadCsv(const QString& path) {
             const std::string_view raw(reinterpret_cast<const char*>(mapped), static_cast<std::size_t>(size));
             outcome.data = std::make_shared<ParseResult>(parseDukascopyCsv(raw, name.toStdString()));
             const double amplitude = neoWaveDynamicAmplitude(outcome.data->candles);
-            const auto pivots = neoWavePivots(outcome.data->candles, amplitude);
+            const auto pivots = aurum::neoWavePivots(outcome.data->candles, amplitude);
             const auto first = pivots.size() > 30 ? pivots.end() - 30 : pivots.begin();
             for (auto it = first; it != pivots.end(); ++it) outcome.neoWavePivots.push_back(QVariantMap{
                 {QStringLiteral("index"), it->index}, {QStringLiteral("price"), it->price},
