@@ -44,9 +44,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           try {
             $env:QT_QPA_PLATFORM = 'offscreen'
-            $process = Start-Process -FilePath 'windows/build/aurum_edge.exe' -ArgumentList '--smoke-test' -Wait -PassThru
+            $process = Start-Process -FilePath 'windows/build/aurum_edge.exe' -ArgumentList '--smoke-test' -Wait -PassThru `
+              -RedirectStandardOutput 'windows/build/smoke.out.log' -RedirectStandardError 'windows/build/smoke.err.log'
             if ($process.ExitCode -ne 0) { throw "QML smoke test failed with code $($process.ExitCode)" }
           } catch {
+            if (Test-Path 'windows/build/smoke.err.log') {
+              $diagnostics = (Get-Content 'windows/build/smoke.err.log' -Raw) -replace "`r?`n", ' | '
+              Write-Host "::error::$diagnostics"
+            }
             Write-Host "::error::$($_.Exception.Message)"
             exit 1
           }
