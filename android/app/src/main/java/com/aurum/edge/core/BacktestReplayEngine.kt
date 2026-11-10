@@ -219,6 +219,8 @@ object BacktestReplayEngine {
         val averageBookGatePct: Double = 0.0,
         /** شرط‌هایی که بیشترین بار رد شدند (عنوان فارسی → تعداد)، بیشترین اول. */
         val topBlockers: List<Pair<String, Int>> = emptyList(),
+        /** گزارش ماه‌به‌ماه (هر خط یک ماه). خالی یعنی اجرا یک‌جا بوده است. */
+        val periodSummariesFa: List<String> = emptyList(),
     ) {
         val totals: Stats? = stats.firstOrNull { it.strategyId == "__ALL__" } ?: stats.firstOrNull()
         val finalEquityUsd: Double get() = equityCurve.lastOrNull()?.second ?: config.startEquityUsd
@@ -371,6 +373,9 @@ object BacktestReplayEngine {
         val periods = ArrayList<PeriodResult>(months.size)
         val allTrades = ArrayList<Trade>(1024)
         var emptyMonths = 0
+        // سرمایه از ماه قبل حمل می‌شود؛ وگرنه هر ماه با ۱۰۰۰$ تازه شروع می‌شد و جمع سود
+        // ماه‌ها با اجرای یک‌جا قابل مقایسه نبود (اندازه‌گیری اول: ۱٬۹۴۲$ در برابر ۵٬۳۷۸$).
+        var runningEquity = config.startEquityUsd
         months.forEachIndexed { index, month ->
             val fromMs = month.atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
             val toMs = month.plusMonths(1).atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -402,18 +407,24 @@ object BacktestReplayEngine {
                 return@forEachIndexed
             }
             val monthStart = System.currentTimeMillis()
-            val res = runWithWindow(window, config.copy(maxBars = 0), ENGINE_WINDOW_BARS, null)
+            val res = runWithWindow(
+                window,
+                config.copy(maxBars = 0, startEquityUsd = runningEquity),
+                ENGINE_WINDOW_BARS,
+                null,
+            )
             // فقط معامله‌هایی که **ورودشان** داخل همین ماه است؛ بقیه (گرم‌کردن یا ماه بعد)
             // در ماه خودشان شمرده می‌شوند.
             val monthTrades = res.trades.filter { it.entryTime in fromMs until toMs }
             allTrades += monthTrades
+            runningEquity += monthTrades.sumOf { it.netPnlUsd }
             periods += PeriodResult(
                 label = label,
                 fromMs = fromMs,
                 toMs = toMs,
                 candles = candlesInMonth,
                 trades = monthTrades,
-                stats = buildStats("__ALL__", "ماه $label", monthTrades, config.startEquityUsd),
+                stats = buildStats("__ALL__", "ماه $label", monthTrades, runningEquity - monthTrades.sumOf { it.netPnlUsd }),
                 elapsedMs = System.currentTimeMillis() - monthStart,
             )
             progress?.invoke((index + 1).toDouble() / months.size)
@@ -443,6 +454,39 @@ object BacktestReplayEngine {
             elapsedMs = System.currentTimeMillis() - started,
             candlesUsed = ordered.size,
             emptyMonths = emptyMonths,
+        )
+    }
+
+    /**
+     * تبدیل نتیجهٔ ماه‌به‌ماه به [Result] معمولی.
+     *
+     * چرا؟ کل برنامه (صفحهٔ بک‌تست، آرشیو، یادگیری عصبی، ذخیرهٔ کار پس‌زمینه) با [Result]
+     * کار می‌کند. با این تبدیل، فایل سنگین هم همان مسیر را می‌رود، فقط معامله‌هایش ماه‌به‌ماه
+     * ساخته شده‌اند و گزارش ماه‌ها در `periodSummariesFa` می‌آید.
+     */
+    fun PeriodicResult.toResult(config: Config): Result {
+        val closed = trades.sortedBy { it.exitTime ?: Long.MAX_VALUE }
+        var equity = config.startEquityUsd
+        val curve = ArrayList<Pair<Long, Double>>(closed.size + 1)
+        curve += (closed.firstOrNull()?.entryTime ?: System.currentTimeMillis()) to equity
+        closed.forEach { trade ->
+            equity += trade.netPnlUsd
+            curve += (trade.exitTime ?: trade.entryTime) to round2(equity)
+        }
+        return Result(
+            config = config,
+            stats = stats,
+            trades = trades,
+            equityCurve = curve,
+            firstTime = periods.firstOrNull()?.fromMs ?: 0L,
+            lastTime = periods.lastOrNull()?.toMs ?: 0L,
+            candlesUsed = candlesUsed,
+            steps = periods.sumOf { it.candles },
+            elapsedMs = elapsedMs,
+            evaluatedSteps = periods.sumOf { it.candles },
+            skippedWarmupSteps = 0,
+            maxConditionsPassed = 0,
+            periodSummariesFa = summaryRows,
         )
     }
 
