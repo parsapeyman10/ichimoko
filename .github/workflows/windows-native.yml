@@ -1,0 +1,39 @@
+name: Windows Native
+
+on:
+  push:
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows-native.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows-native.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        run: cmake -S windows -B windows/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURUM_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build windows/build --config Release
+      - name: Core tests
+        run: ctest --test-dir windows/build -C Release --output-on-failure
+      - name: Smoke QML application
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $process = Start-Process -FilePath 'windows/build/aurum_edge.exe' -PassThru
+          Start-Sleep -Seconds 8
+          if ($process.HasExited) { throw "QML application exited early with code $($process.ExitCode)" }
+          Stop-Process -Id $process.Id -Force
