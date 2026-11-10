@@ -94,4 +94,6 @@ if [[ "${3:-}" == "csv" ]]; then MAIN="CsvLabKt"; EXTRA=("${@:4}"); fi
 if [[ "${3:-}" == "pey" ]]; then MAIN="PeymanLabKt"; EXTRA=("${@:4}"); fi
 # حالت «hx»: سنجش A/B هیدن کراس (مستقل، بیس با لایه، بیس بدون لایه) + سرشماری قواعد.
 if [[ "${3:-}" == "hx" ]]; then MAIN="HiddenCrossLabKt"; EXTRA=("${@:4}"); fi
+# حالت «diag»: چرا روی یک نماد بک‌تست صفر معامله می‌سازد (آمادگی، SL/TP، جهت).
+if [[ "${3:-}" == "diag" ]]; then MAIN="BtcDiagLabKt"; EXTRA=("${@:4}"); fi
 "$JAVA_HOME/bin/java" -Dfile.encoding=UTF-8 -cp "$WORK/out:$STDLIB" "$MAIN" "$BARS" "$SEED" "${EXTRA[@]}"

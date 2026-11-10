@@ -63,10 +63,15 @@ object HiddenCrossEngine {
      * | منبع در عکس‌ها | شرط این‌جا |
      * |---|---|
      * | «فاصلهٔ قرمز و آبی همان ابر مخفی است» + دایره‌هایی که نوار باریک است | ۱. ابر مخفی باریک |
-     * | «جهت روند را از ابر مخفی می‌فهمیم» | ۲. قیمت بیرون نوار، هم‌جهت با ترتیب تنکان/کیجون |
+     * | «زمانی که با ابر مخفی جهت روند را متوجه شدیم» | ۲. ترتیب تنکان/کیجون هم‌سو + قیمت در سمت روند |
      * | چیکوی سبز و جدا از قیمت در همهٔ نمونه‌ها | ۳. چیکو آزاد |
-     * | «مدتی روی هم افتاده‌اند … کراس برابری» | ۴. کراس برابری موجود و تازه |
-     * | «نصف اندازهٔ کراس … تاج» | ۵. تاج در مسیر و همان‌سو |
+     * | «مدتی روی هم افتاده‌اند … کراس برابری» | ۴. کراس برابری بالغ (شکست گذشته، بازگشت شروع شده) |
+     * | «نصف اندازهٔ کراس … سطحی که تاج می‌شود» + بازگشت قیمت به همان خط‌چین | ۵. لمس تاج و رد شدن از آن |
+     *
+     * نکتهٔ کلیدی (اشتباه نسخهٔ قبل): معامله روی **شکست** کراس گرفته نمی‌شد؛ در هر
+     * نُه تصویر، خط تاج رسم می‌شود، قیمت **برمی‌گردد** به آن و از آن رد می‌شود. شرط
+     * «قیمت بیرون نوار» هم همین بازگشت را حذف می‌کرد، چون در پول‌بک قیمت به نوار
+     * تنکان/کیجون نزدیک (یا داخل آن) است.
      *
      * @param cloud هندسهٔ ابر مخفی و کراس برابری برای همین کندل.
      * @param long جهت معامله (خرید/فروش).
@@ -79,27 +84,37 @@ object HiddenCrossEngine {
         tenkanAboveKijun: Boolean,
         chikouFree: Boolean,
     ): Spec {
-        // ۱. ابر مخفی باریک — در عکس‌ها نوار در همهٔ نمونه‌های معامله‌شده باریک است.
-        val thin = cloud.hiddenCloudThicknessAtr <= HIDDEN_CLOUD_MAX_THICKNESS_ATR
-        // ۲. جهت از ابر مخفی: قیمت باید از نوار بیرون زده باشد و ترتیب TK هم‌سو باشد.
-        val outside = if (long) cloud.close > cloud.hiddenCloudTop else cloud.close < cloud.hiddenCloudBottom
+        // ۱. ابر مخفی باریک و واقعی — در عکس‌ها نوار در همهٔ نمونه‌های معامله‌شده باریک است.
+        val thin = cloud.hiddenCloudThicknessAtr in 0.01..HIDDEN_CLOUD_MAX_THICKNESS_ATR
+        // ۲. جهت از ابر مخفی: ترتیب تنکان/کیجون هم‌سو و قیمت در سمت روندِ نوار.
+        //    «سمت روند» = میانهٔ نوار، نه بیرونِ آن؛ چون لحظهٔ بازگشت، قیمت داخل نوار است.
+        val mid = (cloud.hiddenCloudTop + cloud.hiddenCloudBottom) / 2.0
+        val sideOfTrend = if (long) cloud.close >= mid else cloud.close <= mid
         val tkAligned = tenkanAboveKijun == long
         // ۳. چیکو آزاد — در هر ۹ تصویر، خط تأخیر جدا از قیمت رسم شده است.
-        // ۴. کراس برابری: هم‌پوشانی باید وجود داشته باشد و از پایانش زیاد نگذشته باشد
-        //    (عکس‌ها همه بلافاصله پس از خروج از هم‌پوشانی را نشان می‌دهند).
-        val crossExists = cloud.equalCrossBars >= MIN_EQUAL_CROSS_BARS && cloud.equalCrossLevel > 0.0
-        val crossFresh = cloud.equalCrossBarsSinceEnd <= MAX_EQUAL_CROSS_AGE_BARS
-        // ۵. تاج در جهت معامله باشد (بالای قیمت برای خرید، پایین برای فروش).
-        //
-        // دقت: `crownLevel` یک **قیمت** است و همیشه مثبت؛ صفر یعنی «کراس برابری ساخته نشده».
-        // نسخهٔ اول این شرط را برای فروش «تاج < قیمت» نوشته بود و چون تاج صفر هم از آن رد
-        // می‌شد، ۸۶٪ کندل‌ها به‌غلط رد می‌شدند. حالا صفر صریحاً «تاج وجود ندارد» است.
-        // نکتهٔ مهم: `crownLevel` در موتور **همیشه در جهت شکست کراس** ساخته می‌شود
-        // (`level ± extension` بسته به `bullishBreakout`) — یعنی خودش یک سطح هدف است، نه
-        // یک سطح دلخواه. شرط‌گذاشتن روی «بالا/پایین بودنش نسبت به قیمت»طبق عکس‌ها نیست و
-        // بدتر: هر معاملهٔ فروش را حذف می‌کرد (چون برای فروش هم تاج مثبت و بالای صفر است).
-        // پس معیار درست همان است که در عکس‌ها دیده می‌شود: تاج باید **وجود داشته باشد**.
-        val crownExists = cloud.crownLevel > 0.0
+        // ۴. کراس برابری: باید وجود داشته باشد، **مدت‌دار** شده باشد (شکست پشت سر گذاشته
+        //    شده = بازگشت ممکن است) و از عمر تاج بیرون نزده باشد.
+        val crossExists = cloud.equalCrossBars >= MIN_EQUAL_CROSS_BARS && cloud.equalCrossLevel > 0.0 &&
+            cloud.crownLevel > 0.0
+        val crossMatured = crossExists &&
+            cloud.equalCrossBarsSinceEnd >= MIN_RETEST_AGE_BARS &&
+            cloud.equalCrossBarsSinceEnd <= MAX_EQUAL_CROSS_AGE_BARS
+        // ۵. بازگشت به تاج: قیمت به سطح تاج رسیده و کلوز در سمت روند بسته شده (رد شدن).
+        //    آستانه‌ها بر حسب ATR هستند تا در m5 و m15 و روی هر نماد یکسان بمانند.
+        val atr = if (cloud.atr14 > 0.0) cloud.atr14 else (cloud.close * 0.001).coerceAtLeast(1e-9)
+        val crownDistanceAtr = if (crossExists) abs(cloud.close - cloud.crownLevel) / atr else Double.MAX_VALUE
+        // «لمس» با دامنهٔ کندل سنجیده می‌شود، نه فقط کلوز: در عکس‌ها سایهٔ کندل خط تاج را
+        // می‌زند و کلوز در سمت روند برمی‌گردد. سنجش فقط با کلوز، بیشتر بازگشت‌های واقعی
+        // را از دست می‌داد (۴۰ معامله در ۲۲ ماه روی m15).
+        val touchBand = CROWN_TOUCH_ATR * atr
+        val atCrown = crossExists &&
+            cloud.low <= cloud.crownLevel + touchBand &&
+            cloud.high >= cloud.crownLevel - touchBand
+        val rejected = crossExists && if (long) {
+            cloud.close >= cloud.crownLevel - CROWN_REJECT_ATR * atr
+        } else {
+            cloud.close <= cloud.crownLevel + CROWN_REJECT_ATR * atr
+        }
 
         return Spec(
             listOf(
@@ -116,8 +131,8 @@ object HiddenCrossEngine {
                 ),
                 Rule(
                     2,
-                    "۲. جهت از ابر مخفی (قیمت بیرون نوار + ترتیب تنکان/کیجون)",
-                    outside && tkAligned,
+                    "۲. جهت از ابر مخفی (ترتیب تنکان/کیجون + قیمت در سمت روند)",
+                    tkAligned && sideOfTrend,
                     String.format(
                         Locale.US,
                         "نوار=%.2f..%.2f · کلوز=%.2f · TK=%s",
@@ -135,8 +150,8 @@ object HiddenCrossEngine {
                 ),
                 Rule(
                     4,
-                    "۴. کراس برابری موجود و تازه (هم‌پوشانی تنکان/کیجون)",
-                    crossExists && crossFresh,
+                    "۴. کراس برابری بالغ (هم‌پوشانی گذشته، بازگشت ممکن)",
+                    crossMatured,
                     if (crossExists) {
                         String.format(
                             Locale.US,
@@ -151,14 +166,16 @@ object HiddenCrossEngine {
                 ),
                 Rule(
                     5,
-                    "۵. وجود تاج (نصف اندازهٔ کراس، در جهت شکست)",
-                    crownExists,
-                    if (crownExists) {
+                    "۵. بازگشت قیمت به تاج و رد شدن از آن",
+                    atCrown && rejected,
+                    if (crossExists) {
                         String.format(
                             Locale.US,
-                            "تاج=%.2f · فاصله از قیمت=%.2f",
+                            "تاج=%.2f · کلوز=%.2f · فاصله=%.2f ATR (سقف %.2f)",
                             cloud.crownLevel,
-                            abs(cloud.crownLevel - cloud.close),
+                            cloud.close,
+                            crownDistanceAtr,
+                            CROWN_TOUCH_ATR,
                         )
                     } else {
                         "کراس برابری ساخته نشده، پس تاجی هم نیست"
@@ -178,8 +195,28 @@ object HiddenCrossEngine {
     /** ضریب امتداد تاج: نصف اندازهٔ کراس. */
     const val CROWN_EXTENSION_RATIO: Double = 0.5
 
-    /** حداکثر فاصلهٔ مجاز کراس برابری از کندل جاری (کندل) تا هنوز «تازه» شمرده شود. */
-    const val MAX_EQUAL_CROSS_AGE_BARS: Int = 30
+    /**
+     * حداقل فاصلهٔ کراس برابری از کندل جاری تا «بازگشت به تاج» معنا داشته باشد.
+     *
+     * در عکس‌های آموزش، معامله **روی خود کراس** گرفته نمی‌شود؛ سطح تاج رسم می‌شود و
+     * بعد قیمت چند کندل بعد به آن برمی‌گردد و از آن رد می‌شود. اگر سن کراس کمتر از این
+     * باشد، هنوز «شکست» است نه «بازگشت»، پس معامله‌ای هم در کار نیست.
+     */
+    const val MIN_RETEST_AGE_BARS: Int = 5
+
+    /**
+     * حداکثر عمر تاج (کندل): سطح کراس برابری تا این مدت اعتبار دارد.
+     *
+     * پیش از این ۳۰ بود؛ در عکس‌ها خط تاج تا ده‌ها کندل بعد کشیده می‌شود و همان‌جا
+     * واکنش می‌گیرد. با ۳۰، بیشتر بازگشت‌های واقعی از دست می‌رفت.
+     */
+    const val MAX_EQUAL_CROSS_AGE_BARS: Int = 120
+
+    /** فاصلهٔ مجاز قیمت از سطح تاج برای اینکه «لمس سطح» شمرده شود (ATR). */
+    const val CROWN_TOUCH_ATR: Double = 0.35
+
+    /** بسته‌شدن کندل در سمت روند نسبت به تاج، به‌عنوان تأیید برگشت (ATR). */
+    const val CROWN_REJECT_ATR: Double = 0.05
 
     /** ضخامت حداکثر ابر مخفی بر حسب ATR؛ ضخیم‌تر از این دیگر «نوار تعادل» نیست. */
     const val HIDDEN_CLOUD_MAX_THICKNESS_ATR: Double = 0.55
@@ -325,7 +362,8 @@ object HiddenCrossEngine {
         val lastAtr = atr[lastIdx].coerceAtLeast(bars[lastIdx].close * 0.0005)
 
         val crosses = findEqualCrosses(bars, tenkan, kijun, atr, config)
-        val active = crosses.lastOrNull()
+        // کراس «فعال» = آخرین کراس بالغ (که بازگشت به تاجش ممکن است)، وگرنه آخرین کراس.
+        val active = crosses.lastOrNull { it.barsSinceEnd >= MIN_RETEST_AGE_BARS } ?: crosses.lastOrNull()
         val cloud = hiddenCloudState(bars, tenkan, kijun, atr, lastIdx)
         val analogues = findAnalogues(bars, tenkan, kijun, atr)
 
@@ -338,6 +376,7 @@ object HiddenCrossEngine {
             activeCross = active,
             analogues = analogues,
             lastIdx = lastIdx,
+            atrLast = lastAtr,
         )
         val crowns = crownLevels(
             crosses = crosses,
@@ -646,32 +685,40 @@ object HiddenCrossEngine {
         activeCross: EqualCross?,
         analogues: AnalogueResult,
         lastIdx: Int,
+        atrLast: Double,
     ): SignalAction {
         val close = bars[lastIdx].close
         val tkBullish = tenkan[lastIdx] > kijun[lastIdx]
+        val mid = (cloud.top + cloud.bottom) / 2.0
 
-        // ۱. گام اول روش: جهت با ابر مخفی.
+        // ۱. گام اول روش: جهت با ابر مخفی (ترتیب TK + سمت روند). «بیرون نوار بودن» شرط نیست،
+        //    چون لحظهٔ بازگشت به تاج قیمت به نوار نزدیک می‌شود.
         val cloudBias = when {
-            cloud.priceZone == HiddenCloudState.PriceZone.ABOVE && tkBullish && cloud.slopeAtrPerBar >= -0.01 -> SignalAction.BUY
-            cloud.priceZone == HiddenCloudState.PriceZone.BELOW && !tkBullish && cloud.slopeAtrPerBar <= 0.01 -> SignalAction.SELL
+            tkBullish && close >= mid && cloud.slopeAtrPerBar >= -0.01 -> SignalAction.BUY
+            !tkBullish && close <= mid && cloud.slopeAtrPerBar <= 0.01 -> SignalAction.SELL
             else -> SignalAction.NO_TRADE
         }
         if (cloudBias == SignalAction.NO_TRADE) return SignalAction.NO_TRADE
 
-        // ۲. گام دوم: کراس برابری باید در جهت ابر مخفی باشد.
-        val crossAligned = activeCross != null &&
-            activeCross.isFresh &&
-            (activeCross.breakoutDirection == cloudBias || activeCross.breakoutDirection == SignalAction.NO_TRADE)
-        if (!crossAligned) return SignalAction.NO_TRADE
-
-        // ۳. گام سوم: سطح کراس باید هم‌جهت با ابر مخفی باشد (قیمت در جهت شکست حرکت کرده).
-        val cross = activeCross!!
-        val levelAligned = when (cloudBias) {
-            SignalAction.BUY -> close > cross.levelPrice
-            SignalAction.SELL -> close < cross.levelPrice
-            else -> false
+        // ۲. گام دوم: کراس برابری باید بالغ باشد و در جهت ابر مخفی.
+        val cross = activeCross ?: return SignalAction.NO_TRADE
+        if (cross.barsSinceEnd < MIN_RETEST_AGE_BARS || !cross.isFresh) return SignalAction.NO_TRADE
+        if (cross.breakoutDirection != cloudBias && cross.breakoutDirection != SignalAction.NO_TRADE) {
+            return SignalAction.NO_TRADE
         }
-        if (!levelAligned) return SignalAction.NO_TRADE
+
+        // ۳. گام سوم: قیمت به سطح تاج برگشته و از آن رد شده است (قلب روش).
+        val atrLast = atrLast.coerceAtLeast(close * 0.0005)
+        val touchBand = CROWN_TOUCH_ATR * atrLast
+        val touched = bars[lastIdx].low <= cross.crownPrice + touchBand &&
+            bars[lastIdx].high >= cross.crownPrice - touchBand
+        if (!touched) return SignalAction.NO_TRADE
+        val rejected = if (cloudBias == SignalAction.BUY) {
+            close >= cross.crownPrice - CROWN_REJECT_ATR * atrLast
+        } else {
+            close <= cross.crownPrice + CROWN_REJECT_ATR * atrLast
+        }
+        if (!rejected) return SignalAction.NO_TRADE
 
         // ۴. تأیید آنالوگ: اگر اندازه‌گیری ممکن نیست، تصمیم با ابر مخفی می‌ماند (بی‌ادعا).
         if (analogues.isMeasured) {

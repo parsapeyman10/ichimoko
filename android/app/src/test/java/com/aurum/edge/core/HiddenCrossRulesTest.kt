@@ -73,16 +73,21 @@ class HiddenCrossRulesTest {
         crownLevel = crownLevel,
     )
 
-    /** هندسهٔ سالم: نوار باریک، کراس تازه، تاج موجود، قیمت بالای نوار. */
+    /**
+     * هندسهٔ سالم «بازگشت به تاج»: نوار باریک، کراس بالغ، قیمت روی سطح تاج و رد شده.
+     *
+     * ATR در snapshot برابر ۱۰ است، پس سقف لمس تاج = ۰٫۳۵ × ۱۰ = ۳٫۵ قیمت. تاج ۲۴۰۹ و
+     * کلوز ۲۴۱۰ → فاصله ۱ < ۳٫۵ و کلوز بالای تاج → «رد شدن» برای خرید برقرار است.
+     */
     private fun healthyLong() = snapshot(
         close = 2410.0,
         tenkan = 2408.0,
-        kijun = 2404.0, // تنکان بالای کیجون → هم‌سو با خرید
+        kijun = 2404.0, // تنکان بالای کیجون → هم‌سو با خرید · میانهٔ نوار ۲۴۰۶ < کلوز
         thicknessAtr = 0.30, // باریک (سقف ۰٫۵۵)
         equalCrossLevel = 2405.0,
         equalCrossBars = 5, // ≥ ۳
-        equalCrossBarsSinceEnd = 4, // ≤ ۳۰
-        crownLevel = 2440.0,
+        equalCrossBarsSinceEnd = 12, // بالغ (≥ ۵) و در عمر تاج
+        crownLevel = 2409.0, // ۱ واحد زیر کلوز = لمس و رد شدن
     )
 
     private fun evaluate(
@@ -122,10 +127,17 @@ class HiddenCrossRulesTest {
     }
 
     @Test
-    fun `rule 2 rejects price inside the band and mismatched tenkan order`() {
-        // قیمت داخل نوار: نه بالای سقف، نه زیر کف.
-        val inside = healthyLong().copy(close = 2406.0)
-        assertFalse("قیمت داخل نوار باید رد شود", evaluate(inside).conditions[1].passed)
+    fun `rule 2 rejects price on the wrong side of the band and mismatched tenkan order`() {
+        // «سمت روند» میانهٔ نوار است؛ قیمت زیر میانه (۲۴۰۶) با معاملهٔ خرید نمی‌خواند.
+        val wrongSide = healthyLong().copy(close = 2405.0)
+        assertFalse("قیمت زیر میانهٔ نوار نباید برای خرید پاس شود", evaluate(wrongSide).conditions[1].passed)
+
+        // داخل نوار بودن در لحظهٔ بازگشت مجاز است (در عکس‌ها همین‌طور است) — شرط نیست.
+        val insideBand = healthyLong().copy(close = 2407.0)
+        assertTrue(
+            "قیمت داخل نوار ولی در سمت روند باید پاس شود (بازگشت به تاج)",
+            evaluate(insideBand).conditions[1].passed,
+        )
 
         // ترتیب تنکان/کیجون برخلاف جهت معامله.
         assertFalse(
@@ -151,6 +163,10 @@ class HiddenCrossRulesTest {
 
         val stale = healthyLong().copy(equalCrossBarsSinceEnd = HiddenCrossEngine.MAX_EQUAL_CROSS_AGE_BARS + 1)
         assertFalse("کراس کهنه باید رد شود", evaluate(stale).conditions[3].passed)
+
+        // کراس «نابالغ»: قیمت هنوز به تاج برنگشته است؛ در عکس‌ها معامله روی خود کراس نیست.
+        val immature = healthyLong().copy(equalCrossBarsSinceEnd = HiddenCrossEngine.MIN_RETEST_AGE_BARS - 1)
+        assertFalse("کراس نابالغ (بدون بازگشت) باید رد شود", evaluate(immature).conditions[3].passed)
     }
 
     @Test
@@ -160,13 +176,34 @@ class HiddenCrossRulesTest {
     }
 
     @Test
-    fun `rule 5 does not depend on whether the crown is above or below price`() {
-        // تاج در موتور همیشه «در جهت شکست کراس» ساخته می‌شود، پس یک سطح هدف است.
-        // شرط‌گذاشتن روی بالا/پایین بودنش، هر معاملهٔ فروش را حذف می‌کرد.
-        val long = healthyLong().copy(close = 2410.0, crownLevel = 2440.0)
-        val short = healthyLong().copy(close = 2410.0, crownLevel = 2380.0)
-        assertTrue("تاج بالای قیمت باید پذیرفته شود", evaluate(long, long = true).conditions[4].passed)
-        assertTrue("تاج پایین قیمت هم باید پذیرفته شود", evaluate(short, long = false, tenkanAboveKijun = false).conditions[4].passed)
+    fun `rule 5 requires price to actually return to the crown`() {
+        // تاج دور از قیمت = «شکست» تازه، نه «بازگشت». طبق عکس‌ها معامله این‌جا نیست.
+        val far = healthyLong().copy(crownLevel = 2440.0)
+        assertFalse("تاج دور از قیمت باید رد شود", evaluate(far).conditions[4].passed)
+
+        // تاج در سمت اشتباه (بالاتر از قیمت برای معاملهٔ خرید پس از بازگشت) هم پذیرفته نمی‌شود.
+        val wrongSide = healthyLong().copy(crownLevel = 2418.0)
+        assertFalse("تاج بالاتر از کلوز برای خرید باید رد شود", evaluate(wrongSide).conditions[4].passed)
+    }
+
+    @Test
+    fun `rule 5 works symmetrically for a short retest`() {
+        val short = snapshot(
+            close = 2590.0,
+            tenkan = 2592.0,
+            kijun = 2596.0, // تنکان زیر کیجون → هم‌سو با فروش · میانه ۲۵۹۴ > کلوز
+            thicknessAtr = 0.30,
+            equalCrossLevel = 2595.0,
+            equalCrossBars = 5,
+            equalCrossBarsSinceEnd = 12,
+            crownLevel = 2591.0, // ۱ واحد بالای کلوز = لمس و رد شدن
+        )
+        val spec = evaluate(short, long = false, tenkanAboveKijun = false)
+        assertTrue(
+            "بازگشت به تاج برای فروش باید پاس شود؛ ردشده‌ها: " +
+                spec.conditions.filterNot { it.passed }.map { it.titleFa },
+            spec.allPassed,
+        )
     }
 
     // ─────────────────────── ۳. تعداد قاعده‌ها زیاد نشود ───────────────────────

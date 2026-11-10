@@ -60,6 +60,11 @@ fun main(args: Array<String>) {
                 st?.maxDrawdownPct ?: 0.0,
             ),
         )
+        // «۰ معامله» باید دلیل داشته باشد، نه سکوت: بیشترین شرط‌هایی که رد شده‌اند.
+        if (res.trades.isEmpty()) {
+            val blockers = res.topBlockers.take(4).joinToString(" · ") { "${it.first} (${it.second})" }
+            println("    ↳ بیشترین شرط پاس‌شده=${res.maxConditionsPassed} · سدها: ${blockers.ifBlank { "—" }}")
+        }
     }
 
     // ── سرشماری قواعد: «آیا آن‌چه مدرس می‌گوید در داده دیده می‌شود؟» ──
