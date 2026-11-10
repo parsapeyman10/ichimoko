@@ -17,8 +17,13 @@ import kotlin.math.sin
  */
 class BacktestMonthlyTest {
 
-    /** سری مصنوعی سه‌ماهه با روند و نوسان، روی شبکهٔ ۱۵ دقیقه (بدون شکاف). */
-    private fun series(months: Int = 3, barsPerMonth: Int = 900): List<Candle> {
+    /**
+     * سری مصنوعی چندماهه با روند و نوسان، روی شبکهٔ ۱۵ دقیقه (بدون شکاف).
+     *
+     * ۲٬۸۸۰ کندل = ۳۰ روز × ۹۶ کندل ۱۵دقیقه؛ با ۹۰۰ کندل (۹ روز) هر سه ماه داخل یک ماه
+     * تقویمی می‌افتاد و آزمون «تعداد ماه» بی‌معنا می‌شد.
+     */
+    private fun series(months: Int = 3, barsPerMonth: Int = 2_880): List<Candle> {
         val stepMs = 15 * 60_000L
         val start = 1_735_689_600_000L // 2025-01-01T00:00:00Z
         val n = months * barsPerMonth
@@ -82,7 +87,7 @@ class BacktestMonthlyTest {
         val periodic = BacktestReplayEngine.runPeriodic(series(months = 2), config)
         val result = with(BacktestReplayEngine) { periodic.toResult(config) }
         assertEquals(periodic.trades.size, result.trades.size)
-        assertEquals(2, result.periodSummariesFa.size)
+        assertEquals(periodic.periods.size, result.periodSummariesFa.size)
         assertTrue(result.stats.isNotEmpty())
         assertTrue("منحنی سرمایه باید ساخته شود", result.equityCurve.isNotEmpty())
     }
