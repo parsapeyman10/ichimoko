@@ -58,6 +58,8 @@ struct RiskCalculation {
     double stopDistance, double* liquidationPrice = nullptr, double* liquidationBufferR = nullptr);
 [[nodiscard]] std::optional<RiskCalculation> calculatePosition(const std::string& symbol,
     double accountBalance, double riskPercent, double entry, double stopLoss, double takeProfit);
+[[nodiscard]] double minSafeStructuralStopDistance(const std::string& symbol, double referencePrice,
+    double triggerAtr14, double strategyAtr14 = 0.0, bool fiveMinute = true);
 [[nodiscard]] double enforceRiskReward(double entry, double stopLoss, double takeProfit,
     OrderSide side, double minRiskReward = 1.5, double maxRiskReward = 3.0);
 

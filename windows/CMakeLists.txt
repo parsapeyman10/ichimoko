@@ -12,6 +12,8 @@ add_library(aurum_core STATIC
     src/core/Ichimoku.cpp
     src/core/BacktestEngine.cpp
     src/core/RiskEngine.cpp
+    src/core/NeoWave.cpp
+    src/core/NeuralLab.cpp
 )
 target_include_directories(aurum_core PUBLIC src)
 target_compile_features(aurum_core PUBLIC cxx_std_23)

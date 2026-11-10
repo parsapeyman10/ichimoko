@@ -47,9 +47,9 @@ Core نباید به UI، شبکه یا SQLite وابسته شود. بک‌تس�
 | ریسک‌کالکولاتور و VenueSpecs | حجم/کارمزد/اسپرد/اهرم/لیکوییدیشن و R:R با تست Core؛ دالان کامل Peyman هنوز نه |
 | تقویم ماهانه و Risk Limits | تقویم ماهانه SQLite پیاده شد؛ Risk Limits هنوز نه |
 | Live Quotes و Background Monitoring | Quote عمومی Async با Timer اختیاری؛ Background Service و Backfill هنوز نه |
-| تمام استراتژی‌های Ichimoku/Peyman | پورت با Golden Tests |
-| NeoWave و MTF Confluence | پورت با Golden Tests |
-| Neural Learning و Ledger جداگانه | پس از Equality موتورها |
+| تمام استراتژی‌های Ichimoku/Peyman | کف ساختاری Stop پورت و تست شد؛ ارزیابی کامل Peyman هنوز نه |
+| NeoWave و MTF Confluence | ATR/Pivot/Retracement/Gate/MTF پورت و تست شد؛ الگوهای کامل هنوز نه |
+| Neural Learning و Ledger جداگانه | اتاق تمرین Baseline جدا و قطعی؛ شبکه و Ledger کامل Android هنوز نه |
 | AI Trader/News | پس از قرارداد Network و Privacy |
 | TradePlanGuard/EntrySafetyGate | پیش از هر Auto Paper Trade |
 | Archive CSV/JSON/PDF | Archive اتمیک کندل CSV/JSON و ژورنال CSV/JSON/PDF |

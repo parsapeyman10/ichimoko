@@ -3,6 +3,8 @@
 #include "core/Ichimoku.h"
 #include "core/Series.h"
 #include "core/RiskEngine.h"
+#include "core/NeoWave.h"
+#include "core/NeuralLab.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -97,6 +99,43 @@ void testRiskEngine() {
     require(usdJpy.has_value(), "USD/JPY plan");
     near(usdJpy->positionUnits, 30'000.0, 1e-6, "JPY quote PnL converted to USD");
     near(enforceRiskReward(100.0, 99.0, 110.0, OrderSide::buy), 103.0, 1e-9, "RR cap");
+    near(minSafeStructuralStopDistance("BTC/USDT", 100'000.0, 500.0, 500.0, true), 410.0, 1e-9, "Peyman structural ATR floor");
+    near(minSafeStructuralStopDistance("EUR/USD", 1.10, 0.0002, 0.0002, true), 0.00044, 1e-12, "Peyman forex floor");
+}
+
+void testNeoWave() {
+    const auto input = bars(240);
+    require(neoWaveAtr(input) > 0.0, "NeoWave ATR");
+    require(neoWavePivots(bars(20)).empty(), "NeoWave minimum bars");
+    const auto pivots = neoWavePivots(input);
+    require(pivots.size() >= 2, "ATR-filtered swing pivots");
+    for (std::size_t i = 1; i < pivots.size(); ++i)
+        require(pivots[i].index > pivots[i - 1].index && pivots[i].isHigh != pivots[i - 1].isHigh, "ordered alternating pivots");
+    require(neoWaveRetracementRule(0.3) == 1 && neoWaveRetracementRule(0.62) == 3 &&
+        neoWaveRetracementRule(1.2) == 5 && neoWaveRetracementRule(3.0) == 7, "Neely retracement boundaries");
+    const double amplitude = neoWaveDynamicAmplitude(input);
+    require(amplitude >= 0.35 && amplitude <= 1.2, "dynamic amplitude bounds");
+    NeoWaveVerdict aligned{true, true, true, false, 1, 8, 10, 72.0, "test"};
+    require(!neoWaveGate(aligned, true).veto && neoWaveGate(aligned, true).confidenceDelta == 8.0, "aligned NeoWave gate");
+    require(neoWaveGate(aligned, false).veto, "opposing confirmed NeoWave veto");
+    const auto confluence = neoWaveMtfConfluence(aligned, aligned, true);
+    require(confluence.alignedCount == 2 && confluence.confidenceDelta == 5.0, "two-timeframe confluence");
+}
+
+void testNeuralLab() {
+    const auto input = bars(240);
+    const auto backtest = runIchimokuBaseline(input);
+    const auto first = trainBacktestNeuralBaseline(input, backtest.trades, "BTC/USDT");
+    const auto second = trainBacktestNeuralBaseline(input, backtest.trades, "BTC/USDT");
+    require(first.samples == second.samples && first.weights == second.weights, "deterministic isolated neural training");
+    require(first.samples == first.wins + first.losses, "closed training sample accounting");
+    if (first.samples > 0) {
+        require(first.inSampleAccuracyPct >= 0.0 && first.inSampleAccuracyPct <= 100.0, "accuracy range");
+        require(first.predictedWinRatePct >= 0.0 && first.predictedWinRatePct <= 100.0, "probability range");
+    }
+    const auto before = backtest.stats.finalEquity;
+    (void)trainBacktestNeuralBaseline(input, backtest.trades, "BTC/USDT");
+    near(backtest.stats.finalEquity, before, 0.0, "training must not mutate backtest result");
 }
 
 } // namespace
@@ -108,6 +147,8 @@ int main() {
         testIndicators();
         testBacktestDeterminism();
         testRiskEngine();
+        testNeoWave();
+        testNeuralLab();
         std::cout << "All Aurum core tests passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {

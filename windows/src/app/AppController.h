@@ -19,6 +19,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QString fileName READ fileName NOTIFY stateChanged)
     Q_PROPERTY(QString resultSummary READ resultSummary NOTIFY stateChanged)
     Q_PROPERTY(QString modelName READ modelName NOTIFY stateChanged)
+    Q_PROPERTY(QString neuralSummary READ neuralSummary NOTIFY resultChanged)
     Q_PROPERTY(int candleCount READ candleCount NOTIFY stateChanged)
     Q_PROPERTY(QVariantList chartCandles READ chartCandles NOTIFY dataChanged)
     Q_PROPERTY(QVariantList backtestTrades READ backtestTrades NOTIFY resultChanged)
@@ -31,6 +32,7 @@ public:
     [[nodiscard]] QString fileName() const { return fileName_; }
     [[nodiscard]] QString resultSummary() const { return resultSummary_; }
     [[nodiscard]] QString modelName() const;
+    [[nodiscard]] QString neuralSummary() const { return neuralSummary_; }
     [[nodiscard]] int candleCount() const noexcept;
     [[nodiscard]] QVariantList chartCandles() const;
     [[nodiscard]] QVariantList backtestTrades() const;
@@ -59,12 +61,14 @@ private:
     struct BacktestOutcome {
         std::shared_ptr<BacktestResult> result;
         QString error;
+        QString neuralSummary;
     };
     void setStatus(QString text);
     bool busy_{};
     QString status_{QStringLiteral("آماده")};
     QString fileName_;
     QString resultSummary_;
+    QString neuralSummary_;
     std::shared_ptr<ParseResult> data_;
     std::shared_ptr<BacktestResult> result_;
     QFutureWatcher<LoadOutcome> loadWatcher_;

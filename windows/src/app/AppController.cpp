@@ -1,5 +1,6 @@
 #include "app/AppController.h"
 #include "core/RiskEngine.h"
+#include "core/NeuralLab.h"
 
 #include <QDateTime>
 #include <QDate>
@@ -33,6 +34,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             fileName_ = outcome.fileName;
             result_.reset();
             resultSummary_.clear();
+            neuralSummary_.clear();
             setStatus(QStringLiteral("%1 کندل معتبر | %2 | ردیف حذف‌شده: %3")
                 .arg(data_->candles.size()).arg(QString::fromStdString(std::string(label(data_->inferredInterval))))
                 .arg(data_->skippedRows + data_->duplicateRows + data_->flatRowsDropped));
@@ -48,6 +50,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             setStatus(outcome.error);
         } else {
             result_ = outcome.result;
+            neuralSummary_ = outcome.neuralSummary;
             const auto& s = result_->stats;
             resultSummary_ = QStringLiteral("معامله: %1 | برد: %2% | PF: %3 | انتظار: %4R | خالص: %5$ | DD: %6%")
                 .arg(s.trades).arg(s.winRate, 0, 'f', 2).arg(s.profitFactor, 0, 'f', 3)
@@ -139,6 +142,10 @@ void AppController::runBacktest() {
         auto outcome = BacktestOutcome{nullptr, {}};
         try {
             outcome.result = std::make_shared<BacktestResult>(runIchimokuBaseline(input->candles));
+            const auto neural = trainBacktestNeuralBaseline(input->candles, outcome.result->trades, input->suggestedSymbol);
+            outcome.neuralSummary = QStringLiteral("Neural Lab جدا: %1 نمونه | برد/باخت %2/%3 | میانگین %4R | احتمال میانگین %5% | دقت In-sample %6% — نه OOS و نه Android parity")
+                .arg(neural.samples).arg(neural.wins).arg(neural.losses).arg(neural.averageR, 0, 'f', 3)
+                .arg(neural.predictedWinRatePct, 0, 'f', 1).arg(neural.inSampleAccuracyPct, 0, 'f', 1);
         } catch (const std::exception& error) {
             outcome.error = QStringLiteral("خطای بک‌تست: %1").arg(QString::fromUtf8(error.what()));
         }

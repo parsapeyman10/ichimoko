@@ -153,6 +153,29 @@ std::optional<RiskCalculation> calculatePosition(const std::string& symbolInput,
     return result;
 }
 
+double minSafeStructuralStopDistance(const std::string& symbol, const double referencePrice,
+    const double triggerAtr14, const double strategyAtr14, const bool fiveMinute) {
+    const auto clean = normalizeSymbol(symbol);
+    const double price = std::isfinite(referencePrice) && referencePrice > 0.0 ? referencePrice : 1.0;
+    const double trigger = std::isfinite(triggerAtr14) && triggerAtr14 > 0.0 ? triggerAtr14 : price * 0.0020;
+    const double strategy = std::isfinite(strategyAtr14) && strategyAtr14 > 0.0 ? strategyAtr14 : trigger;
+    const double venue = venueSpecFor(clean).minStopDistance(price);
+    switch (assetClassOf(clean)) {
+    case AssetClass::crypto: {
+        const bool major = startsWith(clean, "BTC") || startsWith(clean, "ETH");
+        const double floorPct = major && fiveMinute ? 0.0016 : major ? 0.0020 : fiveMinute ? 0.0020 : 0.0025;
+        return std::max(venue * 3.0, std::max(price * floorPct, std::max(trigger * 0.82, strategy * 0.28)));
+    }
+    case AssetClass::commodity:
+        return std::max(venue * 2.5, std::max(price * (startsWith(clean, "XAG") ? 0.0014 : 0.0009), std::max(trigger * 0.78, strategy * 0.25)));
+    case AssetClass::stock:
+        return std::max(venue * 2.5, std::max(price * 0.0009, std::max(trigger * 0.78, strategy * 0.25)));
+    case AssetClass::forex:
+        return std::max(venue * 2.5, std::max(price * 0.0004, std::max(trigger * 0.75, strategy * 0.24)));
+    }
+    return 0.0;
+}
+
 double enforceRiskReward(const double entry, const double stopLoss, const double takeProfit,
     const OrderSide side, const double minRiskReward, const double maxRiskReward) {
     const double minRr = std::clamp(minRiskReward, 1.5, 3.0);

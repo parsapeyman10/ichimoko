@@ -22,6 +22,7 @@ Page {
         }
         Label { text: App.modelName; color: Theme.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         Label { text: App.resultSummary.length ? App.resultSummary : "پس از انتخاب داده، بک‌تست را اجرا کنید"; color: Theme.text; font.pixelSize: 18; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        Label { visible: App.neuralSummary.length > 0; text: App.neuralSummary; color: Theme.accent; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         Frame {
             Layout.fillWidth: true
             Layout.fillHeight: true
