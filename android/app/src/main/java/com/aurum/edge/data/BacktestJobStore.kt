@@ -47,7 +47,7 @@ data class BacktestJobSpec(
      * حالت را با اسپرد کمتر حساب می‌کرد. با ×۳ همان استراتژی PF ۱٫۷۴ و +۰٫۳۳۰R می‌دهد
      * (به‌جای ۱٫۸۶ و +۰٫۳۸۰R) — یعنی سود از تخمینِ خوش‌بینانهٔ هزینه نیامده است.
      */
-    val conservativeCosts: Boolean = false,
+    val conservativeCosts: Boolean = true,
     /** یادداشت آزاد کاربر؛ در فهرست کارها نشان داده می‌شود. */
     val noteFa: String = "",
 )

@@ -49,7 +49,9 @@ class JournalStore(
     private fun ensureSequentialTradeNumbers(list: List<PaperTrade>): List<PaperTrade> {
         if (list.isEmpty()) return list
         val ascending = list.sortedWith(compareBy<PaperTrade> { it.openedAt }.thenBy { it.id })
-        var maxAssigned = ascending.maxOfOrNull { it.tradeNumber } ?: 0
+        // شماره‌گذاری معامله‌های واقعی نباید با ردیف‌های بک‌تست جابه‌جا شود: ۹۶۷ ردیف بک‌تست
+        // می‌توانست سقف شماره را به ۹۶۷ ببرد و معاملهٔ واقعی بعدی «#۹۶۸» شود.
+        var maxAssigned = ascending.filterNot { it.isBacktest }.maxOfOrNull { it.tradeNumber } ?: 0
         val numberedById = HashMap<String, Int>(ascending.size)
         if (maxAssigned <= 0) {
             ascending.forEachIndexed { idx, t ->

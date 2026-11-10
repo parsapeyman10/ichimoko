@@ -2261,6 +2261,12 @@ private fun MonthlyPnlCalendarSection(
         }
         val shownTrades = if (selectedDayOfMonth in 1..calendar.daysInMonth) panelTrades else monthTrades
         val shownNet = remember(shownTrades) { shownTrades.sumOf { it.pnlUsd ?: 0.0 } }
+        // تفکیک «چه روزی چیکار کردم»: سود واقعی حساب جدا از سود بک‌تست، چون بک‌تست
+        // موجودی را تکان نمی‌دهد و قاطی‌کردن این دو، عدد روز را دروغ می‌کرد.
+        val shownBacktestNet = remember(shownTrades) {
+            shownTrades.filter { it.isBacktest }.sumOf { it.pnlUsd ?: 0.0 }
+        }
+        val shownRealNet = shownNet - shownBacktestNet
 
         Row(
             modifier = Modifier
@@ -2285,6 +2291,14 @@ private fun MonthlyPnlCalendarSection(
                     style = MaterialTheme.typography.labelSmall,
                     color = if (shownNet >= 0.0) AurumColors.Green else AurumColors.Red,
                 )
+                if (shownBacktestNet != 0.0) {
+                    Text(
+                        text = "از این مقدار ${formatUsdExact(shownRealNet)} واقعی حساب · " +
+                            "${formatUsdExact(shownBacktestNet)} از بک‌تست (بدون اثر روی موجودی)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                    )
+                }
             }
             if (selectedDayOfMonth != 0) {
                 Pill(
