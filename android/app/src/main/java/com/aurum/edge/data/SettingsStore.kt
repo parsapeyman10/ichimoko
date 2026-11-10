@@ -34,6 +34,23 @@ class SettingsStore(context: Context) {
     init {
         prefs.edit().remove("embedded_tor_enabled").apply()
         migrateAutoDownload() // owner-requested: in-app updating is on unless switched off
+        migrateOpenPositionCapRemoved()
+    }
+
+    /**
+     * سقف پوزیشن باز هم‌زمان یک‌بار برداشته می‌شود.
+     *
+     * کاربر نصب‌شدهٔ قبلی عدد ۳ (یا ۱) را در حافظه دارد؛ با تغییر «پیش‌فرض» آن عدد عوض
+     * نمی‌شد و سقف سر جایش می‌ماند. این مهاجرت یک‌بار هر دو سقف را صفر می‌کند و پرچم
+     * می‌گذارد؛ از آن به بعد اگر کاربر خودش عددی بگذارد دست‌نخورده می‌مانَد.
+     */
+    private fun migrateOpenPositionCapRemoved() {
+        if (prefs.getBoolean(KEY_OPEN_CAP_REMOVED, false)) return
+        prefs.edit()
+            .putBoolean(KEY_OPEN_CAP_REMOVED, true)
+            .putInt(KEY_MAX_OPEN_TRADES, 0)
+            .putInt(KEY_MAX_OPEN_TRADES_PER_SYMBOL, 0)
+            .apply()
     }
 
     /**
@@ -200,12 +217,13 @@ class SettingsStore(context: Context) {
             .takeIf { it.isFinite() }?.coerceIn(0.5, 100.0) ?: 100.0,
         maxDrawdownLimitPercent = prefs.getFloat(KEY_MAX_DRAWDOWN_LIMIT, 100.0f).toDouble()
             .takeIf { it.isFinite() }?.coerceIn(1.0, 100.0) ?: 100.0,
+        // ۰ = بدون سقف (درخواست کاربر)؛ بالا بردن دستی تا ۱۲/۴ همچنان ممکن است.
         maxOpenTrades = prefs.getInt(KEY_MAX_OPEN_TRADES, EntrySafetyGate.DEFAULT_MAX_CONCURRENT_POSITIONS)
-            .coerceIn(1, 12),
+            .coerceIn(0, 12),
         maxOpenTradesPerSymbol = prefs.getInt(
             KEY_MAX_OPEN_TRADES_PER_SYMBOL,
             EntrySafetyGate.DEFAULT_MAX_POSITIONS_PER_SYMBOL,
-        ).coerceIn(1, 4),
+        ).coerceIn(0, 4),
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 85f).toDouble().takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         spreadPrice = prefs.getFloat(KEY_SPREAD, 0.12f).toDouble(),
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.035f).toDouble(),
@@ -334,8 +352,8 @@ class SettingsStore(context: Context) {
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
             // سقف پوزیشن‌ها به‌صورت عدد صحیح و محدود ذخیره می‌شود تا مقدار خراب ذخیره‌شده
             // هرگز دروازهٔ ایمنی را باز نکند.
-            maxOpenTrades = proposed.maxOpenTrades.coerceIn(1, 12),
-            maxOpenTradesPerSymbol = proposed.maxOpenTradesPerSymbol.coerceIn(1, 4),
+            maxOpenTrades = proposed.maxOpenTrades.coerceIn(0, 12),
+            maxOpenTradesPerSymbol = proposed.maxOpenTradesPerSymbol.coerceIn(0, 4),
         )
         prefs.edit()
             .putString(KEY_API, next.apiKey.trim())
@@ -545,6 +563,8 @@ class SettingsStore(context: Context) {
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
         private const val KEY_AUTO_DOWNLOAD_UPDATES = "auto_download_updates"
         private const val KEY_AUTO_DOWNLOAD_MIGRATED = "auto_download_updates_migrated_2_0_2"
+        /** یک‌بار گذاشته می‌شود تا سقف پوزیشن باز فقط یک‌بار برداشته شود. */
+        private const val KEY_OPEN_CAP_REMOVED = "open_position_cap_removed_3_9_70"
         private const val KEY_AVAL_AI_ENABLED = "aval_ai_pretrade_enabled"
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"

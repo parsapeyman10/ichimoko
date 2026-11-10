@@ -153,8 +153,9 @@ class SettingsStoreTest {
         prefs.edit().clear().commit()
         val store = SettingsStore(context)
         val defaults = store.read()
-        assertEquals(3, defaults.maxOpenTrades)
-        assertEquals(1, defaults.maxOpenTradesPerSymbol)
+        // ۰ = بدون سقف؛ سقف پوزیشن به‌درخواست کاربر برداشته شد.
+        assertEquals(0, defaults.maxOpenTrades)
+        assertEquals(0, defaults.maxOpenTradesPerSymbol)
 
         store.update { it.copy(maxOpenTrades = 5, maxOpenTradesPerSymbol = 2) }
         val reread = SettingsStore(context).read()
@@ -165,7 +166,7 @@ class SettingsStoreTest {
         prefs.edit().putInt("max_open_trades", 999).putInt("max_open_trades_per_symbol", 0).commit()
         val clamped = SettingsStore(context).read()
         assertEquals(12, clamped.maxOpenTrades)
-        assertEquals(1, clamped.maxOpenTradesPerSymbol)
+        assertEquals(0, clamped.maxOpenTradesPerSymbol)
     }
 
     @Test fun `risk brake migration restores protective limits once and keeps manual ones`() {

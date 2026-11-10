@@ -172,7 +172,28 @@ class EntrySafetyGateTest {
     }
 
     @Test
-    fun `concurrent position ceiling blocks the fourth trade`() {
+    fun `a manual concurrent ceiling still blocks the fourth trade`() {
+        val open = listOf(trade("a", "BTC/USDT"), trade("b", "ETH/USDT"), trade("c", "XAU/USD"))
+        val d = EntrySafetyGate.evaluate(
+            symbol = "SOL/USDT",
+            interval = Interval.M15,
+            openTrades = open,
+            nowMillis = now,
+            signalBarTime = now,
+            proposedRiskUsd = 5.0,
+            roundTripFeeUsd = 0.1,
+            riskStatus = null,
+            limits = EntrySafetyGate.Limits(maxConcurrentPositions = 3),
+            enforceSession = false,
+        )
+        assertFalse(d.allowed)
+        assertTrue(d.reasonsFa.any { it.contains("سقف پوزیشن باز هم‌زمان") })
+    }
+
+    @Test
+    fun `with no ceiling a fourth trade is allowed`() {
+        // درخواست کاربر: «سد ایمنی سقف پوزیشن را بردار» — با پیش‌فرض تازه (۰) هیچ سقفی
+        // و هیچ دلیلی برای رد ساخته نمی‌شود.
         val open = listOf(trade("a", "BTC/USDT"), trade("b", "ETH/USDT"), trade("c", "XAU/USD"))
         val d = EntrySafetyGate.evaluate(
             symbol = "SOL/USDT",
@@ -185,12 +206,13 @@ class EntrySafetyGateTest {
             riskStatus = null,
             enforceSession = false,
         )
-        assertFalse(d.allowed)
-        assertTrue(d.reasonsFa.any { it.contains("سقف پوزیشن باز هم‌زمان") })
+        assertTrue(d.allowed)
+        assertTrue(d.reasonsFa.none { it.contains("پوزیشن") })
+        assertEquals(0, EntrySafetyGate.Limits().maxConcurrentPositions)
     }
 
     @Test
-    fun `per-symbol ceiling blocks a second trade on the same symbol`() {
+    fun `a manual per-symbol ceiling still blocks a second trade on the same symbol`() {
         val d = EntrySafetyGate.evaluate(
             symbol = "btc/usdt",
             interval = Interval.M5,
@@ -200,6 +222,7 @@ class EntrySafetyGateTest {
             proposedRiskUsd = 5.0,
             roundTripFeeUsd = 0.1,
             riskStatus = null,
+            limits = EntrySafetyGate.Limits(maxPositionsPerSymbol = 1),
             enforceSession = false,
         )
         assertFalse(d.allowed)

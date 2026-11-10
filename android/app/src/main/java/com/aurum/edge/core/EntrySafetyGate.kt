@@ -24,11 +24,18 @@ import java.util.Locale
  */
 object EntrySafetyGate {
 
-    /** سقف پیش‌فرض پوزیشن باز هم‌زمان در کل حساب. */
-    const val DEFAULT_MAX_CONCURRENT_POSITIONS: Int = 3
+    /**
+     * سقف پوزیشن باز هم‌زمان در کل حساب. **۰ = بدون سقف.**
+     *
+     * درخواست صریح کاربر: «این سد ایمنی هم بردار» → سقف پوزیشن باز هم‌زمان برداشته شد.
+     * منطق پشتش هم درست است: سقف پوزیشن یک *دلیل اضافه برای رد کردن معامله* بود، و قاعدهٔ
+     * خودت این است که اگر شرایط استراتژی برقرار شد، معامله باید انجام شود. اگر کاربر خودش
+     * عدد بگذارد (۱ تا ۱۲)، همان عدد مثل قبل اعمال می‌شود.
+     */
+    const val DEFAULT_MAX_CONCURRENT_POSITIONS: Int = 0
 
-    /** سقف پیش‌فرض پوزیشن باز روی یک نماد. */
-    const val DEFAULT_MAX_POSITIONS_PER_SYMBOL: Int = 1
+    /** سقف پوزیشن باز روی یک نماد. **۰ = بدون سقف** (همان دلیل بالا). */
+    const val DEFAULT_MAX_POSITIONS_PER_SYMBOL: Int = 0
 
     /** بیشینهٔ عمر مجاز ماشه بر حسب کندل؛ بعد از آن سیگنال باطل است. */
     const val DEFAULT_MAX_SIGNAL_AGE_BARS: Int = 3
@@ -137,12 +144,12 @@ object EntrySafetyGate {
         val open = openTrades.filter { it.isOpen }
         val reasons = mutableListOf<String>()
 
-        // ۱. سقف پوزیشن هم‌زمان
-        if (open.size >= limits.maxConcurrentPositions) {
+        // ۱. سقف پوزیشن هم‌زمان — ۰ یعنی هیچ سقفی نیست و هیچ دلیلی هم ساخته نمی‌شود.
+        if (limits.maxConcurrentPositions > 0 && open.size >= limits.maxConcurrentPositions) {
             reasons += "سقف پوزیشن باز هم‌زمان پر است (${open.size}/${limits.maxConcurrentPositions})"
         }
         val sameSymbol = open.count { V1Universe.normalize(it.symbol) == norm }
-        if (sameSymbol >= limits.maxPositionsPerSymbol) {
+        if (limits.maxPositionsPerSymbol > 0 && sameSymbol >= limits.maxPositionsPerSymbol) {
             reasons += "$norm همین حالا $sameSymbol پوزیشن باز دارد (سقف ${limits.maxPositionsPerSymbol})"
         }
 

@@ -355,13 +355,13 @@ data class AppSettings(
     val dailyLossLimitPercent: Double = 100.0,
     val maxDrawdownLimitPercent: Double = 100.0,
     /**
-     * سقف پوزیشن بازِ هم‌زمان روی کل حساب (دروازهٔ ایمنی ورود).
+     * سقف پوزیشن بازِ هم‌زمان روی کل حساب (دروازهٔ ایمنی ورود). **۰ = بدون سقف** (پیش‌فرض).
      *
-     * پیش از این سقف ۳ در `EntrySafetyGate` سخت‌کد شده بود و کاربر نمی‌توانست آن را ببیند یا
-     * تغییر دهد. حالا هم در تنظیمات دیده می‌شود و هم همان عدد واقعاً در دروازه اعمال می‌شود.
+     * پیش‌تر ۳ بود و به‌خاطر درخواست کاربر برداشته شد؛ اگر کاربر خودش عددی بگذارد، همان
+     * عدد اعمال می‌شود.
      */
     val maxOpenTrades: Int = EntrySafetyGate.DEFAULT_MAX_CONCURRENT_POSITIONS,
-    /** سقف پوزیشن باز روی یک نماد (جلوگیری از انباشت روی BNB/BTC که در گزارش ۷۰+۴۵ معامله داشتند). */
+    /** سقف پوزیشن باز روی یک نماد. **۰ = بدون سقف** (پیش‌فرض تازه). */
     val maxOpenTradesPerSymbol: Int = EntrySafetyGate.DEFAULT_MAX_POSITIONS_PER_SYMBOL,
     val minConfidence: Double = 85.0,
     val spreadPrice: Double = 0.12,

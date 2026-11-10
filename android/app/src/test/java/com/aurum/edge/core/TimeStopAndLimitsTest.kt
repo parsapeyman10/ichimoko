@@ -140,20 +140,11 @@ class TimeStopAndLimitsTest {
     // ───────────────── سقف‌های قابل تنظیم (جای سخت‌کد) ─────────────────
 
     @Test
-    fun `settings expose the safety gate ceilings with the old defaults`() {
+    fun `settings expose no position ceilings by default`() {
         val defaults = AppSettings()
-        assertTrue(
-            "سقف پیش‌فرض پوزیشن هم‌زمان باید عدد کوچک و محافظتی باشد",
-            defaults.maxOpenTrades in 1..5,
-        )
-        assertTrue(
-            "سقف پیش‌فرض هر نماد باید ۱ باشد تا روی یک نماد انباشت نشود",
-            defaults.maxOpenTradesPerSymbol in 1..2,
-        )
-        assertTrue(
-            "سقف هم‌زمان نباید از سقف هر نماد کمتر باشد",
-            defaults.maxOpenTrades >= defaults.maxOpenTradesPerSymbol,
-        )
+        // درخواست کاربر: سقف پوزیشن باز یک «دلیل اضافهٔ رد معامله» بود و برداشته شد.
+        assertEquals(0, defaults.maxOpenTrades)
+        assertEquals(0, defaults.maxOpenTradesPerSymbol)
     }
 
     @Test

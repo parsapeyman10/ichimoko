@@ -839,8 +839,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 riskPercent = safeRisk,
                 dailyLossLimitPercent = safeDaily,
                 maxDrawdownLimitPercent = safeMaxDd,
-                maxOpenTrades = maxOpenTrades.coerceIn(1, 12),
-                maxOpenTradesPerSymbol = maxOpenTradesPerSymbol.coerceIn(1, 4),
+                // ۰ = بدون سقف (درخواست کاربر)؛ عدد دستی کاربر تا ۱۲/۴ همچنان اعمال می‌شود.
+                maxOpenTrades = maxOpenTrades.coerceIn(0, 12),
+                maxOpenTradesPerSymbol = maxOpenTradesPerSymbol.coerceIn(0, 4),
             )
         }
         _toast.value = if (useFixedDollarRisk) {
@@ -1378,8 +1379,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
      * کاربر می‌توانست فقط در صفحهٔ ژورنال «۱۵۰ پوزیشن باز» ببیند بدون اینکه چیزی قابل تنظیم باشد.
      */
     private fun safetyLimits(cfg: AppSettings): EntrySafetyGate.Limits = EntrySafetyGate.Limits(
-        maxConcurrentPositions = cfg.maxOpenTrades.coerceIn(1, 12),
-        maxPositionsPerSymbol = cfg.maxOpenTradesPerSymbol.coerceIn(1, 4),
+        // ۰ = بدون سقف. سقف پوزیشن یک «دلیل اضافهٔ رد معامله» بود و برداشته شد.
+        maxConcurrentPositions = cfg.maxOpenTrades.coerceIn(0, 12),
+        maxPositionsPerSymbol = cfg.maxOpenTradesPerSymbol.coerceIn(0, 4),
     )
 
     // ─────────────────────────────────────────────────────────────────────────────
