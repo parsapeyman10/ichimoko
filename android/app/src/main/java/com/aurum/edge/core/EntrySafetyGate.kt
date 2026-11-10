@@ -139,6 +139,15 @@ object EntrySafetyGate {
         riskStatus: RiskLimitStatus?,
         limits: Limits = Limits(),
         enforceSession: Boolean = true,
+        /**
+         * شناسهٔ استراتژی‌ای که می‌خواهد وارد شود (خالی = ندانیم و این قاعده سنجیده نشود).
+         *
+         * قاعدهٔ کاربر: «سقف یک پوزیشن روی هر نماد فقط وقتی برداشته می‌شود که استراتژی
+         * یکسان نباشد.» یعنی روی یک نماد می‌توان چند پوزیشن داشت، ولی **هر استراتژی روی هر
+         * نماد فقط یک پوزیشن باز**. اگر همان استراتژی دوباره همان نماد را سیگنال داد، پوزیشن
+         * دوم تکرار همان ریسک است، نه تنوع.
+         */
+        strategyId: String = "",
     ): Decision {
         val norm = V1Universe.normalize(symbol)
         val open = openTrades.filter { it.isOpen }
@@ -151,6 +160,17 @@ object EntrySafetyGate {
         val sameSymbol = open.count { V1Universe.normalize(it.symbol) == norm }
         if (limits.maxPositionsPerSymbol > 0 && sameSymbol >= limits.maxPositionsPerSymbol) {
             reasons += "$norm همین حالا $sameSymbol پوزیشن باز دارد (سقف ${limits.maxPositionsPerSymbol})"
+        }
+        // قاعدهٔ «هر استراتژی، روی هر نماد، یک پوزیشن باز».
+        if (strategyId.isNotBlank()) {
+            val sameStrategy = open.count {
+                V1Universe.normalize(it.symbol) == norm && it.strategyId.trim() == strategyId.trim()
+            }
+            if (sameStrategy > 0) {
+                val title = BitcoinStrategyModel.fromId(strategyId).titleFa
+                reasons += "همین استراتژی ($title) روی $norm پوزیشن باز دارد؛ " +
+                    "پوزیشن دوم همان استراتژی روی همان نماد تکرار همان ریسک است (سقف یک پوزیشن به‌ازای هر استراتژی روی هر نماد)"
+            }
         }
 
         // ۲. سقف ضرر روزانه و افت سرمایه

@@ -19,6 +19,7 @@ class EntrySafetyGateTest {
         id: String,
         symbol: String = "BTC/USDT",
         open: Boolean = true,
+        strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
     ) = PaperTrade(
         id = id,
         symbol = symbol,
@@ -33,6 +34,7 @@ class EntrySafetyGateTest {
         closedAt = if (open) null else 1_760_000_600_000L,
         pnlUsd = if (open) null else -5.0,
         fixedRiskUsd = 5.0,
+        strategyId = strategyId,
     )
 
     private val now = 1_760_000_000_000L
@@ -227,6 +229,44 @@ class EntrySafetyGateTest {
         )
         assertFalse(d.allowed)
         assertTrue(d.reasonsFa.any { it.contains("پوزیشن باز دارد") })
+    }
+
+    @Test
+    fun `same strategy on the same symbol is blocked even without a position ceiling`() {
+        // قاعدهٔ کاربر: برداشتن سقف پوزیشن هر نماد فقط وقتی درست است که استراتژی یکسان نباشد.
+        val d = EntrySafetyGate.evaluate(
+            symbol = "BTC/USDT",
+            interval = Interval.M15,
+            openTrades = listOf(trade("a", "BTC/USDT", strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id)),
+            nowMillis = now,
+            signalBarTime = now,
+            proposedRiskUsd = 5.0,
+            roundTripFeeUsd = 0.1,
+            riskStatus = null,
+            enforceSession = false,
+            strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+        )
+        assertFalse(d.allowed)
+        assertTrue(d.reasonsFa.any { it.contains("همین استراتژی") })
+    }
+
+    @Test
+    fun `a different strategy on the same symbol is allowed`() {
+        val other = BitcoinStrategyModel.values().first { it.id != BitcoinStrategyModel.BASE_ICHIMOKU.id }
+        val d = EntrySafetyGate.evaluate(
+            symbol = "BTC/USDT",
+            interval = Interval.M15,
+            openTrades = listOf(trade("a", "BTC/USDT", strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id)),
+            nowMillis = now,
+            signalBarTime = now,
+            proposedRiskUsd = 5.0,
+            roundTripFeeUsd = 0.1,
+            riskStatus = null,
+            enforceSession = false,
+            strategyId = other.id,
+        )
+        assertTrue(d.allowed)
+        assertTrue(d.reasonsFa.none { it.contains("همین استراتژی") })
     }
 
     @Test

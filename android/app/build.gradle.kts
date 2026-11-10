@@ -219,8 +219,8 @@ android {
         // ۳.۹.۵۸: آرشیو معاملاتی در پایان هر بک‌تست + دکمهٔ «اعمال یک‌بارهٔ سود» با قفل
         // شناسهٔ محتوایی، نمایش هزینهٔ اجرا در برابر ۱R، حافظهٔ اسنپ‌شات (۵.۳× سریع‌تر در
         // حالت «همهٔ استراتژی‌ها»)، زمان تقریبی باقی‌مانده و سقف کندل.
-        versionCode = 780
-        versionName = "3.9.71"
+        versionCode = 781
+        versionName = "3.9.72"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

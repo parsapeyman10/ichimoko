@@ -757,6 +757,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                 riskStatus = currentRiskLimitStatus(tick.at),
                                 limits = safetyLimits(cfg),
                                 enforceSession = true,
+                                strategyId = armedReport.strategyId,
                             )
                             if (!safety.allowed) {
                                 lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
@@ -2151,6 +2152,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                     riskStatus = currentRiskLimitStatus(now),
                                     limits = safetyLimits(cfg),
                                     enforceSession = cfg.autoPaperTrading,
+                                    strategyId = report.strategyId,
                                 )
                                 if (!safety.allowed) {
                                     lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
