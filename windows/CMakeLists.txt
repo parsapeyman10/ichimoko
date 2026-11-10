@@ -49,8 +49,6 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(aurum_edge
     URI AurumEdge
     VERSION 1.0
-    SOURCES
-        src/app/CandleChart.h
     QML_FILES
         qml/Main.qml
         qml/HomePage.qml

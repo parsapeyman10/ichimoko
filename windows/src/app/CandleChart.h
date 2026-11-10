@@ -9,7 +9,6 @@ namespace aurum {
 class CandleChart : public QQuickPaintedItem {
     Q_OBJECT
     Q_PROPERTY(QVariantList candles READ candles WRITE setCandles NOTIFY candlesChanged)
-    QML_ELEMENT
 public:
     explicit CandleChart(QQuickItem* parent = nullptr);
     [[nodiscard]] QVariantList candles() const { return candles_; }
