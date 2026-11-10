@@ -111,6 +111,15 @@ object BacktestReplayEngine {
          */
         val peymanCryptoConfig: com.aurum.edge.core.peyman.PeymanCryptoConfig =
             com.aurum.edge.core.peyman.PeymanCryptoConfig(),
+        /**
+         * ضریب هزینهٔ اجرا: کارمزد + اسپرد مدل‌شدهٔ ونو در همین عدد ضرب می‌شود.
+         *
+         * چرا لازم است؟ ممیزی داده نشان داد اسپرد واقعیِ خودِ فایل (میانهٔ ask−bid روی
+         * XAU/USD) حدود ۰٫۶۲ دلار است، در حالی که هزینهٔ مدل‌شدهٔ بک‌تست کمتر از این است.
+         * با `1.0` (پیش‌فرض) رفتار برنامه هیچ تغییری نمی‌کند؛ `3.0` یک آزمون محافظه‌کارانه
+         * است تا معلوم شود «آیا سود از هزینه‌های واقعی‌تر جان سالم به در می‌برد؟»
+         */
+        val costMultiplier: Double = 1.0,
     )
 
     /** یک معاملهٔ بک‌تست. جدا از `PaperTrade` نگه داشته می‌شود تا هیچ‌جا با ژورنال قاطی نشود. */
@@ -663,7 +672,8 @@ object BacktestReplayEngine {
         val rawPnl = if (open.action == SignalAction.BUY) safePrice - open.entry else open.entry - safePrice
         // نسبت حرکت قیمت به ارزش قرارداد (همان منطق PaperTrade برای هر دسته دارایی).
         val grossUsd = PaperOrderRules.quotePnlToUsd(config.symbol, rawPnl * pseudo.positionOz, open.entry)
-        val fee = VenueSpecs.of(config.symbol).totalRoundTripFeeUsd(open.entry, pseudo.positionOz)
+        val fee = VenueSpecs.of(config.symbol).totalRoundTripFeeUsd(open.entry, pseudo.positionOz) *
+            config.costMultiplier
         val netUsd = grossUsd - fee
         return Trade(
             index = 0,

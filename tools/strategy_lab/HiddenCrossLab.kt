@@ -42,7 +42,8 @@ fun main(args: Array<String>) {
     val strategy = strategyPath?.let { readCsv(it) }
     val macro = macroPath?.let { readCsv(it) }
     println(
-        "نماد=$symbol · تایم ماشه=${triggerInterval.label} · کندل ماشه=${trigger.size} · " +
+        "نماد=$symbol · تایم ماشه=${triggerInterval.label} · ضریب هزینه=" +
+            "${System.getenv("HX_COST_MULT") ?: "1"} · کندل ماشه=${trigger.size} · " +
             "۱ساعته=${strategy?.size ?: 0} · ۴ساعته=${macro?.size ?: 0}",
     )
 
@@ -51,6 +52,7 @@ fun main(args: Array<String>) {
             strategyId = id,
             symbol = symbol,
             triggerInterval = triggerInterval,
+            costMultiplier = System.getenv("HX_COST_MULT")?.toDoubleOrNull() ?: 1.0,
             includeHiddenCrossLayer = hiddenLayer,
             strategyCandlesOverride = strategy.orEmpty(),
             macroCandlesOverride = macro.orEmpty(),
@@ -71,6 +73,29 @@ fun main(args: Array<String>) {
                 st?.maxDrawdownPct ?: 0.0,
             ),
         )
+        // ممیزی مستقل: فهرست معامله‌ها را بیرون می‌نویسیم تا آمار موتور با محاسبهٔ مستقل
+        // (پایتون) مقایسه شود — «آیا این اعداد از همان معامله‌ها می‌آیند؟»
+        if (System.getenv("HX_DUMP") != null) {
+            val safe = label.replace(Regex("[^A-Za-z]"), "_")
+            // مسیر با File(dir, name) ساخته می‌شود؛ پیش‌تر با replace("/") نام فایل به ریشهٔ
+            // مخزن می‌افتاد.
+            val f = File("/tmp", "hx-trades-${symbol.replace("/", "")}-$safe.csv")
+            f.writeText(
+                buildString {
+                    appendLine("idx,action,entryTime,entry,sl,tp,exitTime,exitPrice,reason,gross,fee,net,r,barsHeld,equityAfter")
+                    res.trades.forEach { t ->
+                        appendLine(
+                            listOf(
+                                t.index, t.action.name, t.entryTime, t.entryPrice, t.stopLoss, t.takeProfit,
+                                t.exitTime ?: "", t.exitPrice ?: "", t.exitReason.name,
+                                t.grossPnlUsd, t.feeUsd, t.netPnlUsd, t.rMultiple, t.barsHeld, t.equityAfterUsd,
+                            ).joinToString(","),
+                        )
+                    }
+                },
+            )
+            println("    ↳ معامله‌ها نوشته شد: ${f.path}")
+        }
         // «۰ معامله» باید دلیل داشته باشد، نه سکوت: بیشترین شرط‌هایی که رد شده‌اند.
         if (res.trades.isEmpty()) {
             val blockers = res.topBlockers.take(4).joinToString(" · ") { "${it.first} (${it.second})" }
