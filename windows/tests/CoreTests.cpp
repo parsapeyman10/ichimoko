@@ -101,6 +101,19 @@ void testRiskEngine() {
     near(enforceRiskReward(100.0, 99.0, 110.0, OrderSide::buy), 103.0, 1e-9, "RR cap");
     near(minSafeStructuralStopDistance("BTC/USDT", 100'000.0, 500.0, 500.0, true), 410.0, 1e-9, "Peyman structural ATR floor");
     near(minSafeStructuralStopDistance("EUR/USD", 1.10, 0.0002, 0.0002, true), 0.00044, 1e-12, "Peyman forex floor");
+    const auto bounds = tradePlanBounds("BTC/USDT", 15);
+    near(bounds.minStopPct, 0.0016, 1e-12, "TradePlanGuard crypto corridor");
+    const auto guarded = sanitizeTradePlan("BTC/USDT", OrderSide::buy, 100000.0, 99000.0, 102000.0, 2.0, 500.0, 15);
+    require(guarded.usable && guarded.stopLoss < guarded.entry && guarded.takeProfit > guarded.entry, "guarded direction");
+    require(guarded.riskReward >= 1.49 && guarded.riskReward <= 3.01, "guarded RR bounds");
+    require(guarded.stopPct >= bounds.minStopPct * 0.90 && guarded.stopPct <= bounds.maxStopPct * 1.01, "guarded volatility corridor");
+    require(guarded.liquidationBufferR >= 2.5, "guarded liquidation distance");
+    const auto rebased = rebaseTradePlanToLive("BTC/USDT", OrderSide::buy, 100000.0, 100000.0,
+        guarded.stopLoss, guarded.takeProfit, 500.0, 15, 2.0);
+    require(rebased.usable, "live rebase at anchor");
+    const auto stale = rebaseTradePlanToLive("BTC/USDT", OrderSide::buy, 110000.0, 100000.0,
+        guarded.stopLoss, guarded.takeProfit, 500.0, 15, 2.0);
+    require(!stale.usable, "stale plan rejected instead of executing old levels");
 }
 
 void testNeoWave() {

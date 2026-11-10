@@ -46,6 +46,8 @@ public:
     Q_INVOKABLE void runBacktest();
     Q_INVOKABLE QVariantMap calculateRisk(const QString& symbol, double accountBalance,
         double riskPercent, double entry, double stopLoss, double takeProfit) const;
+    Q_INVOKABLE QVariantMap guardRiskPlan(const QString& symbol, const QString& side,
+        double entry, double stopLoss, double takeProfit, double referenceAtr, int intervalMinutes) const;
     Q_INVOKABLE bool exportJournal(const QString& path);
     Q_INVOKABLE QVariantMap monthlyCalendar(int year, int month) const;
     Q_INVOKABLE bool exportCandles(const QString& path);

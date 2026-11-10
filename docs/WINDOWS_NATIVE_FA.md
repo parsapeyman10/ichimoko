@@ -51,7 +51,7 @@ Core نباید به UI، شبکه یا SQLite وابسته شود. بک‌تس�
 | NeoWave و MTF Confluence | الگوهای Impulse/ZigZag/Flat/Triangles/Diametric/Symmetrical، Gate و MTF پورت و تست شد؛ Golden Test مشترک Kotlin ادامه دارد |
 | Neural Learning و Ledger جداگانه | اتاق تمرین Baseline جدا و قطعی؛ شبکه و Ledger کامل Android هنوز نه |
 | AI Trader/News | پس از قرارداد Network و Privacy |
-| TradePlanGuard/EntrySafetyGate | پیش از هر Auto Paper Trade |
+| TradePlanGuard/EntrySafetyGate | دالان ATR، Sanitize، Rebase، Staleness و Leverage پورت و تست شد؛ EntrySafetyGate کامل هنوز نه |
 | Archive CSV/JSON/PDF | Archive اتمیک کندل CSV/JSON و ژورنال CSV/JSON/PDF |
 | Notifications | Windows Toast |
 | Update | بررسی Async نسخهٔ GitHub و باز کردن Release؛ نصب امضاشده/Authenticode هنوز نه |

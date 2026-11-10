@@ -25,6 +25,37 @@ struct VenueSpec {
     [[nodiscard]] double minStopDistance(double price) const;
 };
 
+struct TradePlanBounds {
+    double minStopPct{};
+    double maxStopPct{};
+    double maxTargetPct{};
+    double atrFactorMin{0.80};
+    double atrFactorMax{2.10};
+    double maxTargetAtr{3.40};
+    int venueLeverageCap{};
+};
+
+struct GuardedTradePlan {
+    std::string symbol;
+    OrderSide side{};
+    int intervalMinutes{15};
+    double entry{};
+    double stopLoss{};
+    double takeProfit{};
+    double stopDistance{};
+    double targetDistance{};
+    double riskReward{};
+    double stopPct{};
+    double targetPct{};
+    double atr{};
+    int recommendedLeverage{};
+    double liquidationPrice{};
+    double liquidationBufferR{};
+    bool usable{};
+    bool adjusted{};
+    std::string note;
+};
+
 struct RiskCalculation {
     std::string symbol;
     OrderSide side{};
@@ -58,6 +89,15 @@ struct RiskCalculation {
     double stopDistance, double* liquidationPrice = nullptr, double* liquidationBufferR = nullptr);
 [[nodiscard]] std::optional<RiskCalculation> calculatePosition(const std::string& symbol,
     double accountBalance, double riskPercent, double entry, double stopLoss, double takeProfit);
+[[nodiscard]] TradePlanBounds tradePlanBounds(const std::string& symbol, int intervalMinutes = 15);
+[[nodiscard]] double robustAtr(const std::string& symbol, double price, double atrValue, int intervalMinutes = 15);
+[[nodiscard]] GuardedTradePlan sanitizeTradePlan(const std::string& symbol, OrderSide side,
+    double entry, std::optional<double> candidateStop, std::optional<double> candidateTarget,
+    double desiredRiskReward = 1.5, double referenceAtr = 0.0, int intervalMinutes = 15,
+    double strategyAtr = 0.0, std::optional<double> anchorEntry = std::nullopt);
+[[nodiscard]] GuardedTradePlan rebaseTradePlanToLive(const std::string& symbol, OrderSide side,
+    double liveEntry, double planAnchorEntry, double planStop, double planTarget,
+    double referenceAtr = 0.0, int intervalMinutes = 15, double desiredRiskReward = 1.5);
 [[nodiscard]] double minSafeStructuralStopDistance(const std::string& symbol, double referencePrice,
     double triggerAtr14, double strategyAtr14 = 0.0, bool fiveMinute = true);
 [[nodiscard]] double enforceRiskReward(double entry, double stopLoss, double takeProfit,

@@ -188,6 +188,19 @@ QVariantMap AppController::calculateRisk(const QString& symbol, const double acc
     };
 }
 
+QVariantMap AppController::guardRiskPlan(const QString& symbol, const QString& side,
+    const double entry, const double stopLoss, const double takeProfit,
+    const double referenceAtr, const int intervalMinutes) const {
+    const auto plan = sanitizeTradePlan(symbol.toStdString(), side == QStringLiteral("SELL") ? OrderSide::sell : OrderSide::buy,
+        entry, stopLoss, takeProfit, 2.0, referenceAtr, intervalMinutes);
+    return QVariantMap{{QStringLiteral("usable"), plan.usable}, {QStringLiteral("adjusted"), plan.adjusted},
+        {QStringLiteral("entry"), plan.entry}, {QStringLiteral("stop"), plan.stopLoss}, {QStringLiteral("target"), plan.takeProfit},
+        {QStringLiteral("riskReward"), plan.riskReward}, {QStringLiteral("leverage"), plan.recommendedLeverage},
+        {QStringLiteral("liquidation"), plan.liquidationPrice}, {QStringLiteral("bufferR"), plan.liquidationBufferR},
+        {QStringLiteral("stopPct"), plan.stopPct * 100.0}, {QStringLiteral("targetPct"), plan.targetPct * 100.0},
+        {QStringLiteral("note"), QString::fromStdString(plan.note)}};
+}
+
 QVariantMap AppController::monthlyCalendar(const int year, const int month) const {
     const QDate first(year, month, 1);
     if (!first.isValid() || !journal_) return {};

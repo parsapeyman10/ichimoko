@@ -32,9 +32,23 @@ Page {
                     TextField { id: stop; text: "1990"; color: Theme.text; inputMethodHints: Qt.ImhFormattedNumbersOnly; Layout.fillWidth: true }
                     TextField { id: target; text: "2020"; color: Theme.text; inputMethodHints: Qt.ImhFormattedNumbersOnly; Layout.fillWidth: true }
                     Button {
-                        Layout.columnSpan: 6; Layout.fillWidth: true; text: "محاسبهٔ واقعی حجم و هزینه"
+                        Layout.columnSpan: 3; Layout.fillWidth: true; text: "محاسبهٔ واقعی حجم و هزینه"
                         onClicked: result = App.calculateRisk(symbol.text, Number(balance.text), Number(risk.text), Number(entry.text), Number(stop.text), Number(target.text))
                     }
+                    Button {
+                        Layout.columnSpan: 3; Layout.fillWidth: true; text: "ایمن‌سازی با TradePlanGuard"
+                        onClicked: guarded = App.guardRiskPlan(symbol.text, Number(stop.text) > Number(entry.text) ? "SELL" : "BUY", Number(entry.text), Number(stop.text), Number(target.text), 0, 15)
+                    }
+                }
+            }
+            Frame {
+                visible: guarded.note !== undefined
+                Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
+                background: Rectangle { color: Theme.panel; border.color: guarded.usable ? Theme.accent : Theme.red; radius: 8 }
+                contentItem: ColumnLayout {
+                    Label { text: "Peyman TradePlanGuard · " + (guarded.usable ? (guarded.adjusted ? "اصلاح‌شده" : "تأییدشده") : "رد شد"); color: guarded.usable ? Theme.accent : Theme.red; font.bold: true }
+                    Label { text: guarded.usable ? "ورود " + Number(guarded.entry).toFixed(5) + " · SL " + Number(guarded.stop).toFixed(5) + " · TP " + Number(guarded.target).toFixed(5) + " · R:R 1:" + Number(guarded.riskReward).toFixed(2) + " · اهرم " + guarded.leverage + "x" : "پلن قابل استفاده نیست"; color: Theme.text; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    Label { text: guarded.note || ""; color: Theme.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 }
             }
             Frame {
@@ -59,4 +73,5 @@ Page {
         }
     }
     property var result: ({})
+    property var guarded: ({})
 }
