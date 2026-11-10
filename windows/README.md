@@ -25,7 +25,17 @@
 - Ninja
 - Qt 6.8+ با `MSVC2022_64`
 
-## Build
+## Build با فایل آماده
+
+روی ویندوز فایل `windows\build_windows.bat` را اجرا کنید. این فایل Visual Studio 2022 را پیدا می‌کند، پروژه را در حالت Release می‌سازد و تست‌های Core را اجرا می‌کند. مسیر پیش‌فرض Qt برابر `C:\Qt\6.8.3\msvc2022_64` است؛ اگر Qt جای دیگری نصب است:
+
+```bat
+windows\build_windows.bat "D:\Qt\6.8.3\msvc2022_64"
+```
+
+خروجی در `windows\build-local\aurum_edge.exe` قرار می‌گیرد. این فایل Build و Test انجام می‌دهد و Installer تولید نمی‌کند.
+
+## Build دستی
 
 ```powershell
 git clone https://github.com/parsapeyman10/ichimoko.git
