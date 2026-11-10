@@ -15,6 +15,7 @@ public:
     bool addTrade(const QString& symbol, const QString& side, double entry, double stop,
         double target, double exitPrice, double netPnl, std::int64_t closedAtMs);
     [[nodiscard]] QVariantList recentTrades(int limit = 200) const;
+    [[nodiscard]] QVariantList tradesBetween(std::int64_t startMs, std::int64_t endMs) const;
 
 private:
     QSqlDatabase db_;

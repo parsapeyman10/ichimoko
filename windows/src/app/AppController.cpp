@@ -2,6 +2,7 @@
 #include "core/RiskEngine.h"
 
 #include <QDateTime>
+#include <QDate>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -10,6 +11,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QPdfWriter>
+#include <QPainter>
+#include <QPageSize>
 #include <QUrl>
 #include <QtConcurrent/QtConcurrent>
 
@@ -162,15 +166,81 @@ QVariantMap AppController::calculateRisk(const QString& symbol, const double acc
     };
 }
 
+QVariantMap AppController::monthlyCalendar(const int year, const int month) const {
+    const QDate first(year, month, 1);
+    if (!first.isValid() || !journal_) return {};
+    QVariantList days;
+    double monthNet{}, best{}, worst{};
+    int wins{}, losses{}, winningDays{}, losingDays{};
+    for (int day = 1; day <= first.daysInMonth(); ++day) {
+        const QDate date(year, month, day);
+        const auto dayRows = journal_->tradesBetween(QDateTime(date, QTime(0, 0)).toMSecsSinceEpoch(),
+            QDateTime(date.addDays(1), QTime(0, 0)).toMSecsSinceEpoch());
+        double net{};
+        int dayWins{}, dayLosses{};
+        for (const auto& row : dayRows) {
+            const double pnl = row.toMap().value(QStringLiteral("netPnl")).toDouble();
+            net += pnl;
+            pnl > 0.0 ? ++dayWins : ++dayLosses;
+        }
+        monthNet += net;
+        wins += dayWins;
+        losses += dayLosses;
+        if (!dayRows.isEmpty()) {
+            if (net > 0.0) ++winningDays;
+            if (net < 0.0) ++losingDays;
+            best = winningDays + losingDays == 1 ? net : std::max(best, net);
+            worst = winningDays + losingDays == 1 ? net : std::min(worst, net);
+        }
+        days.push_back(QVariantMap{{QStringLiteral("day"), day}, {QStringLiteral("net"), net},
+            {QStringLiteral("count"), dayRows.size()}, {QStringLiteral("wins"), dayWins}, {QStringLiteral("losses"), dayLosses}});
+    }
+    const int closed = wins + losses;
+    return QVariantMap{{QStringLiteral("year"), year}, {QStringLiteral("month"), month},
+        {QStringLiteral("offset"), (first.dayOfWeek() + 1) % 7}, {QStringLiteral("days"), days},
+        {QStringLiteral("net"), monthNet}, {QStringLiteral("wins"), wins}, {QStringLiteral("losses"), losses},
+        {QStringLiteral("winRate"), closed > 0 ? wins * 100.0 / closed : 0.0},
+        {QStringLiteral("winningDays"), winningDays}, {QStringLiteral("losingDays"), losingDays},
+        {QStringLiteral("best"), best}, {QStringLiteral("worst"), worst}};
+}
+
 bool AppController::exportJournal(const QString& path) {
     const auto local = QUrl::fromUserInput(path).isLocalFile() ? QUrl::fromUserInput(path).toLocalFile() : path;
     if (local.trimmed().isEmpty() || !journal_) return false;
+    const auto rows = journal_->recentTrades(1000);
+    if (local.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
+        QPdfWriter pdf(local);
+        pdf.setPageSize(QPageSize(QPageSize::A4));
+        pdf.setResolution(120);
+        pdf.setTitle(QStringLiteral("Aurum Edge Journal"));
+        QPainter painter(&pdf);
+        if (!painter.isActive()) { setStatus(QStringLiteral("PDF قابل ساخت نیست")); return false; }
+        int y = 400;
+        const int rowHeight = 150;
+        painter.drawText(200, y, QStringLiteral("Aurum Edge - Paper Trading Journal"));
+        y += rowHeight * 2;
+        painter.drawText(200, y, QStringLiteral("Date / Symbol / Side / Entry / Exit / Net PnL (USD)"));
+        y += rowHeight;
+        for (const auto& row : rows) {
+            if (y + rowHeight > pdf.height() - 300) { pdf.newPage(); y = 400; }
+            const auto item = row.toMap();
+            const auto date = QDateTime::fromMSecsSinceEpoch(item.value(QStringLiteral("closedAt")).toLongLong()).toString(Qt::ISODate);
+            const auto line = QStringLiteral("%1 | %2 | %3 | %4 | %5 | %6")
+                .arg(date, item.value(QStringLiteral("symbol")).toString(), item.value(QStringLiteral("side")).toString())
+                .arg(item.value(QStringLiteral("entry")).toDouble()).arg(item.value(QStringLiteral("exit")).toDouble())
+                .arg(item.value(QStringLiteral("netPnl")).toDouble());
+            painter.drawText(200, y, line);
+            y += rowHeight;
+        }
+        painter.end();
+        setStatus(QStringLiteral("PDF ژورنال ذخیره شد: %1").arg(QFileInfo(local).fileName()));
+        return true;
+    }
     QSaveFile file(local);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         setStatus(QStringLiteral("خروجی قابل نوشتن نیست: %1").arg(file.errorString()));
         return false;
     }
-    const auto rows = journal_->recentTrades(1000);
     QByteArray output;
     if (local.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
         QJsonArray array;
@@ -197,6 +267,36 @@ bool AppController::exportJournal(const QString& path) {
         return false;
     }
     setStatus(QStringLiteral("خروجی ژورنال ذخیره شد: %1").arg(QFileInfo(local).fileName()));
+    return true;
+}
+
+bool AppController::exportCandles(const QString& path) {
+    if (!data_) { setStatus(QStringLiteral("ابتدا CSV بارگذاری کنید")); return false; }
+    const auto local = QUrl::fromUserInput(path).isLocalFile() ? QUrl::fromUserInput(path).toLocalFile() : path;
+    QSaveFile file(local);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) { setStatus(QStringLiteral("Archive قابل نوشتن نیست")); return false; }
+    QByteArray output;
+    if (local.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
+        output += "[\n";
+        for (std::size_t i = 0; i < data_->candles.size(); ++i) {
+            const auto& c = data_->candles[i];
+            output += QJsonDocument(QJsonObject{{QStringLiteral("time"), QJsonValue::fromVariant(QVariant::fromValue(c.timeMs))},
+                {QStringLiteral("open"), c.open}, {QStringLiteral("high"), c.high}, {QStringLiteral("low"), c.low},
+                {QStringLiteral("close"), c.close}, {QStringLiteral("volume"), c.volume}, {QStringLiteral("closed"), c.closed}})
+                .toJson(QJsonDocument::Compact);
+            output += i + 1 == data_->candles.size() ? "\n" : ",\n";
+        }
+        output += "]\n";
+    } else {
+        output = "timestamp,open,high,low,close,volume,closed\n";
+        for (const auto& c : data_->candles) {
+            output += QStringLiteral("%1,%2,%3,%4,%5,%6,%7\n").arg(c.timeMs)
+                .arg(c.open, 0, 'g', 17).arg(c.high, 0, 'g', 17).arg(c.low, 0, 'g', 17)
+                .arg(c.close, 0, 'g', 17).arg(c.volume, 0, 'g', 17).arg(c.closed ? 1 : 0).toUtf8();
+        }
+    }
+    if (file.write(output) != output.size() || !file.commit()) { setStatus(QStringLiteral("ثبت Archive ناموفق بود")); return false; }
+    setStatus(QStringLiteral("Archive کندل ذخیره شد: %1").arg(QFileInfo(local).fileName()));
     return true;
 }
 

@@ -31,13 +31,15 @@ else()
     endif()
 endif()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Sql Concurrent)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Sql Concurrent Network)
 qt_standard_project_setup(REQUIRES 6.8)
 qt_add_executable(aurum_edge WIN32
     src/app/main.cpp
     src/app/AppController.cpp
     src/app/CandleChart.cpp
     src/app/JournalStore.cpp
+    src/app/LiveQuoteService.cpp
+    src/app/UpdateService.cpp
 )
 target_link_libraries(aurum_edge PRIVATE
     aurum_core
@@ -45,6 +47,7 @@ target_link_libraries(aurum_edge PRIVATE
     Qt6::QuickControls2
     Qt6::Sql
     Qt6::Concurrent
+    Qt6::Network
 )
 set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(aurum_edge
@@ -57,6 +60,8 @@ qt_add_qml_module(aurum_edge
         qml/BacktestPage.qml
         qml/JournalPage.qml
         qml/RiskPage.qml
+        qml/CalendarPage.qml
+        qml/LivePage.qml
         qml/SettingsPage.qml
         qml/Theme.qml
 )

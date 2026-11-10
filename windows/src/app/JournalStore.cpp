@@ -71,4 +71,24 @@ QVariantList JournalStore::recentTrades(const int limit) const {
     return rows;
 }
 
+QVariantList JournalStore::tradesBetween(const std::int64_t startMs, const std::int64_t endMs) const {
+    QVariantList rows;
+    if (!valid_ || startMs < 0 || endMs <= startMs) return rows;
+    QSqlQuery query(db_);
+    query.prepare(QStringLiteral("SELECT symbol,side,entry,stop,target,exit,net_pnl,closed_at_ms "
+        "FROM journal_trades WHERE closed_at_ms >= ? AND closed_at_ms < ? ORDER BY closed_at_ms DESC"));
+    query.addBindValue(QVariant::fromValue(startMs));
+    query.addBindValue(QVariant::fromValue(endMs));
+    if (!query.exec()) return rows;
+    while (query.next()) {
+        rows.push_back(QVariantMap{
+            {QStringLiteral("symbol"), query.value(0)}, {QStringLiteral("side"), query.value(1)},
+            {QStringLiteral("entry"), query.value(2)}, {QStringLiteral("stop"), query.value(3)},
+            {QStringLiteral("target"), query.value(4)}, {QStringLiteral("exit"), query.value(5)},
+            {QStringLiteral("netPnl"), query.value(6)}, {QStringLiteral("closedAt"), query.value(7)},
+        });
+    }
+    return rows;
+}
+
 } // namespace aurum

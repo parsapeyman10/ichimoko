@@ -31,6 +31,21 @@ Page {
                 Label { text: "Native Tune و SIMD فقط با Benchmark و Runtime Dispatch در مراحل بعد فعال می‌شوند تا Binary روی تمام CPUهای x64 سازگار بماند."; color: Theme.muted; wrapMode: Text.WordWrap }
             }
         }
+        Frame {
+            Layout.fillWidth: true
+            background: Rectangle { color: Theme.panel; border.color: Theme.border; radius: 8 }
+            contentItem: ColumnLayout {
+                spacing: 10
+                Label { text: "بروزرسانی ویندوز · نسخهٔ فعلی " + Updates.currentVersion; color: Theme.accent; font.bold: true }
+                Label { text: Updates.message; color: Theme.text; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                RowLayout {
+                    Button { text: "بررسی نسخهٔ جدید"; enabled: !Updates.loading; onClicked: Updates.check() }
+                    Button { text: "باز کردن Release"; visible: Updates.releaseUrl.length > 0; onClicked: Updates.openReleasePage() }
+                    BusyIndicator { running: Updates.loading; visible: running; Layout.preferredWidth: 26; Layout.preferredHeight: 26 }
+                }
+                Label { text: "نصب خودکار فایل ناشناس انجام نمی‌شود. انتشار Installer امضاشده و بررسی Authenticode هنوز لازم است."; color: Theme.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            }
+        }
         Item { Layout.fillHeight: true }
         Label { text: "Aurum Edge Windows 0.1.0 — Vertical Slice"; color: Theme.muted }
     }

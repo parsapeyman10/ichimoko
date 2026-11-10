@@ -21,6 +21,12 @@ Page {
             Label { text: App.fileName; color: Theme.text; elide: Label.ElideLeft; Layout.fillWidth: true }
             Label { text: App.candleCount ? App.candleCount.toLocaleString() + " کندل" : "بدون داده"; color: Theme.muted }
         }
+        RowLayout {
+            visible: App.hasData
+            TextField { id: archivePath; text: "candles.csv"; color: Theme.text; Layout.fillWidth: true; placeholderText: "مسیر Archive کندل" }
+            Button { text: "Archive CSV"; onClicked: { archivePath.text = archivePath.text.replace(/\.json$/i, ".csv"); App.exportCandles(archivePath.text) } }
+            Button { text: "Archive JSON"; onClicked: { archivePath.text = archivePath.text.replace(/\.csv$/i, ".json"); App.exportCandles(archivePath.text) } }
+        }
         CandleChart {
             id: chart
             Layout.fillWidth: true

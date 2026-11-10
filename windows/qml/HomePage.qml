@@ -43,9 +43,9 @@ Page {
                 anchors.fill: parent
                 anchors.margins: 20
                 spacing: 12
-                Label { text: "برش اول قابل اجرا"; color: Theme.accent; font.pixelSize: 20; font.bold: true }
-                Label { color: Theme.text; wrapMode: Text.WordWrap; Layout.fillWidth: true; text: "خواندن Dukascopy CSV با Memory Map، تشخیص و حذف ردیف خراب، چارت Native، بک‌تست ایچیموکو مستقل با کارمزد و Slippage، و ژورنال واقعی SQLite." }
-                Label { color: Theme.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; text: "موتور Peyman، نئوویو، یادگیری عصبی، دادهٔ زنده، آرشیو و Update هنوز در این برش ادعای تکمیل ندارند و طبق Feature Matrix پورت می‌شوند." }
+                Label { text: "نسخهٔ Native در حال تکمیل"; color: Theme.accent; font.pixelSize: 20; font.bold: true }
+                Label { color: Theme.text; wrapMode: Text.WordWrap; Layout.fillWidth: true; text: "CSV و چارت Native، بک‌تست Baseline، ژورنال SQLite، ریسک، تقویم ماهانه، Archive کندل، خروجی PDF، Quote زندهٔ اختیاری و بررسی Release." }
+                Label { color: Theme.muted; wrapMode: Text.WordWrap; Layout.fillWidth: true; text: "Peyman کامل، NeoWave، Neural، Backfill و نصب خودکار امضاشده هنوز کامل اعلام نمی‌شوند. بک‌تست فعلی Peyman Parity ندارد." }
                 Item { Layout.fillHeight: true }
                 Label { text: App.fileName.length ? App.fileName : "فایلی انتخاب نشده است"; color: Theme.text }
                 Label { text: App.resultSummary.length ? App.resultSummary : "نتیجهٔ بک‌تست: —"; color: Theme.green; wrapMode: Text.WordWrap }

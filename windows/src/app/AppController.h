@@ -41,6 +41,8 @@ public:
     Q_INVOKABLE QVariantMap calculateRisk(const QString& symbol, double accountBalance,
         double riskPercent, double entry, double stopLoss, double takeProfit) const;
     Q_INVOKABLE bool exportJournal(const QString& path);
+    Q_INVOKABLE QVariantMap monthlyCalendar(int year, int month) const;
+    Q_INVOKABLE bool exportCandles(const QString& path);
     Q_INVOKABLE bool addJournalTrade(const QString& symbol, const QString& side, double entry,
         double stop, double target, double exitPrice, double netPnl);
 signals:

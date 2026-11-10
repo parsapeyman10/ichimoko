@@ -1,5 +1,7 @@
 #include "app/AppController.h"
 #include "app/CandleChart.h"
+#include "app/LiveQuoteService.h"
+#include "app/UpdateService.h"
 
 #include <QGuiApplication>
 #include <QIcon>
@@ -15,8 +17,12 @@ int main(int argc, char* argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Material"));
     qmlRegisterType<aurum::CandleChart>("AurumEdge", 1, 0, "CandleChart");
     aurum::AppController controller;
+    aurum::LiveQuoteService liveQuotes;
+    aurum::UpdateService updates;
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("App"), &controller);
+    engine.rootContext()->setContextProperty(QStringLiteral("Live"), &liveQuotes);
+    engine.rootContext()->setContextProperty(QStringLiteral("Updates"), &updates);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
         &app, [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("AurumEdge", "Main");

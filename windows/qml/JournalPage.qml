@@ -42,9 +42,10 @@ Page {
         }
         RowLayout {
             Layout.fillWidth: true
-            TextField { id: exportPath; text: "journal.csv"; placeholderText: "مسیر فایل CSV یا JSON"; color: Theme.text; Layout.fillWidth: true }
-            Button { text: "خروجی CSV"; onClicked: { exportPath.text = exportPath.text.replace(/\.json$/i, ".csv"); App.exportJournal(exportPath.text) } }
-            Button { text: "خروجی JSON"; onClicked: { exportPath.text = exportPath.text.replace(/\.csv$/i, ".json"); App.exportJournal(exportPath.text) } }
+            TextField { id: exportPath; text: "journal.csv"; placeholderText: "مسیر فایل CSV، JSON یا PDF"; color: Theme.text; Layout.fillWidth: true }
+            Button { text: "خروجی CSV"; onClicked: { exportPath.text = exportPath.text.replace(/\.(json|pdf)$/i, ".csv"); App.exportJournal(exportPath.text) } }
+            Button { text: "خروجی JSON"; onClicked: { exportPath.text = exportPath.text.replace(/\.(csv|pdf)$/i, ".json"); App.exportJournal(exportPath.text) } }
+            Button { text: "خروجی PDF"; onClicked: { exportPath.text = exportPath.text.replace(/\.(csv|json)$/i, ".pdf"); App.exportJournal(exportPath.text) } }
         }
         Frame {
             Layout.fillWidth: true

@@ -45,16 +45,16 @@ Core نباید به UI، شبکه یا SQLite وابسته شود. بک‌تس�
 | ژورنال پایدار | SQLite اولیه |
 | Home/Chart/Backtest/Journal/Settings | Vertical Slice |
 | ریسک‌کالکولاتور و VenueSpecs | حجم/کارمزد/اسپرد/اهرم/لیکوییدیشن و R:R با تست Core؛ دالان کامل Peyman هنوز نه |
-| تقویم ماهانه و Risk Limits | هنوز پورت نشده |
-| Live Quotes و Background Monitoring | مرحلهٔ دادهٔ زنده |
+| تقویم ماهانه و Risk Limits | تقویم ماهانه SQLite پیاده شد؛ Risk Limits هنوز نه |
+| Live Quotes و Background Monitoring | Quote عمومی Async با Timer اختیاری؛ Background Service و Backfill هنوز نه |
 | تمام استراتژی‌های Ichimoku/Peyman | پورت با Golden Tests |
 | NeoWave و MTF Confluence | پورت با Golden Tests |
 | Neural Learning و Ledger جداگانه | پس از Equality موتورها |
 | AI Trader/News | پس از قرارداد Network و Privacy |
 | TradePlanGuard/EntrySafetyGate | پیش از هر Auto Paper Trade |
-| Archive CSV/JSON/PDF | خروجی اتمیک CSV/JSON ژورنال؛ Archive کندل و PDF هنوز نه |
+| Archive CSV/JSON/PDF | Archive اتمیک کندل CSV/JSON و ژورنال CSV/JSON/PDF |
 | Notifications | Windows Toast |
-| Update | Signed MSIX/NSIS، نه APK |
+| Update | بررسی Async نسخهٔ GitHub و باز کردن Release؛ نصب امضاشده/Authenticode هنوز نه |
 | مانیتورینگ سرعت و Resource Governor | Benchmark و مرحلهٔ Performance |
 
 ## قواعد پورت موتورها
