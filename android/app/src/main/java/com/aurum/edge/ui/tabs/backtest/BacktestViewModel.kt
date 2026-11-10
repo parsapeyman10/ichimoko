@@ -50,6 +50,29 @@ class BacktestViewModel(
     private val trainer = BacktestNeuralTrainer(application)
     private val jobStore = BacktestJobStore(application)
 
+    /**
+     * فهرست کارهای بک‌تستِ پس‌زمینه.
+     *
+     * ⚠️ این دو ویژگی **باید** پیش از بلوک `init` اعلان شوند: `init` تابع `refresh()` را
+     * صدا می‌زند و آن هم `refreshJobs()` را؛ اگر `_jobs` پایین‌ترِ کلاس اعلان شده باشد،
+     * در آن لحظه مقدارش `null` است و باز کردن تب بک‌تست به NullPointerException و
+     * بسته‌شدن اپ می‌انجامد (همان دستهٔ خطای `heavyRunFa` که قبلاً رخ داد).
+     */
+    private val _jobs = MutableStateFlow<List<BacktestJob>>(emptyList())
+    val jobs: StateFlow<List<BacktestJob>> = _jobs.asStateFlow()
+
+    /**
+     * خواندن فهرست کارها از حافظه — روی رشتهٔ IO، نه رشتهٔ اصلی.
+     * خواندن فایل روی رشتهٔ اصلی هنگام باز شدن تب، هم قفل‌شدن لحظه‌ای می‌سازد و هم
+     * اگر فایل نیمه‌نوشته باشد می‌تواند استثنا بدهد؛ هر دو با `runCatching` + IO حل شده‌اند.
+     */
+    fun refreshJobs() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = runCatching { jobStore.list() }.getOrDefault(emptyList())
+            withContext(Dispatchers.Main) { _jobs.value = list }
+        }
+    }
+
     private val _dataSets = MutableStateFlow<List<BacktestDataStore.DataSet>>(emptyList())
     val dataSets: StateFlow<List<BacktestDataStore.DataSet>> = _dataSets.asStateFlow()
 
@@ -344,12 +367,6 @@ class BacktestViewModel(
      * از ری‌استارت گوشی) و تنظیماتِ کاملِ همان اجرا در `BacktestJobStore` ذخیره
      * می‌شود؛ بنابراین بعداً می‌توانی فقط یک پارامتر را عوض کنی و دوباره اجرا.
      */
-    private val _jobs = MutableStateFlow<List<BacktestJob>>(emptyList())
-    val jobs: StateFlow<List<BacktestJob>> = _jobs.asStateFlow()
-
-    fun refreshJobs() {
-        _jobs.value = runCatching { jobStore.list() }.getOrDefault(emptyList())
-    }
 
     fun queueBackgroundRun(noteFa: String = "") {
         val all = _candles.value
