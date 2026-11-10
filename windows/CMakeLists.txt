@@ -13,6 +13,7 @@ add_library(aurum_core STATIC
     src/core/BacktestEngine.cpp
     src/core/RiskEngine.cpp
     src/core/TradePlanGuard.cpp
+    src/core/TrendRunner.cpp
     src/core/NeoWave.cpp
     src/core/NeoWaveAnalysis.cpp
     src/core/NeuralLab.cpp

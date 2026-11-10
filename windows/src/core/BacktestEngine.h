@@ -9,7 +9,7 @@
 namespace aurum {
 
 enum class Side : std::int8_t { buy = 1, sell = -1 };
-enum class ExitReason : std::uint8_t { stopLoss, takeProfit, endOfData, ruin };
+enum class ExitReason : std::uint8_t { stopLoss, takeProfit, trendExit, endOfData, ruin };
 
 struct Trade final {
     Side side{Side::buy};
@@ -35,6 +35,9 @@ struct BacktestConfig final {
     double targetR{2.0};
     bool allowLong{true};
     bool allowShort{true};
+    bool trendRunnerEnabled{true};
+    double trendRunnerActivationR{2.85};
+    double trendRunnerAtrMultiplier{1.20};
 };
 
 struct BacktestStats final {

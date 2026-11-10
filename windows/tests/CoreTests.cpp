@@ -5,6 +5,7 @@
 #include "core/RiskEngine.h"
 #include "core/NeoWave.h"
 #include "core/NeuralLab.h"
+#include "core/TrendRunner.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -116,6 +117,25 @@ void testRiskEngine() {
     require(!stale.usable, "stale plan rejected instead of executing old levels");
 }
 
+void testTrendRunner() {
+    IchimokuPoint before, now;
+    before.valid = now.valid = true;
+    before.tenkan = 100.0; now.tenkan = 101.0;
+    before.kijun = now.kijun = 100.0;
+    before.spanA = now.spanA = 95.0; before.spanB = now.spanB = 94.0;
+    before.atr14 = now.atr14 = 1.0;
+    Candle bar{300000, 103.0, 104.0, 102.8, 103.5, 10.0, true};
+    const auto active = evaluateTrendRunner(Side::buy, 100.0, 1.0, 99.0, bar, now, before);
+    require(active.active && active.keepOpen && active.unrealizedR > 2.85, "healthy trend activates runner beyond 3R");
+    require(active.trailingStop > 99.0 && active.trailingStop < bar.close, "runner only improves stop");
+    bar.close = 102.5;
+    require(!evaluateTrendRunner(Side::buy, 100.0, 1.0, 99.0, bar, now, before).active, "runner does not activate early");
+    bar.close = 103.5; now.tenkan = 99.0;
+    require(!evaluateTrendRunner(Side::buy, 100.0, 1.0, 99.0, bar, now, before).active, "weak trend cannot disable fixed target");
+    bar.closed = false; now.tenkan = 101.0;
+    require(!evaluateTrendRunner(Side::buy, 100.0, 1.0, 99.0, bar, now, before).active, "forming bar cannot affect runner");
+}
+
 void testNeoWave() {
     const auto input = bars(240);
     require(neoWaveAtr(input) > 0.0, "NeoWave ATR");
@@ -178,6 +198,7 @@ int main() {
         testIndicators();
         testBacktestDeterminism();
         testRiskEngine();
+        testTrendRunner();
         testNeoWave();
         testNeuralLab();
         std::cout << "All Aurum core tests passed\n";

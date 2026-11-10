@@ -40,7 +40,7 @@ Core نباید به UI، شبکه یا SQLite وابسته شود. بک‌تس�
 | CSV واقعی و حذف ردیف خراب/تکراری/حجم صفر | پیاده‌سازی و تست Core |
 | مرز کندل بسته و جلوگیری از Look-Ahead | پیاده‌سازی و تست Core |
 | چارت کندلی | Native اولیه |
-| بک‌تست با هزینه، Slippage و Risk | Baseline واقعی؛ Peyman هنوز نه |
+| بک‌تست با هزینه، Slippage و Risk | Baseline واقعی + Trend Runner با کندل بسته؛ Peyman هنوز نه |
 | آمار PF/Expectancy/Equity/DD/Trade Ledger | پیاده‌سازی اولیه |
 | ژورنال پایدار | SQLite اولیه |
 | Home/Chart/Backtest/Journal/Settings | Vertical Slice |

@@ -1,5 +1,6 @@
 #include "core/BacktestEngine.h"
 #include "core/Ichimoku.h"
+#include "core/TrendRunner.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,14 +12,16 @@ namespace aurum {
 namespace {
 
 struct Position final {
-    Side side;
-    std::int64_t entryTime;
-    double entry;
-    double stop;
-    double target;
-    double quantity;
-    double entryFee;
-    double riskBudget;
+    Side side{Side::buy};
+    std::int64_t entryTime{};
+    double entry{};
+    double stop{};
+    double target{};
+    double quantity{};
+    double entryFee{};
+    double riskBudget{};
+    double initialRisk{};
+    bool runnerActive{};
 };
 
 BacktestStats statistics(std::vector<Trade>& trades, const double startingEquity) {
@@ -77,14 +80,21 @@ BacktestResult runIchimokuBaseline(const std::vector<Candle>& bars, const Backte
         if (position) {
             auto p = *position;
             const auto direction = p.side == Side::buy ? 1.0 : -1.0;
+            if (config.trendRunnerEnabled && i >= 2) {
+                const auto runner = evaluateTrendRunner(p.side, p.entry, p.initialRisk, p.stop,
+                    bars[i - 1], indicators[i - 1], indicators[i - 2],
+                    config.trendRunnerActivationR, config.trendRunnerAtrMultiplier);
+                p.stop = runner.trailingStop;
+                p.runnerActive = p.runnerActive || runner.active;
+            }
             const bool stopHit = p.side == Side::buy ? bar.low <= p.stop : bar.high >= p.stop;
-            const bool targetHit = p.side == Side::buy ? bar.high >= p.target : bar.low <= p.target;
+            const bool targetHit = !p.runnerActive && (p.side == Side::buy ? bar.high >= p.target : bar.low <= p.target);
             const double adverseExit = p.side == Side::buy ? bar.low : bar.high;
             const double mtm = equity + direction * (adverseExit - p.entry) * p.quantity - p.entryFee;
             if (peak > 0) maxDd = std::max(maxDd, (peak - mtm) / peak * 100.0);
             if (stopHit) {
                 const double raw = p.side == Side::buy ? std::min(bar.open, p.stop) : std::max(bar.open, p.stop);
-                closePosition(p, raw, bar.timeMs, equity + p.riskBudget <= 0 ? ExitReason::ruin : ExitReason::stopLoss);
+                closePosition(p, raw, bar.timeMs, equity + p.riskBudget <= 0 ? ExitReason::ruin : p.runnerActive ? ExitReason::trendExit : ExitReason::stopLoss);
                 position.reset();
                 hasPending = false;
                 continue;
@@ -96,6 +106,7 @@ BacktestResult runIchimokuBaseline(const std::vector<Candle>& bars, const Backte
                 hasPending = false;
                 continue;
             }
+            *position = p;
         }
         if (!position && hasPending) {
             const auto direction = pending == Side::buy ? 1.0 : -1.0;
@@ -115,8 +126,9 @@ BacktestResult runIchimokuBaseline(const std::vector<Candle>& bars, const Backte
                 const auto unitLoss = std::abs(entry - stopExit) + config.feePerSide * (entry + stopExit);
                 const auto quantity = riskBudget / unitLoss;
                 const auto entryFee = entry * quantity * config.feePerSide;
+                const double plannedR = config.trendRunnerEnabled ? std::max(3.0, config.targetR) : config.targetR;
                 position = Position{pending, bar.timeMs, entry, stop,
-                    entry + direction * config.targetR * riskDistance, quantity, entryFee, riskBudget};
+                    entry + direction * plannedR * riskDistance, quantity, entryFee, riskBudget, riskDistance, false};
                 const bool entryStopHit = pending == Side::buy ? bar.low <= stop : bar.high >= stop;
                 const bool entryTargetHit = pending == Side::buy ? bar.high >= position->target : bar.low <= position->target;
                 if (entryStopHit) {

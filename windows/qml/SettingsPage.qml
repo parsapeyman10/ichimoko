@@ -16,7 +16,8 @@ Page {
             contentItem: ColumnLayout {
                 spacing: 12
                 Label { text: "ریسک بک‌تست: ۰٫۲۵٪ سرمایه در هر معامله"; color: Theme.text }
-                Label { text: "کارمزد: ۰٫۱۰٪ هر سمت · Slippage: ۰٫۰۱٪ هر سمت · هدف آزمایشی: 2R"; color: Theme.text; wrapMode: Text.WordWrap }
+                Label { text: "کارمزد: ۰٫۱۰٪ هر سمت · Slippage: ۰٫۰۱٪ هر سمت · پلن اولیه حداکثر 3R"; color: Theme.text; wrapMode: Text.WordWrap }
+                Label { text: "Trend Runner: بعد از ۲٫۸۵R فقط با روند سالم روی کندل بسته، TP ثابت حذف و Stop در جهت سود Trail می‌شود."; color: Theme.accent; wrapMode: Text.WordWrap }
                 Label { text: "در برخورد هم‌زمان SL/TP داخل یک کندل، SL برنده فرض می‌شود."; color: Theme.muted; wrapMode: Text.WordWrap }
                 Label { text: "داده‌ها و ژورنال روی دستگاه می‌مانند. این نسخه هیچ معاملهٔ واقعی و API Key ندارد."; color: Theme.green; wrapMode: Text.WordWrap }
             }
