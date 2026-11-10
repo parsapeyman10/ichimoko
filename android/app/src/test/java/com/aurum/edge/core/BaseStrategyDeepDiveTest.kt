@@ -117,15 +117,16 @@ class BaseStrategyDeepDiveTest {
     )
 
     @Test
-    fun `crypto symbols never trade the base strategy while the peyman policy is on`() {
-        // سیاست صریح: «فقط پیمان کریپتو باید روی نمادهای کریپتو کار کند.»
-        val blocked = evaluate(config = BaseStrategyConfig())
+    fun `crypto symbols trade the base strategy by default and stop only if the peyman monopoly is turned on`() {
+        // ۳.۹.۶۷: انحصار «فقط پیمان» پیش‌فرض خاموش شد، چون پیمان خودش پیش‌فرض DISABLED است و
+        // نتیجه‌اش این بود که رمزارز هیچ‌وقت معامله نمی‌کرد (BTC: صفر معامله در ۶۴٬۸۳۴ کندل).
+        val trading = evaluate(config = BaseStrategyConfig())
+        assertEquals(SignalAction.BUY, trading.action)
+
+        // و اگر کاربر انحصار را روشن کند، همان سری و همان استراتژی باید مسدود شود.
+        val blocked = evaluate(config = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = true))
         assertEquals(SignalAction.NO_TRADE, blocked.action)
         assertTrue(blocked.readiness != StrategyReadinessState.SIGNAL_BUY)
-
-        // اثبات اینکه تفاوت از سیاست است نه از داده: همان سری، همان استراتژی، سیاست خاموش.
-        val allowed = evaluate(config = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = false))
-        assertEquals(SignalAction.BUY, allowed.action)
     }
 
     @Test

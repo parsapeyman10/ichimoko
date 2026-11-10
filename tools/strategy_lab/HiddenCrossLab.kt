@@ -32,14 +32,25 @@ fun main(args: Array<String>) {
     val symbol = args.getOrNull(5)?.takeIf { it.isNotBlank() } ?: "XAU/USD"
 
     val trigger = readCsv(triggerPath)
+    // تایم‌فریم از نام فایل خوانده می‌شود؛ پیش از این همیشه M15 می‌ماند و «۵ دقیقه» در واقع
+    // ۱۵ دقیقه‌ی بازنمونه‌گیری‌شده بود — اندازه‌گیری غلط، ادعای غلط.
+    val triggerInterval = when {
+        triggerPath.contains("-m5-") -> com.aurum.edge.domain.Interval.M5
+        triggerPath.contains("-m30-") -> com.aurum.edge.domain.Interval.M30
+        else -> com.aurum.edge.domain.Interval.M15
+    }
     val strategy = strategyPath?.let { readCsv(it) }
     val macro = macroPath?.let { readCsv(it) }
-    println("نماد=$symbol · کندل ماشه=${trigger.size} · ۱ساعته=${strategy?.size ?: 0} · ۴ساعته=${macro?.size ?: 0}")
+    println(
+        "نماد=$symbol · تایم ماشه=${triggerInterval.label} · کندل ماشه=${trigger.size} · " +
+            "۱ساعته=${strategy?.size ?: 0} · ۴ساعته=${macro?.size ?: 0}",
+    )
 
     fun run(label: String, id: String, hiddenLayer: Boolean) {
         val cfg = BacktestReplayEngine.Config(
             strategyId = id,
             symbol = symbol,
+            triggerInterval = triggerInterval,
             includeHiddenCrossLayer = hiddenLayer,
             strategyCandlesOverride = strategy.orEmpty(),
             macroCandlesOverride = macro.orEmpty(),

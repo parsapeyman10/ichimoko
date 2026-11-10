@@ -684,13 +684,29 @@ data class BaseStrategyConfig(
     /**
      * روی نمادهای رمزارز فقط موتور «پیمان کریپتو» اجازهٔ ورود دارد.
      *
-     * تصمیم صریح کاربر: «فقط پیمان کریپتو باید روی نمادهای کریپتو کار کند.» با `true`
-     * (پیش‌فرض) هیچ استراتژی دیگری — بیس، مدل‌های تکی، ترکیب‌ها — روی رمزارز ورود نمی‌سازد
-     * و تنها مسیر مجاز، تصمیم `isTradeAllowed` موتور پیمان است. اگر پیمان خاموش باشد
-     * (پیش‌فرض `DISABLED`)، رمزارز هیچ ورودی ندارد؛ این عمدی است، نه باگ.
-     * برای آزمون‌های رفتاریِ قدیمی می‌توان آن را `false` داد.
+     * **پیش‌فرض از ۳.۹.۶۷ خاموش است.** روشن‌بودنش یک تناقض پنهان می‌ساخت: پیمان به‌صورت
+     * پیش‌فرض `DISABLED` است و هم‌زمان تنها مسیر مجاز رمزارز بود؛ نتیجه این بود که
+     * بک‌تست BTC/USD **هیچ‌وقت** معامله نمی‌ساخت، حتی وقتی همهٔ شرط‌های استراتژی برقرار
+     * بود (اندازه‌گیری: ۳٬۰۰۰ کندل، آمادگی همیشه `WATCH_SETUP`). حالا هر استراتژی که
+     * شرط‌های خودش را پاس کند روی رمزارز هم معامله می‌کند و پیمان یکی از گزینه‌هاست.
+     * اگر کاربر بخواهد همان انحصار قبلی برگردد، این کلید را `true` می‌کند.
      */
-    val cryptoSymbolsOnlyPeyman: Boolean = true,
+    val cryptoSymbolsOnlyPeyman: Boolean = false,
+    /**
+     * «حالت حداکثر اجرا»: هیچ قفل بیرونی‌ای جز شرط‌های خودِ استراتژی جلوی معامله را نمی‌گیرد.
+     *
+     * اندازه‌گیری نشان داد چند لایه که در هیچ‌یک از روش‌ها تعریف نشده‌اند، عملاً موتور را
+     * قفل می‌کردند: گیت کیجون، وتوی نئوویو، و آستانهٔ ۸۰٪ هم‌گرایی مکتبی روی بیس.
+     * با `true` (پیش‌فرض):
+     *   • گیت کیجون فقط **نمایشی** است و ورود را نمی‌بندد،
+     *   • وتوی نئوویو فقط وقتی اثر دارد که خودِ استراتژیِ فعال نئوویو باشد،
+     *   • آستانهٔ هم‌گرایی بیس از ۸۰٪ به ۷۰٪ و آستانهٔ هر لایه از ۷۰٪ به ۶۰٪ می‌آید
+     *     (وتوی سختِ شرط‌های ۱/۳/۴/۶/۱۷ همچنان برقرار است).
+     * چیزهایی که **همیشه** برقرار می‌مانند: شرط‌های سختِ خود روش، اعتبار پلن (جهت
+     * حد ضرر/حد سود، R:R ≥ ۱:۱٫۵ و هدف ≥ دو برابر کارمزد)، و «یک معاملهٔ باز برای هر
+     * استراتژی». این‌ها امنیت سرمایه‌اند، نه قفل اضافه.
+     */
+    val allowMaximumExecution: Boolean = true,
     /** لایهٔ اختیاری نئوویو (NeoWave). پیش‌فرض خاموش ⇒ خروجی موتور بدون تغییر. */
     val neoWaveEnabled: Boolean = false,
     /** حداقل قواعد نیلی که باید پاس شود تا شمارش «معتبر» شمرده شود. */
@@ -4569,7 +4585,9 @@ object IchimokuStrategyEngine {
         } else {
             null
         }
-        val kijunGatePassed = (kijunGate?.passed ?: true) && (kijunStopRule?.blocked != true)
+        val kijunGateRaw = (kijunGate?.passed ?: true) && (kijunStopRule?.blocked != true)
+        // در «حالت حداکثر اجرا» این گیت نمایشی است: شرط‌های خود استراتژی تصمیم می‌گیرند.
+        val kijunGatePassed = kijunGateRaw || effectiveConfig.allowMaximumExecution
         val firstFifteenPassed = modelCoreConditions.filter { it.index != 16 }.all { it.passed }
         val triggerFired = effectiveTriggerType != StrategyTriggerType.NONE
         val passedCount = conditions.count { it.passed }
@@ -4666,12 +4684,16 @@ object IchimokuStrategyEngine {
                 neoWaveVerdict.isComplete &&
                 neoWaveVerdict.isAlignedWith(isLong)
             )
+        // وتوی نئوویو فقط وقتی ورود را می‌بندد که خودِ استراتژیِ فعال نئوویو باشد (یا حالت
+        // حداکثر اجرا خاموش باشد). پیش از این، یک لایهٔ نمایشی می‌توانست هر ورودی را ببندد.
+        val neoWaveVetoActive = (neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto)) &&
+            (activeModel.isNeoWaveElliottStrategy || !effectiveConfig.allowMaximumExecution)
         val baseReadiness = when {
             !peymanWaveConfirmed -> StrategyReadinessState.BLOCKED
             // مسیر مستقل «فشردگی → انبساط»؛ همهٔ وتوها و اقتصاد اجرا از پیش سنجیده شده‌اند.
             compressionEntry && kijunGatePassed && isLong -> StrategyReadinessState.SIGNAL_BUY
             compressionEntry && kijunGatePassed && !isLong -> StrategyReadinessState.SIGNAL_SELL
-            neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) -> StrategyReadinessState.BLOCKED
+            neoWaveVetoActive -> StrategyReadinessState.BLOCKED
             // مسیر کلاسیک: هر ۱۷ شرط هم‌زمان (سخت‌گیرترین حالت، هنوز معتبر است).
             allSixteenPassed && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
             allSixteenPassed && kijunGatePassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
@@ -4759,7 +4781,7 @@ object IchimokuStrategyEngine {
 
         val finalAction = if (blockedByPeymanPolicy) {
             SignalAction.NO_TRADE
-        } else if (neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto)) {
+        } else if (neoWaveVetoActive) {
             SignalAction.NO_TRADE
         } else if (!kijunGatePassed && !cryptoNeoWaveEntry) {
             // استراتژی ۱۶ فقط با تأیید کراس ۹/۲۶، خطوط پیش‌بینی و ابر معامله می‌کند.
@@ -4821,7 +4843,7 @@ object IchimokuStrategyEngine {
             else -> " · ${neoWaveGate.noteFa} · ${neoWaveMtf.noteFa}"
         }
         val summaryFa = when {
-            neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) ->
+            neoWaveVetoActive ->
                 "$tfTag ⛔ ورود وتو شد · $normalizedSymbol · $effectiveTitle · ${neoWaveGate.noteFa}"
             cryptoNeoWaveEntry ->
                 "$tfTag 🌊 ورود رمزارز بر پایهٔ نئوویو · $normalizedSymbol · $effectiveTitle · " +
@@ -5337,6 +5359,10 @@ object IchimokuStrategyEngine {
 
     /** حداقل امتیاز لازم برای «سیگنال» و برای «آماده». */
     internal const val BOOK_MIN_TOTAL_PCT: Double = 80.0
+    /** آستانهٔ کل در «حالت حداکثر اجرا» (۳.۹.۶۷). */
+    internal const val BOOK_MIN_TOTAL_PCT_MAX_EXEC: Double = 70.0
+    /** آستانهٔ هر لایه در «حالت حداکثر اجرا». */
+    internal const val BOOK_MIN_LAYER_PCT_MAX_EXEC: Double = 60.0
     internal const val BOOK_MIN_LAYER_PCT: Double = 70.0
     /** آستانهٔ «آماده» (WATCH). قبلاً ۶۶٪ بود و ۴۵٪ کندل‌ها را آماده اعلام می‌کرد. */
     internal const val BOOK_WATCH_TOTAL_PCT: Double = 76.0
@@ -5388,8 +5414,12 @@ object IchimokuStrategyEngine {
 
         // لایه‌ها: رژیم به‌صورت AND سنجیده شد (۱۰۰٪ لازم است چون همه‌اش وتوی سخت است).
         // کیفیت و ماشه آستانهٔ ۷۰٪ دارند: یعنی هر لایه اجازهٔ از دست دادن یک وزن کوچک را دارد.
-        val layersOk = qualityPct >= BOOK_MIN_LAYER_PCT && triggerPct >= BOOK_MIN_LAYER_PCT
-        val fires = hardOk && layersOk && totalPct >= BOOK_MIN_TOTAL_PCT
+        // «حالت حداکثر اجرا»: آستانه‌ها یک پله پایین می‌آیند تا ستاپ واقعیِ شرط‌ها
+        // (با وتوی سختِ شرط‌های ۱/۳/۴/۶/۱۷) از دست نرود.
+        val minLayerPct = if (baseConfig.allowMaximumExecution) BOOK_MIN_LAYER_PCT_MAX_EXEC else BOOK_MIN_LAYER_PCT
+        val minTotalPct = if (baseConfig.allowMaximumExecution) BOOK_MIN_TOTAL_PCT_MAX_EXEC else BOOK_MIN_TOTAL_PCT
+        val layersOk = qualityPct >= minLayerPct && triggerPct >= minLayerPct
+        val fires = hardOk && layersOk && totalPct >= minTotalPct
         val watch = !fires && hardOk && totalPct >= BOOK_WATCH_TOTAL_PCT
 
         val missing = conditions.filter { !it.passed }

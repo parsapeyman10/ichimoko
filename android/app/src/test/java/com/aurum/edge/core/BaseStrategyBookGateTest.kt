@@ -159,7 +159,8 @@ class BaseStrategyBookGateTest {
                 true, false, true, true, true,   // ۱۳✓ ۱۴✗ ۱۵✓ ۱۶✓ ۱۷✓
             ),
             isBaseModel = true,
-            baseConfig = BaseStrategyConfig(),
+            // آستانه‌های «سخت‌گیرانه» (۸۰٪/۷۰٪) آزموده می‌شوند، نه حالت حداکثر اجرا.
+            baseConfig = BaseStrategyConfig(allowMaximumExecution = false),
         )
         assertTrue(gate.hardVetoPassed)
         assertFalse("با این‌همه ضعف نباید سیگنال بدهد: ${gate.noteFa}", gate.fires)
