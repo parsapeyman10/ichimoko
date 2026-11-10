@@ -2,6 +2,7 @@
 #include "core/CsvReader.h"
 #include "core/Ichimoku.h"
 #include "core/Series.h"
+#include "core/RiskEngine.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -79,6 +80,25 @@ void testBacktestDeterminism() {
     }
 }
 
+void testRiskEngine() {
+    require(assetClassOf("btc/usdt") == AssetClass::crypto, "crypto classification");
+    require(assetClassOf("EUR/USD") == AssetClass::forex, "forex classification");
+    require(assetClassOf("XAU/USD") == AssetClass::commodity, "gold classification");
+    const auto gold = calculatePosition("XAU/USD", 10'000.0, 0.5, 2'000.0, 1'990.0, 2'020.0);
+    require(gold.has_value(), "valid gold risk plan");
+    near(gold->riskBudgetUsd, 50.0, 1e-9, "fixed fractional risk budget");
+    near(gold->positionUnits, 5.0, 1e-9, "gold ounces from stop distance");
+    near(gold->standardLots, 0.05, 1e-9, "gold standard lots");
+    near(gold->riskReward, 2.0, 1e-9, "risk reward");
+    require(gold->leverage >= 1 && gold->leverage <= 10 && gold->liquidationBufferR >= 2.5,
+        "liquidation buffer must constrain leverage");
+    require(!calculatePosition("BTC/USDT", 10'000.0, 1.0, 100.0, 101.0, 102.0), "direction mismatch rejected");
+    const auto usdJpy = calculatePosition("USD/JPY", 10'000.0, 1.0, 150.0, 149.5, 151.0);
+    require(usdJpy.has_value(), "USD/JPY plan");
+    near(usdJpy->positionUnits, 30'000.0, 1e-6, "JPY quote PnL converted to USD");
+    near(enforceRiskReward(100.0, 99.0, 110.0, OrderSide::buy), 103.0, 1e-9, "RR cap");
+}
+
 } // namespace
 
 int main() {
@@ -87,6 +107,7 @@ int main() {
         testCsv();
         testIndicators();
         testBacktestDeterminism();
+        testRiskEngine();
         std::cout << "All Aurum core tests passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {

@@ -21,7 +21,7 @@ ApplicationWindow {
             spacing: 18
             Label { text: "AURUM EDGE"; color: Theme.accent; font.bold: true; font.pixelSize: 20; Layout.leftMargin: 20 }
             Repeater {
-                model: ["خانه", "چارت", "بک‌تست", "ژورنال", "تنظیمات"]
+                model: ["خانه", "چارت", "بک‌تست", "ژورنال", "ریسک", "تنظیمات"]
                 delegate: TabButton {
                     text: modelData
                     checked: stack.currentIndex === index
@@ -42,6 +42,7 @@ ApplicationWindow {
         ChartPage {}
         BacktestPage {}
         JournalPage {}
+        RiskPage {}
         SettingsPage {}
     }
 }

@@ -11,6 +11,7 @@ add_library(aurum_core STATIC
     src/core/Series.cpp
     src/core/Ichimoku.cpp
     src/core/BacktestEngine.cpp
+    src/core/RiskEngine.cpp
 )
 target_include_directories(aurum_core PUBLIC src)
 target_compile_features(aurum_core PUBLIC cxx_std_23)
@@ -55,6 +56,7 @@ qt_add_qml_module(aurum_edge
         qml/ChartPage.qml
         qml/BacktestPage.qml
         qml/JournalPage.qml
+        qml/RiskPage.qml
         qml/SettingsPage.qml
         qml/Theme.qml
 )

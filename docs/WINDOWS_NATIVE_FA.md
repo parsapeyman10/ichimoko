@@ -44,14 +44,15 @@ Core نباید به UI، شبکه یا SQLite وابسته شود. بک‌تس�
 | آمار PF/Expectancy/Equity/DD/Trade Ledger | پیاده‌سازی اولیه |
 | ژورنال پایدار | SQLite اولیه |
 | Home/Chart/Backtest/Journal/Settings | Vertical Slice |
-| ریسک‌کالکولاتور کامل و تقویم ماهانه | مرحلهٔ ژورنال کامل |
+| ریسک‌کالکولاتور و VenueSpecs | حجم/کارمزد/اسپرد/اهرم/لیکوییدیشن و R:R با تست Core؛ دالان کامل Peyman هنوز نه |
+| تقویم ماهانه و Risk Limits | هنوز پورت نشده |
 | Live Quotes و Background Monitoring | مرحلهٔ دادهٔ زنده |
 | تمام استراتژی‌های Ichimoku/Peyman | پورت با Golden Tests |
 | NeoWave و MTF Confluence | پورت با Golden Tests |
 | Neural Learning و Ledger جداگانه | پس از Equality موتورها |
 | AI Trader/News | پس از قرارداد Network و Privacy |
 | TradePlanGuard/EntrySafetyGate | پیش از هر Auto Paper Trade |
-| Archive CSV/JSON/PDF | مرحلهٔ Export |
+| Archive CSV/JSON/PDF | خروجی اتمیک CSV/JSON ژورنال؛ Archive کندل و PDF هنوز نه |
 | Notifications | Windows Toast |
 | Update | Signed MSIX/NSIS، نه APK |
 | مانیتورینگ سرعت و Resource Governor | Benchmark و مرحلهٔ Performance |

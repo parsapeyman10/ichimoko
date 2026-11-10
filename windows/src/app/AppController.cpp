@@ -1,10 +1,15 @@
 #include "app/AppController.h"
+#include "core/RiskEngine.h"
 
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
 #include <QUrl>
 #include <QtConcurrent/QtConcurrent>
 
@@ -135,6 +140,64 @@ void AppController::runBacktest() {
         }
         return outcome;
     }));
+}
+
+QVariantMap AppController::calculateRisk(const QString& symbol, const double accountBalance,
+    const double riskPercent, const double entry, const double stopLoss, const double takeProfit) const {
+    const auto risk = aurum::calculatePosition(symbol.toStdString(), accountBalance, riskPercent, entry, stopLoss, takeProfit);
+    if (!risk) return {};
+    return QVariantMap{
+        {QStringLiteral("symbol"), QString::fromStdString(risk->symbol)},
+        {QStringLiteral("side"), risk->side == OrderSide::buy ? QStringLiteral("BUY") : QStringLiteral("SELL")},
+        {QStringLiteral("riskBudget"), risk->riskBudgetUsd}, {QStringLiteral("units"), risk->positionUnits},
+        {QStringLiteral("lots"), risk->standardLots}, {QStringLiteral("riskReward"), risk->riskReward},
+        {QStringLiteral("leverage"), risk->leverage}, {QStringLiteral("notional"), risk->notionalUsd},
+        {QStringLiteral("margin"), risk->marginRequiredUsd}, {QStringLiteral("commission"), risk->commissionUsd},
+        {QStringLiteral("spread"), risk->spreadCostUsd}, {QStringLiteral("profitAtTp"), risk->grossProfitAtTpUsd},
+        {QStringLiteral("lossAtSl"), risk->grossLossAtSlUsd}, {QStringLiteral("liquidation"), risk->liquidationPrice},
+        {QStringLiteral("liquidationBufferR"), risk->liquidationBufferR},
+        {QStringLiteral("stopPct"), risk->stopPctOfPrice * 100.0},
+        {QStringLiteral("targetPct"), risk->targetPctOfPrice * 100.0},
+        {QStringLiteral("valid"), risk->planValid}, {QStringLiteral("note"), QString::fromStdString(risk->planNote)},
+    };
+}
+
+bool AppController::exportJournal(const QString& path) {
+    const auto local = QUrl::fromUserInput(path).isLocalFile() ? QUrl::fromUserInput(path).toLocalFile() : path;
+    if (local.trimmed().isEmpty() || !journal_) return false;
+    QSaveFile file(local);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        setStatus(QStringLiteral("خروجی قابل نوشتن نیست: %1").arg(file.errorString()));
+        return false;
+    }
+    const auto rows = journal_->recentTrades(1000);
+    QByteArray output;
+    if (local.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
+        QJsonArray array;
+        for (const auto& row : rows) array.append(QJsonObject::fromVariantMap(row.toMap()));
+        output = QJsonDocument(array).toJson(QJsonDocument::Indented);
+    } else {
+        output = "symbol,side,entry,stop,target,exit,net_pnl,closed_at_ms\n";
+        for (const auto& row : rows) {
+            const auto item = row.toMap();
+            QString symbol = item.value(QStringLiteral("symbol")).toString();
+            symbol.replace(QStringLiteral("\""), QStringLiteral("\"\""));
+            output += QStringLiteral("\"%1\",%2,%3,%4,%5,%6,%7,%8\n")
+                .arg(symbol, item.value(QStringLiteral("side")).toString())
+                .arg(item.value(QStringLiteral("entry")).toDouble(), 0, 'g', 17)
+                .arg(item.value(QStringLiteral("stop")).toDouble(), 0, 'g', 17)
+                .arg(item.value(QStringLiteral("target")).toDouble(), 0, 'g', 17)
+                .arg(item.value(QStringLiteral("exit")).toDouble(), 0, 'g', 17)
+                .arg(item.value(QStringLiteral("netPnl")).toDouble(), 0, 'g', 17)
+                .arg(item.value(QStringLiteral("closedAt")).toLongLong()).toUtf8();
+        }
+    }
+    if (file.write(output) != output.size() || !file.commit()) {
+        setStatus(QStringLiteral("ثبت خروجی ناموفق بود"));
+        return false;
+    }
+    setStatus(QStringLiteral("خروجی ژورنال ذخیره شد: %1").arg(QFileInfo(local).fileName()));
+    return true;
 }
 
 bool AppController::addJournalTrade(const QString& symbol, const QString& side, const double entry,
