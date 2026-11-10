@@ -1,5 +1,5 @@
 pragma Singleton
-import QtQml
+import QtQuick
 
 QtObject {
     readonly property color background: "#080d18"
