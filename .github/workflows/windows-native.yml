@@ -26,7 +26,16 @@ jobs:
       - name: Configure
         run: cmake -S windows -B windows/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURUM_BUILD_TESTS=ON
       - name: Build
-        run: cmake --build windows/build --config Release
+        shell: pwsh
+        run: |
+          cmake --build windows/build --config Release 2>&1 | Tee-Object -FilePath windows/build/build.log
+          $buildExitCode = $LASTEXITCODE
+          if ($buildExitCode -ne 0) {
+            Select-String -Path windows/build/build.log -Pattern 'FAILED:|error [A-Z]+[0-9]+:|fatal error' |
+              Select-Object -First 20 |
+              ForEach-Object { Write-Host "::error::$($_.Line)" }
+            exit $buildExitCode
+          }
       - name: Core tests
         run: ctest --test-dir windows/build -C Release --output-on-failure
       - name: Smoke QML application
