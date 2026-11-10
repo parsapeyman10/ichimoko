@@ -42,13 +42,5 @@ jobs:
         shell: pwsh
         run: |
           $env:QT_QPA_PLATFORM = 'offscreen'
-          $process = Start-Process -FilePath 'windows/build/aurum_edge.exe' -PassThru `
-            -RedirectStandardOutput 'windows/build/smoke.out.log' `
-            -RedirectStandardError 'windows/build/smoke.err.log'
-          Start-Sleep -Seconds 8
-          if ($process.HasExited) {
-            $diagnostics = Get-Content 'windows/build/smoke.err.log' -Raw
-            Write-Host "::error::$diagnostics"
-            throw "QML application exited early with code $($process.ExitCode)"
-          }
-          Stop-Process -Id $process.Id -Force
+          & windows/build/aurum_edge.exe --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "QML smoke test failed with code $LASTEXITCODE" }

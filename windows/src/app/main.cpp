@@ -6,6 +6,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QTimer>
 
 int main(int argc, char* argv[]) {
     QGuiApplication app(argc, argv);
@@ -19,5 +20,8 @@ int main(int argc, char* argv[]) {
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
         &app, [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("AurumEdge", "Main");
+    if (app.arguments().contains(QStringLiteral("--smoke-test"))) {
+        QTimer::singleShot(8000, &app, &QCoreApplication::quit);
+    }
     return app.exec();
 }
