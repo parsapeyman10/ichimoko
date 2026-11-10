@@ -658,11 +658,12 @@ data class BaseStrategyConfig(
     /**
      * آیا لایهٔ «هیدن کراس» (ابر مخفی + دیوار تاج) جزء شرایط «استراتژی بیس» باشد.
      *
-     * پیش‌فرض **روشن** است تا رفتار فعلی هیچ نمادی عوض نشود. خاموش‌کردن آن، بیس را به تعریف
-     * اصلی خودش برمی‌گرداند: فقط چهار مکتب پاتل/تاتل/هوسودا/پلویل. این کلید فقط برای مقایسهٔ
-     * A/B در بک‌تست و تنظیمات استراتژی است.
+     * پیش‌فرض از ۳.۹.۶۵ **خاموش** است، و دلیلش اندازه‌گیری است نه سلیقه:
+     * روی XAU/USD ۱۵دقیقه (۲۰۲۵-۰۱-۰۱ → ۲۰۲۶-۱۱-۰۹، ۴۳٬۸۱۰ کندل) «بیس + لایه» و
+     * «بیس بدون لایه» **دقیقاً یکسان** بودند (۱۵۲ معامله، +۳۴۴٫۲۴$، PF ۱٫۸۲، +۰٫۳۹۰R).
+     * لایه‌ای که هیچ اثری ندارد ولی می‌تواند معاملهٔ سالم را ببندد، نباید پیش‌فرض روشن باشد.
      */
-    val includeHiddenCrossLayer: Boolean = true,
+    val includeHiddenCrossLayer: Boolean = false,
     /**
      * ماشهٔ «فشردگی → انبساط» — فقط برای استراتژی بیس.
      *
@@ -5652,7 +5653,17 @@ object IchimokuStrategyEngine {
             // ۲) بعد از آن هم فقط روی یک **سطح ساختاری** (تنکان، یا ۰٫۳۵ ATR عقب‌تر از
             //    قیمت) جابه‌جا می‌شود، و آن سطح باید سود **مثبتِ خالص بعد از کارمزد**
             //    قفل کند؛ وگرنه جابه‌جایی یعنی «ریسک‌فری کاغذی» که در واقعیت ضرر است.
-            if (currentRMultiple >= MIN_R_TO_MOVE_STOP) {
+            // آستانهٔ جابه‌جایی «متناسب با شرایط» است، نه یک عدد ثابت برای همهٔ بازارها:
+            // در بازار پرنوسان دیرتر (سخت‌گیرانه‌تر) و در روند قوی/ابر ضخیم زودتر قفل می‌شود.
+            val moveThresholdR = adaptiveStopMoveThresholdR(
+                atrPercentOfPrice = if (trade.entry > 0.0) trigSnap.atr14 / trade.entry * 100.0 else 0.0,
+                tenkanKijunSpreadAtr = kotlin.math.abs(trigSnap.tenkan - trigSnap.kijun) /
+                    trigSnap.atr14.coerceAtLeast(1e-9),
+                cloudThicknessAtr = kotlin.math.abs(trigSnap.currentSpanA - trigSnap.currentSpanB) /
+                    trigSnap.atr14.coerceAtLeast(1e-9),
+                interval = report.triggerInterval,
+            )
+            if (currentRMultiple >= moveThresholdR) {
                 val spec = VenueSpecs.of(trade.symbol)
                 val feePct = (spec.takerFeeBps * 2.0 + spec.spreadBps) / 10_000.0
                 val feePerUnit = trade.entry * feePct
@@ -5672,7 +5683,10 @@ object IchimokuStrategyEngine {
                 } else {
                     (trade.entry - structuralCandidate - feePerUnit) / oneRDistance
                 }
-                if (improvesOnCurrentStop && lockedNetR > 0.0) {
+                // «سود مثبت» کافی نیست: در بازار پرنوسان باید حاشیهٔ امن هم داشته باشد،
+                // وگرنه یک کندل معمولی همان قفل را می‌زند و کارمزد دوباره پرداخت می‌شود.
+                val minLockedCushionR = 0.10 + 0.25 * (moveThresholdR - MIN_R_TO_MOVE_STOP) / 0.5
+                if (improvesOnCurrentStop && lockedNetR >= minLockedCushionR) {
                     val tag = if (trade.note.contains(TRAIL_TAG_MARK)) "TRAIL" else "STRUCT"
                     return PreserveModeEvaluation(
                         tradeId = trade.id,
@@ -5684,7 +5698,7 @@ object IchimokuStrategyEngine {
                             "سود باز %.2fR (≥ %.1fR) شد؛ حد ضرر روی سطح ساختاری %.2f منتقل شد، " +
                                 "که بعد از کارمزد %.2fR سود خالص قفل می‌کند",
                             currentRMultiple,
-                            MIN_R_TO_MOVE_STOP,
+                            moveThresholdR,
                             structuralAnchor,
                             lockedNetR,
                         ),
@@ -5711,6 +5725,34 @@ object IchimokuStrategyEngine {
      * قاعدهٔ کاربر: «تا ۱٫۵R نشده، حق جابه‌جایی SL را نداریم».
      */
     const val MIN_R_TO_MOVE_STOP: Double = 1.5
+
+    /**
+     * آستانهٔ جابه‌جایی حد ضرر، متناسب با شرایط (نه یک عدد جادویی برای همه).
+     *
+     * - **نوسان بالا** (ATR% > ۰٫۵٪ قیمت): یک کندل معمولی می‌تواند قفل سود را بزند و
+     *   کارمزد دوباره پرداخت شود؛ آستانه تا +۰٫۵R بالا می‌رود.
+     * - **روند قوی** (تنکان−کیجون ≥ ۰٫۶ ATR): ساختار پشت قیمت واقعی است ⇒ قفل زودتر (تا −۰٫۳R).
+     * - **ابر ضخیم** (≥ ۰٫۸ ATR): حمایت/مقاومت واقعی هست ⇒ −۰٫۱R.
+     * - **تایم‌فریم ۵/۱۵ دقیقه**: نویز بیشتر ⇒ +۰٫۱R.
+     *
+     * خروجی همیشه در [۱٫۲ , ۲٫۲]R می‌ماند. ورودی خراب آستانه را پایین‌تر از کف نمی‌برد.
+     */
+    fun adaptiveStopMoveThresholdR(
+        atrPercentOfPrice: Double,
+        tenkanKijunSpreadAtr: Double,
+        cloudThicknessAtr: Double,
+        interval: Interval = Interval.M15,
+    ): Double {
+        var r = MIN_R_TO_MOVE_STOP
+        val volatility = if (atrPercentOfPrice.isFinite()) atrPercentOfPrice.coerceIn(0.0, 2.0) else 0.0
+        if (volatility > 0.5) r += (minOf(volatility, 1.5) - 0.5) / 1.0 * 0.5
+        if (volatility < 0.2) r -= 0.1
+        if (tenkanKijunSpreadAtr.isFinite() && tenkanKijunSpreadAtr >= 0.6) r -= 0.3
+        if (tenkanKijunSpreadAtr.isFinite() && tenkanKijunSpreadAtr < 0.15) r += 0.2
+        if (cloudThicknessAtr.isFinite() && cloudThicknessAtr >= 0.8) r -= 0.1
+        if (interval == Interval.M5 || interval == Interval.M15) r += 0.1
+        return r.coerceIn(1.2, 2.2)
+    }
 
     const val DEFAULT_MAX_HOLD_BARS: Int = 20
 

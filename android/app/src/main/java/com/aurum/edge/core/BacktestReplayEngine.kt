@@ -68,7 +68,8 @@ object BacktestReplayEngine {
          * لایهٔ «هیدن کراس» (دیوار تاج + ابر مخفی) جزء شرایط بیس باشد.
          * `true` = رفتار فعلی برنامه؛ `false` = بیس خالص چهارگانه. تنها ابزار مقایسهٔ A/B در بک‌تست.
          */
-        val includeHiddenCrossLayer: Boolean = true,
+        // پیش‌فرض خاموش، مثل BaseStrategyConfig — با اندازه‌گیری A/B یکسان (۳.۹.۶۵).
+        val includeHiddenCrossLayer: Boolean = false,
         /** حداقل کندل لازم برای شروع ارزیابی؛ پیش‌فرض بر اساس دورهٔ سنکو B. */
         val warmupBars: Int = 60,
         /**

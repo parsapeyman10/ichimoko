@@ -264,6 +264,18 @@ class BaseStrategyDeepDiveTest {
     // ────────── ۴) خاموش‌شدنی بودن لایهٔ هیدن کراس ──────────
 
     @Test
+    fun `hidden cross layer is off by default because it measured as neutral`() {
+        // اندازه‌گیری ۳.۹.۶۵ روی XAU/USD 15m (۴۳٬۸۱۰ کندل): «بیس + لایه» و «بیس بدون لایه»
+        // دقیقاً یکسان بودند؛ لایه‌ای که هیچ اثری ندارد ولی می‌تواند معامله را ببندد،
+        // نباید پیش‌فرض روشن باشد.
+        assertFalse("لایهٔ هیدن کراس باید پیش‌فرض خاموش باشد", BaseStrategyConfig().includeHiddenCrossLayer)
+        assertFalse(
+            "پیکربندی بک‌تست هم باید همان پیش‌فرض را داشته باشد",
+            com.aurum.edge.core.BacktestReplayEngine.Config().includeHiddenCrossLayer,
+        )
+    }
+
+    @Test
     fun `hidden cross layer can be removed from the base strategy`() {
         val withLayer = evaluate(config = BaseStrategyConfig(includeHiddenCrossLayer = true, cryptoSymbolsOnlyPeyman = false))
         val pureBase = evaluate(config = BaseStrategyConfig(includeHiddenCrossLayer = false, cryptoSymbolsOnlyPeyman = false))
