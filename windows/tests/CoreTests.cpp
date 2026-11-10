@@ -115,11 +115,29 @@ void testNeoWave() {
         neoWaveRetracementRule(1.2) == 5 && neoWaveRetracementRule(3.0) == 7, "Neely retracement boundaries");
     const double amplitude = neoWaveDynamicAmplitude(input);
     require(amplitude >= 0.35 && amplitude <= 1.2, "dynamic amplitude bounds");
-    NeoWaveVerdict aligned{true, true, true, false, 1, 8, 10, 72.0, "test"};
+    NeoWaveVerdict aligned;
+    aligned.usable = aligned.complete = aligned.confirmed = true;
+    aligned.expectedDirection = 1; aligned.rulesPassed = 8; aligned.rulesTotal = 10;
+    aligned.confidencePct = 72.0; aligned.badge = "test";
     require(!neoWaveGate(aligned, true).veto && neoWaveGate(aligned, true).confidenceDelta == 8.0, "aligned NeoWave gate");
     require(neoWaveGate(aligned, false).veto, "opposing confirmed NeoWave veto");
     const auto confluence = neoWaveMtfConfluence(aligned, aligned, true);
     require(confluence.alignedCount == 2 && confluence.confidenceDelta == 5.0, "two-timeframe confluence");
+    const std::vector<double> prices{100,110,105,125,115,140,130,125};
+    std::vector<Candle> waveBars;
+    for (std::size_t leg = 0; leg + 1 < prices.size(); ++leg) {
+        for (int step = 0; step < 10; ++step) {
+            const double close = prices[leg] + (prices[leg + 1] - prices[leg]) * (step + 1) / 10.0;
+            const double open = step == 0 ? prices[leg] : waveBars.back().close;
+            waveBars.push_back(Candle{static_cast<std::int64_t>((waveBars.size() + 1) * 300000), open,
+                std::max(open, close) + 0.1, std::min(open, close) - 0.1, close, 10.0, true});
+        }
+    }
+    const auto analysis = analyzeNeoWave(waveBars);
+    require(analysis.has_value(), "known five-wave fixture must produce a structural verdict");
+    require(analysis->usable && !analysis->hardBreach && analysis->rulesTotal >= 5, "NeoWave rule audit");
+    require(analysis->monowaveCount >= 3 && analysis->structureLabel.size() > 1, "NeoWave structural label");
+    require(analyzeNeoWave(waveBars)->summary == analysis->summary, "deterministic NeoWave analysis");
 }
 
 void testNeuralLab() {

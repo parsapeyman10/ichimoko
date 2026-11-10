@@ -25,6 +25,15 @@ struct NeoWaveVerdict {
     int rulesTotal{};
     double confidencePct{};
     std::string badge;
+    std::string pattern;
+    std::optional<double> invalidationPrice;
+    std::optional<double> nextTarget;
+    int monowaveCount{};
+    double structureHeight{};
+    std::string structureLabel;
+    int retracementRule{};
+    std::string postConstructiveNote;
+    std::string summary;
 };
 
 struct NeoWaveGate {
@@ -40,6 +49,8 @@ struct MtfConfluence {
     std::string note;
 };
 
+[[nodiscard]] std::optional<NeoWaveVerdict> analyzeNeoWave(const std::vector<Candle>& candles,
+    double amplitudeAtr = 0.55);
 [[nodiscard]] double neoWaveAtr(const std::vector<Candle>& candles, int period = 14);
 [[nodiscard]] std::vector<NeoWavePivot> neoWavePivots(const std::vector<Candle>& candles,
     double amplitudeAtr = 0.55, int window = 3);

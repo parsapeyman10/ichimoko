@@ -20,6 +20,8 @@ class AppController final : public QObject {
     Q_PROPERTY(QString resultSummary READ resultSummary NOTIFY stateChanged)
     Q_PROPERTY(QString modelName READ modelName NOTIFY stateChanged)
     Q_PROPERTY(QString neuralSummary READ neuralSummary NOTIFY resultChanged)
+    Q_PROPERTY(QString neoWaveSummary READ neoWaveSummary NOTIFY dataChanged)
+    Q_PROPERTY(QVariantList neoWavePivots READ neoWavePivots NOTIFY dataChanged)
     Q_PROPERTY(int candleCount READ candleCount NOTIFY stateChanged)
     Q_PROPERTY(QVariantList chartCandles READ chartCandles NOTIFY dataChanged)
     Q_PROPERTY(QVariantList backtestTrades READ backtestTrades NOTIFY resultChanged)
@@ -33,6 +35,8 @@ public:
     [[nodiscard]] QString resultSummary() const { return resultSummary_; }
     [[nodiscard]] QString modelName() const;
     [[nodiscard]] QString neuralSummary() const { return neuralSummary_; }
+    [[nodiscard]] QString neoWaveSummary() const { return neoWaveSummary_; }
+    [[nodiscard]] QVariantList neoWavePivots() const { return neoWavePivots_; }
     [[nodiscard]] int candleCount() const noexcept;
     [[nodiscard]] QVariantList chartCandles() const;
     [[nodiscard]] QVariantList backtestTrades() const;
@@ -57,6 +61,8 @@ private:
         std::shared_ptr<ParseResult> data;
         QString fileName;
         QString error;
+        QString neoWaveSummary;
+        QVariantList neoWavePivots;
     };
     struct BacktestOutcome {
         std::shared_ptr<BacktestResult> result;
@@ -69,6 +75,8 @@ private:
     QString fileName_;
     QString resultSummary_;
     QString neuralSummary_;
+    QString neoWaveSummary_;
+    QVariantList neoWavePivots_;
     std::shared_ptr<ParseResult> data_;
     std::shared_ptr<BacktestResult> result_;
     QFutureWatcher<LoadOutcome> loadWatcher_;

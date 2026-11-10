@@ -13,6 +13,7 @@ add_library(aurum_core STATIC
     src/core/BacktestEngine.cpp
     src/core/RiskEngine.cpp
     src/core/NeoWave.cpp
+    src/core/NeoWaveAnalysis.cpp
     src/core/NeuralLab.cpp
 )
 target_include_directories(aurum_core PUBLIC src)
@@ -64,6 +65,7 @@ qt_add_qml_module(aurum_edge
         qml/RiskPage.qml
         qml/CalendarPage.qml
         qml/LivePage.qml
+        qml/NeoWavePage.qml
         qml/SettingsPage.qml
         qml/Theme.qml
 )

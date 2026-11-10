@@ -21,7 +21,7 @@ ApplicationWindow {
             spacing: 18
             Label { text: "AURUM EDGE"; color: Theme.accent; font.bold: true; font.pixelSize: 20; Layout.leftMargin: 20 }
             Repeater {
-                model: ["خانه", "چارت", "بک‌تست", "ژورنال", "ریسک", "تقویم", "زنده", "تنظیمات"]
+                model: ["خانه", "چارت", "بک‌تست", "ژورنال", "ریسک", "تقویم", "زنده", "NeoWave", "تنظیمات"]
                 delegate: TabButton {
                     text: modelData
                     checked: stack.currentIndex === index
@@ -45,6 +45,7 @@ ApplicationWindow {
         RiskPage {}
         CalendarPage {}
         LivePage {}
+        NeoWavePage {}
         SettingsPage {}
     }
 }

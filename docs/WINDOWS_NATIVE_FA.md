@@ -48,7 +48,7 @@ Core نباید به UI، شبکه یا SQLite وابسته شود. بک‌تس�
 | تقویم ماهانه و Risk Limits | تقویم ماهانه SQLite پیاده شد؛ Risk Limits هنوز نه |
 | Live Quotes و Background Monitoring | Quote عمومی Async با Timer اختیاری؛ Background Service و Backfill هنوز نه |
 | تمام استراتژی‌های Ichimoku/Peyman | کف ساختاری Stop پورت و تست شد؛ ارزیابی کامل Peyman هنوز نه |
-| NeoWave و MTF Confluence | ATR/Pivot/Retracement/Gate/MTF پورت و تست شد؛ الگوهای کامل هنوز نه |
+| NeoWave و MTF Confluence | الگوهای Impulse/ZigZag/Flat/Triangles/Diametric/Symmetrical، Gate و MTF پورت و تست شد؛ Golden Test مشترک Kotlin ادامه دارد |
 | Neural Learning و Ledger جداگانه | اتاق تمرین Baseline جدا و قطعی؛ شبکه و Ledger کامل Android هنوز نه |
 | AI Trader/News | پس از قرارداد Network و Privacy |
 | TradePlanGuard/EntrySafetyGate | پیش از هر Auto Paper Trade |

@@ -1,6 +1,7 @@
 #include "app/AppController.h"
 #include "core/RiskEngine.h"
 #include "core/NeuralLab.h"
+#include "core/NeoWave.h"
 
 #include <QDateTime>
 #include <QDate>
@@ -33,6 +34,8 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             data_ = outcome.data;
             fileName_ = outcome.fileName;
             result_.reset();
+            neoWaveSummary_ = outcome.neoWaveSummary;
+            neoWavePivots_ = outcome.neoWavePivots;
             resultSummary_.clear();
             neuralSummary_.clear();
             setStatus(QStringLiteral("%1 کندل معتبر | %2 | ردیف حذف‌شده: %3")
@@ -124,6 +127,18 @@ void AppController::loadCsv(const QString& path) {
             if (!mapped) throw std::runtime_error("Cannot memory-map CSV");
             const std::string_view raw(reinterpret_cast<const char*>(mapped), static_cast<std::size_t>(size));
             outcome.data = std::make_shared<ParseResult>(parseDukascopyCsv(raw, name.toStdString()));
+            const double amplitude = neoWaveDynamicAmplitude(outcome.data->candles);
+            const auto pivots = neoWavePivots(outcome.data->candles, amplitude);
+            const auto first = pivots.size() > 30 ? pivots.end() - 30 : pivots.begin();
+            for (auto it = first; it != pivots.end(); ++it) outcome.neoWavePivots.push_back(QVariantMap{
+                {QStringLiteral("index"), it->index}, {QStringLiteral("price"), it->price},
+                {QStringLiteral("type"), it->isHigh ? QStringLiteral("HIGH") : QStringLiteral("LOW")}});
+            if (const auto analysis = analyzeNeoWave(outcome.data->candles, amplitude)) {
+                outcome.neoWaveSummary = QStringLiteral("%1 | %2/%3 قاعده | اطمینان %4% | %5 | هدف %6 | ابطال %7")
+                    .arg(QString::fromStdString(analysis->badge)).arg(analysis->rulesPassed).arg(analysis->rulesTotal)
+                    .arg(analysis->confidencePct, 0, 'f', 1).arg(analysis->confirmed ? QStringLiteral("تأییدشده") : QStringLiteral("بدون تأیید"))
+                    .arg(analysis->nextTarget.value_or(0.0)).arg(analysis->invalidationPrice.value_or(0.0));
+            } else outcome.neoWaveSummary = QStringLiteral("ساختار معتبر NeoWave با دادهٔ فعلی شناسایی نشد؛ داور خنثی است.");
             file.unmap(mapped);
         } catch (const std::exception& error) {
             outcome.error = QStringLiteral("خطای CSV: %1").arg(QString::fromUtf8(error.what()));
