@@ -1,7 +1,6 @@
 package com.aurum.edge.ui
 
 import com.aurum.edge.app.AppContainer
-import com.aurum.edge.ui.tabs.backtest.BacktestViewModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
