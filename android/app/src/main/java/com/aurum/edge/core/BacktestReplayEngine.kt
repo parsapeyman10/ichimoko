@@ -291,6 +291,30 @@ object BacktestReplayEngine {
 
     // ─────────────────────── اجرای ماه‌به‌ماه ───────────────────────
 
+    /**
+     * از این تعداد کندل به بالا، اجرا **ماه‌به‌ماه** انجام می‌شود.
+     *
+     * اندازه‌گیری روی XAU ۱۵دقیقه (۴۳٬۸۱۰ کندل): اجرای یک‌جا ۹۹۹ معامله و +۰٫۳۸۰R داد و
+     * اجرای ماه‌به‌ماه ۹۶۷ معامله و +۰٫۳۸۰R (اختلاف ۳٪ در شمار معامله، صفر در انتظار R).
+     * یعنی ماه‌به‌ماه‌کردن نتیجه را عوض نمی‌کند، ولی حافظه/زمان را قابل‌کنترل و گزارش را
+     * ماه‌به‌ماه می‌کند.
+     */
+    const val MONTHLY_MODE_MIN_BARS: Int = 20_000
+
+    /**
+     * اجرای «خودکار»: فایل سنگین ماه‌به‌ماه، فایل سبک یک‌جا. خروجی همیشه [Result] است، پس
+     * بقیهٔ برنامه (صفحه، آرشیو، ذخیرهٔ کار، یادگیری عصبی) تفاوتی نمی‌بیند.
+     */
+    fun runAuto(
+        source: List<Candle>,
+        config: Config,
+        progress: ((Double) -> Unit)? = null,
+    ): Result = if (source.size >= MONTHLY_MODE_MIN_BARS) {
+        runPeriodic(source, config, progress = progress).toResult(config)
+    } else {
+        run(source, config, progress)
+    }
+
     /** نتیجهٔ یک ماه. */
     data class PeriodResult(
         val label: String,

@@ -768,6 +768,26 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     Spacer(Modifier.height(8.dp))
                 }
                 res.totals?.let { totals -> StatsGrid(totals, res.config.startEquityUsd) }
+                // ── گزارش ماه‌به‌ماه ──────────────────────────────────────────────
+                // دادهٔ سنگین ماه‌به‌ماه اجرا می‌شود؛ نتیجهٔ هر ماه باید دیده شود، نه فقط عدد کل.
+                if (res.periodSummariesFa.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "📅 اجرای ماه‌به‌ماه (${res.periodSummariesFa.size} ماه) — هر ماه مستقل سنجیده شد",
+                        color = AurumColors.TextMuted,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    res.periodSummariesFa.forEach { row ->
+                        Text(
+                            "• $row",
+                            color = AurumColors.TextMuted,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp,
+                        )
+                    }
+                }
                 // هزینهٔ اجرا، پنهان‌ترین دلیل «چرا سود نمی‌دهد» است: کارمزد درصدی از قیمت است
                 // ولی ۱R از ATR می‌آید؛ روی نماد ارزان با ۱R کوچک، کارمزد نصف ریسک را می‌خورد.
                 // عدد این‌جا همان چیزی است که شرط ۱۷ در موتور می‌سنجد.

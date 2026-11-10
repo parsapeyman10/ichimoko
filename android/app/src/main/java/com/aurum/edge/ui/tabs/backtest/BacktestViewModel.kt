@@ -542,7 +542,9 @@ class BacktestViewModel(
             val startedAt = System.currentTimeMillis()
             _etaFa.value = ""
             runCatching {
-                BacktestReplayEngine.run(cut, config) { p ->
+                // «runAuto»: فایل سنگین ماه‌به‌ماه اجرا می‌شود (گزارش هر ماه جدا) و فایل سبک
+                // مثل قبل یک‌جا؛ خروجی در هر دو حالت یک `Result` است.
+                BacktestReplayEngine.runAuto(cut, config) { p ->
                     _progress.value = p
                     val elapsed = System.currentTimeMillis() - startedAt
                     if (p > 0.03 && elapsed > 900) {

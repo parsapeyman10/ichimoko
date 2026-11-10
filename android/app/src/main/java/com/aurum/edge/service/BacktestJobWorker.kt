@@ -83,7 +83,8 @@ class BacktestJobWorker(
                 captureEntryReports = false,
                 neuralGate = trainer.entryGate(),
             )
-            val result = BacktestReplayEngine.run(cut, config) { }
+            // همان مسیر خودکار: فایل سنگین ماه‌به‌ماه، سبک یک‌جا.
+            val result = BacktestReplayEngine.runAuto(cut, config) { }
             val stats = result.stats.firstOrNull()
             val built = BacktestTradeArchive.build(
                 result = result,
@@ -93,7 +94,7 @@ class BacktestJobWorker(
                 candles = cut,
             )
             val files = BacktestArchiveStore(applicationContext).save(built.archive, built)
-            val summaryFa = String.format(
+            val head = String.format(
                 Locale.US,
                 "معامله=%d · برد=%.0f%% · خالص=%+.2f$ · PF=%.2f · انتظار=%+.2fR",
                 result.trades.size,
@@ -102,6 +103,13 @@ class BacktestJobWorker(
                 stats?.profitFactor ?: 0.0,
                 stats?.expectancyR ?: 0.0,
             )
+            // گزارش ماه‌به‌ماه (اگر اجرا در این حالت بوده) پایین خلاصه می‌آید تا کاربر بداند
+            // هر ماه جدا چه چیزی به دست آمده است.
+            val summaryFa = if (result.periodSummariesFa.isEmpty()) {
+                head
+            } else {
+                head + "\n\nگزارش ماه‌به‌ماه:\n" + result.periodSummariesFa.joinToString("\n")
+            }
             store.update(jobId) {
                 it.copy(
                     status = BacktestJob.STATUS_DONE,
