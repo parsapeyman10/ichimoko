@@ -82,6 +82,8 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
     val appliedEntry by vm.appliedEntry.collectAsStateWithLifecycle()
     val htfCandles by vm.htfCandles.collectAsStateWithLifecycle()
     val backgroundJobs by vm.jobs.collectAsStateWithLifecycle()
+    val restoredLines by vm.restoredLinesFa.collectAsStateWithLifecycle()
+    val restoredAt by vm.restoredAtMs.collectAsStateWithLifecycle()
 
     var toastText by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
@@ -133,6 +135,37 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
         // یک‌بار در هر ورود به صفحه، فهرست کارها از حافظه خوانده می‌شود تا وضعیت کارهایی
         // که وقتی در اپ نبودی تمام شده‌اند تازه باشد.
         LaunchedEffect(Unit) { vm.refreshJobs() }
+
+        // ── نشست قبلی ────────────────────────────────────────────────────────
+        // شکایت کاربر: «می‌روم برمی‌گردم همه‌چیز از اول.» فایل داده، نقطهٔ چارت و همهٔ کلیدها
+        // برگشته‌اند؛ این‌جا خلاصهٔ آخرین اجرا هم نشان داده می‌شود تا بدانی از کجا ادامه می‌دهی.
+        if (restoredLines.isNotEmpty() && result == null) {
+            SectionCard(initiallyExpanded = true, title = "🗂 نشست قبلی برگشت") {
+                Text(
+                    text = "همان فایل و همان تنظیمات که رفته بودی برگشته‌اند" +
+                        if (restoredAt > 0) {
+                            " · آخرین اجرا: " + java.text.SimpleDateFormat(
+                                "yyyy-MM-dd HH:mm",
+                                java.util.Locale.US,
+                            ).format(java.util.Date(restoredAt))
+                        } else {
+                            ""
+                        } + ". برای چارت و آرشیو، یک‌بار «اجرای بک‌تست» را بزن.",
+                    color = AurumColors.TextMuted,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp,
+                )
+                Spacer(Modifier.height(4.dp))
+                restoredLines.forEach { line ->
+                    Text(
+                        "• $line",
+                        color = AurumColors.TextMuted,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp,
+                    )
+                }
+            }
+        }
 
         // ── ۰. سرصفحه و مرز جدایی ───────────────────────────────────────────
         SectionCard(initiallyExpanded = true, title = "🧪 آزمایشگاه بک‌تست (dukascopy-node)") {
@@ -471,6 +504,23 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 ToggleRow("پیمان کریپتو حرفه‌ای (فقط رمزارز)", settings.peymanCryptoPaper) { on ->
                     vm.updateSettings { s -> s.copy(peymanCryptoPaper = on) }
                 }
+                // ── هزینهٔ محافظه‌کارانه ──────────────────────────────────────────
+                // «اگر به سوددهی کمک می‌کند انجام بده»: این کلید سود را بیشتر نشان نمی‌دهد،
+                // عمداً سخت‌گیرتر می‌شود (کارمزد و اسپرد ×۳) تا معلوم شود سود از استراتژی
+                // می‌آید یا از تخمین خوش‌بینانهٔ هزینه. با ×۳ هم مثبت ماند ⇒ سود واقعی است.
+                ToggleRow("💸 هزینهٔ محافظه‌کارانه (کارمزد و اسپرد ×۳)", settings.conservativeCosts) { on ->
+                    vm.updateSettings { s -> s.copy(conservativeCosts = on) }
+                }
+                if (settings.conservativeCosts) {
+                    Text(
+                        text = "با این کلید، همان استراتژی روی XAU ۱۵دقیقه PF ۱٫۷۴ و +۰٫۳۳۰R داد " +
+                            "(به‌جای ۱٫۸۶ و +۰٫۳۸۰R). عدد کمتر است ولی به اسپرد واقعی همان فایل " +
+                            "(میانهٔ ۰٫۶۱۷ دلار) نزدیک‌تر — یعنی سود از استراتژی می‌آید، نه از هزینهٔ کم‌شمرده.",
+                        color = AurumColors.Orange,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp,
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "بک‌تست روی ${fmtCount(endIndex)} کندلِ تا این نقطه اجرا می‌شود؛ کندل‌های آیندهٔ " +
@@ -596,6 +646,25 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                         lineHeight = 13.sp,
                     )
                 }
+                // ── ژورنال بدون پول ───────────────────────────────────────────────
+                // «سود هر معامله برود در ژورنال بنشیند، ولی پولش وارد پولم نشود.»
+                // هر ردیف با نشان «بک‌تست» ثبت می‌شود، درس خودش را می‌گیرد، و موجودی
+                // حساب دست‌نخورده می‌ماند.
+                Spacer(Modifier.height(8.dp))
+                ActionButton(
+                    label = if (busy) "…" else "📓 ثبت معامله‌ها در ژورنال (بدون تغییر موجودی)",
+                    enabled = !busy && arc.rows.isNotEmpty(),
+                    color = AurumColors.Gold,
+                    onClick = { vm.recordArchiveToJournal() },
+                )
+                Text(
+                    text = "${fmtCount(arc.rows.size)} ردیف با نشان «بک‌تست» در ژورنال ثبت می‌شود؛ " +
+                        "از هر کدام یک درس ساخته می‌شود و هوش با آموخته‌های تازه به‌روز می‌شود. " +
+                        "موجودی حساب حتی یک سنت هم تغییر نمی‌کند.",
+                    color = AurumColors.TextMuted,
+                    fontSize = 9.sp,
+                    lineHeight = 13.sp,
+                )
 
                 val files = archiveFiles
                 if (files != null) {

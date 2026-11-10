@@ -292,24 +292,43 @@ object BacktestReplayEngine {
     // ─────────────────────── اجرای ماه‌به‌ماه ───────────────────────
 
     /**
-     * از این تعداد کندل به بالا، اجرا **ماه‌به‌ماه** انجام می‌شود.
+     * مرز تصمیم «ماه‌به‌ماه یا یک‌جا» دیگر تعداد کندل نیست، **بازهٔ زمانی** است.
      *
-     * اندازه‌گیری روی XAU ۱۵دقیقه (۴۳٬۸۱۰ کندل): اجرای یک‌جا ۹۹۹ معامله و +۰٫۳۸۰R داد و
-     * اجرای ماه‌به‌ماه ۹۶۷ معامله و +۰٫۳۸۰R (اختلاف ۳٪ در شمار معامله، صفر در انتظار R).
-     * یعنی ماه‌به‌ماه‌کردن نتیجه را عوض نمی‌کند، ولی حافظه/زمان را قابل‌کنترل و گزارش را
-     * ماه‌به‌ماه می‌کند.
+     * درخواست کاربر روشن بود: «فایل بزرگ را خودش ماه‌به‌ماه تست کن؛ اگر کوچک‌تر از یک ماه
+     * بود، همان کافی است و کوچک‌ترش نکن.» پس قاعده این شد:
+     *  • داده اگر بیش از یک ماه تقویمی را بپوشاند ⇒ ماه‌به‌ماه (هر ماه یک گزارش و بعد ماه بعد).
+     *  • اگر همه‌اش داخل یک ماه (یا کمتر) باشد ⇒ یک اجرای کامل، بدون تکه‌تکه‌کردن.
+     *
+     * چرا تعداد کندل معیار خوبی نبود؟ ۵٬۰۰۰ کندل ۵دقیقه‌ای فقط ۱۷ روز است ولی ۵٬۰۰۰ کندل
+     * ۴ساعته هشت ماه؛ آستانهٔ ثابت کندلی یکی را الکی تکه می‌کرد و دیگری را یک‌جا اجرا.
      */
-    const val MONTHLY_MODE_MIN_BARS: Int = 20_000
+    fun monthCount(source: List<Candle>): Int {
+        if (source.isEmpty()) return 0
+        val zone = java.time.ZoneOffset.UTC
+        val months = HashSet<java.time.YearMonth>(minOf(source.size, 512))
+        for (candle in source) {
+            months += java.time.YearMonth.from(
+                java.time.Instant.ofEpochMilli(candle.time).atZone(zone).toLocalDate(),
+            )
+        }
+        // شمارش کامل است، نه «به‌محض دیدن ماه دوم برگرد»: آزمون همین را گرفت (۲ به‌جای ۳) و
+        // گزارش «چند ماه اجرا شد» باید عدد واقعی باشد.
+        return months.size
+    }
+
+    /** آیا این داده باید ماه‌به‌ماه اجرا شود؟ (بیش از یک ماه تقویمی ⇒ بله) */
+    fun usesMonthlyMode(source: List<Candle>, config: Config): Boolean =
+        source.size >= config.warmupBars && monthCount(source) > 1
 
     /**
-     * اجرای «خودکار»: فایل سنگین ماه‌به‌ماه، فایل سبک یک‌جا. خروجی همیشه [Result] است، پس
-     * بقیهٔ برنامه (صفحه، آرشیو، ذخیرهٔ کار، یادگیری عصبی) تفاوتی نمی‌بیند.
+     * اجرای «خودکار»: هر دادهٔ چندماهه ماه‌به‌ماه، دادهٔ درون‌یک‌ماهه یک‌جا. خروجی همیشه
+     * [Result] است، پس بقیهٔ برنامه (صفحه، آرشیو، ذخیرهٔ کار، یادگیری عصبی) تفاوتی نمی‌بیند.
      */
     fun runAuto(
         source: List<Candle>,
         config: Config,
         progress: ((Double) -> Unit)? = null,
-    ): Result = if (source.size >= MONTHLY_MODE_MIN_BARS) {
+    ): Result = if (usesMonthlyMode(source, config)) {
         runPeriodic(source, config, progress = progress).toResult(config)
     } else {
         run(source, config, progress)

@@ -530,6 +530,9 @@ class JournalStore(
      * که کاربر در صفحهٔ نخست می‌دید (موجودی ≠ سرمایهٔ پایه + سود/زیان تحققیافته).
      */
     private fun applyBalanceDelta(previous: PaperTrade?, next: PaperTrade?) {
+        // معاملهٔ بک‌تست سود/زیانش در ژورنال دیده می‌شود ولی **هرگز** به موجودی اضافه نمی‌شود؛
+        // درخواست صریح کاربر: «سود هر معامله برود در ژورنال بنشیند، ولی پولش وارد پولم نشود.»
+        if (previous?.isBacktest == true || next?.isBacktest == true) return
         val previousPnl = previous?.takeIf { !it.isOpen }?.pnlUsd ?: 0.0
         val nextPnl = next?.takeIf { !it.isOpen }?.pnlUsd ?: 0.0
         val delta = nextPnl - previousPnl

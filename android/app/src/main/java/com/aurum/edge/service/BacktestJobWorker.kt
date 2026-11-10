@@ -80,6 +80,7 @@ class BacktestJobWorker(
                 } else {
                     PeymanCryptoConfig()
                 },
+                costMultiplier = if (spec.conservativeCosts) 3.0 else 1.0,
                 captureEntryReports = false,
                 neuralGate = trainer.entryGate(),
             )

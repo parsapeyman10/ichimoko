@@ -17,6 +17,8 @@ import com.aurum.edge.data.BacktestDataStore
 import com.aurum.edge.data.BacktestJob
 import com.aurum.edge.data.BacktestJobSpec
 import com.aurum.edge.data.BacktestJobStore
+import com.aurum.edge.data.BacktestSession
+import com.aurum.edge.data.BacktestSessionStore
 import com.aurum.edge.service.BacktestJobWorker
 import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.Interval
@@ -49,6 +51,7 @@ class BacktestViewModel(
     private val archiveStore = BacktestArchiveStore(application)
     private val trainer = BacktestNeuralTrainer(application)
     private val jobStore = BacktestJobStore(application)
+    private val sessionStore = BacktestSessionStore(application)
 
     /**
      * فهرست کارهای بک‌تستِ پس‌زمینه.
@@ -99,6 +102,114 @@ class BacktestViewModel(
     /** فایل‌های CSV/JSON همان آرشیو روی حافظهٔ داخلی. */
     private val _archiveFiles = MutableStateFlow<BacktestArchiveStore.ArchiveFiles?>(null)
     val archiveFiles: StateFlow<BacktestArchiveStore.ArchiveFiles?> = _archiveFiles.asStateFlow()
+
+    /**
+     * ── «سود هر معامله برود در ژورنال، ولی پولش وارد پولم نشود» ──────────────
+     *
+     * هر معاملهٔ آرشیو با `origin = BACKTEST` در ژورنال ثبت می‌شود:
+     *  • سود/زیان، R، دلیل خروج و نمادِ همین معامله در ژورنال دیده می‌شود،
+     *  • موجودی حساب **تغییر نمی‌کند** (`applyBalanceDelta` ردیف‌های بک‌تست را رد می‌کند)،
+     *  • چون ژورنال تغییر می‌کند، موتور یادگیری خودکار یک درس از هر معامله می‌گیرد و
+     *    پارامترهای تیون‌شده را در پیکربندی بعدی اعمال می‌کند (همان «با هر معامله یک درس»).
+     *
+     * شناسهٔ هر ردیف از هش محتوای آرشیو + شمارهٔ معامله ساخته می‌شود، پس ثبت دوبارهٔ همان
+     * آرشیو ردیف تکراری نمی‌سازد.
+     */
+    fun recordArchiveToJournal() {
+        if (_busy.value) return
+        val archive = _archive.value ?: run {
+            emit("اول بک‌تست را اجرا کنید تا آرشیو ساخته شود.")
+            return
+        }
+        if (archive.rows.isEmpty()) {
+            emit("این آرشیو معامله‌ای ندارد؛ چیزی برای ثبت نیست.")
+            return
+        }
+        _busy.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val interval = _dataSets.value.firstOrNull { it.id == archive.dataSetId }?.interval ?: Interval.M15
+            val strategyId = _settings.value.strategyId
+            val strategyTitle = archive.strategyLabel
+            val base = archive.contentHash.take(10)
+            val trades = archive.rows.map { row ->
+                val risk = if (row.rMultiple != 0.0) kotlin.math.abs(row.netPnlUsd / row.rMultiple) else 0.0
+                val rr = runCatching {
+                    val riskDist = kotlin.math.abs(row.entryPrice - row.stopLoss)
+                    if (riskDist > 0.0) kotlin.math.abs(row.takeProfit - row.entryPrice) / riskDist else 2.0
+                }.getOrDefault(2.0)
+                com.aurum.edge.core.PaperTrade(
+                    id = "bt_${base}_${row.tradeNumber}",
+                    symbol = archive.symbol,
+                    interval = interval,
+                    action = row.action,
+                    entry = row.entryPrice,
+                    stopLoss = row.stopLoss,
+                    takeProfit = row.takeProfit,
+                    confidence = 0.0,
+                    riskReward = rr.coerceIn(1.5, 3.0),
+                    openedAt = row.entryTime,
+                    closedAt = row.exitTime,
+                    exitPrice = row.exitPrice,
+                    exitReason = row.exitReasonFa,
+                    pnlUsd = row.netPnlUsd,
+                    positionOz = 1.0,
+                    positionUnit = "",
+                    autoOpened = true,
+                    note = "ثبت از بک‌تست ${archive.dataSetName} · بدون اثر روی موجودی · $strategyTitle",
+                    initialStopLoss = row.stopLoss,
+                    strategyId = strategyId,
+                    strategyTitleFa = strategyTitle,
+                    // ریسک ثابت از خودِ معامله گرفته می‌شود تا R ژورنال با R بک‌تست یکی باشد.
+                    fixedRiskUsd = risk,
+                    optimalRiskReward = rr.coerceIn(1.5, 3.0),
+                    tradeNumber = row.tradeNumber,
+                    origin = com.aurum.edge.core.PaperTrade.ORIGIN_BACKTEST,
+                    lessonFa = buildLessonFa(row),
+                )
+            }
+            val inserted = runCatching { container.journalStore.importTrades(trades) }.getOrDefault(0)
+            val learned = runCatching {
+                container.neuralEngine.syncWithClosedJournalTrades(container.journalStore.trades.value)
+            }.getOrNull()
+            val applied = if ((learned?.newlyLearnedThisRun ?: 0) > 0) {
+                runCatching {
+                    val refreshed = container.neuralEngine
+                        .applyAutoTunedParametersToConfig(container.settingsStore.read().baseStrategyConfig)
+                    container.settingsStore.update { cur -> cur.copy(baseStrategyConfig = refreshed) }
+                    true
+                }.getOrDefault(false)
+            } else {
+                false
+            }
+            val balance = runCatching { container.settingsStore.read().accountBalance }.getOrDefault(0.0)
+            withContext(Dispatchers.Main) {
+                _busy.value = false
+                val learnedNow = learned?.newlyLearnedThisRun ?: 0
+                emit(
+                    "📓 ${trades.size} معامله در ژورنال ثبت شد (تازه: $inserted) · " +
+                        "درس گرفته‌شده: $learnedNow" +
+                        if (applied) " · پیکربندی هوش با آموخته‌های تازه به‌روز شد" else "" +
+                        " · موجودی دست‌نخورده: ${fmtUsd(balance)}",
+                )
+            }
+        }
+    }
+
+    /** یک درس کوتاه و قابل‌فهم از خودِ معامله — همان چیزی که در ژورنال کنار ردیف می‌نشیند. */
+    private fun buildLessonFa(row: com.aurum.edge.core.BacktestTradeArchive.Row): String {
+        val outcome = if (row.won) "سود" else "ضرر"
+        val rStr = String.format(java.util.Locale.US, "%+.2f", row.rMultiple)
+        val timeFa = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+            .format(java.util.Date(row.entryTime))
+        val directionFa = if (row.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"
+        val why = when {
+            row.exitReasonFa.contains("حد ضرر") -> "حد ضرر خورد؛ ورود در جهت اشتباه یا حد خیلی نزدیک بود."
+            row.exitReasonFa.contains("حد سود") -> "به حد سود رسید؛ همان الگو تکرارشدنی است."
+            row.barsHeld > 20 -> "بیش از ۲۰ کندل طول کشید؛ نگه‌داشتن طولانی، هزینهٔ فرصت دارد."
+            else -> "خروج طبق قاعدهٔ هوشمند انجام شد."
+        }
+        return "$timeFa · $directionFa · $outcome $rStr R (${row.exitReasonFa}) — $why"
+    }
 
     /** اگر آرشیو فعلی قبلاً اعمال شده باشد، سطر دفتر؛ وگرنه `null`. */
     private val _appliedEntry = MutableStateFlow<BacktestArchiveStore.AppliedEntry?>(null)
@@ -175,6 +286,15 @@ class BacktestViewModel(
          * خاموش = `DISABLED` (هیچ ارزیابی‌ای انجام نمی‌شود و رفتار قبلی دست‌نخورده است).
          */
         val peymanCryptoPaper: Boolean = false,
+        /**
+         * هزینهٔ محافظه‌کارانه: کارمزد + اسپرد × ۳.
+         *
+         * «اگر به سودده‌بودن کمک می‌کند انجام بده.» — کم‌کردن هزینه سود را *بیشتر* نشان می‌دهد،
+         * ولی دروغ است؛ این کلید عمداً هزینه را سه برابر می‌کند تا معلوم شود سود از استراتژی
+         * می‌آید یا از تخمینِ خوش‌بینانهٔ هزینه. اگر با ×۳ هم مثبت ماند، سود واقعی است.
+         * پیش‌فرض خاموش است تا عدد قبلی عوض نشود و مقایسه ممکن بمانَد.
+         */
+        val conservativeCosts: Boolean = false,
     )
 
     private val _settings = MutableStateFlow(Settings())
@@ -205,8 +325,85 @@ class BacktestViewModel(
 
     val storePathFa: String get() = store.storagePathFa()
 
+    /**
+     * خلاصهٔ آخرین اجرا، پس از بازگشت به صفحه.
+     *
+     * چرا فقط متن و نه خودِ `Result`؟ ذخیرهٔ صدها معامله در JSON هم کند است و هم تکراری؛
+     * آرشیو کامل همان معامله‌ها در `BacktestArchiveStore` هست. آن‌چه کاربر گم می‌کرد —
+     * «چه فایلی، با چه تنظیماتی، چه نتیجه‌ای» — این‌جا می‌مانَد.
+     */
+    private val _restoredLinesFa = MutableStateFlow<List<String>>(emptyList())
+    val restoredLinesFa: StateFlow<List<String>> = _restoredLinesFa.asStateFlow()
+
+    private val _restoredAtMs = MutableStateFlow(0L)
+    val restoredAtMs: StateFlow<Long> = _restoredAtMs.asStateFlow()
+
+    /** ذخیرهٔ نشست با کمی تأخیر تا کشیدنِ چارت صد فایل‌نوشتن پشت‌سرهم نسازد. */
+    private var persistJob: kotlinx.coroutines.Job? = null
+
     init {
+        restoreSession()
         refresh()
+    }
+
+    /**
+     * خواندن نشست قبلی: فایل داده، نقطهٔ چارت، همهٔ کلیدها و خلاصهٔ آخرین اجرا.
+     * کندل‌ها این‌جا خوانده نمی‌شوند؛ `refresh()` بعد از آمدن فهرست، همان فایل را بار می‌کند.
+     */
+    private fun restoreSession() {
+        val session = runCatching { sessionStore.read() }.getOrNull() ?: return
+        _settings.update { cur ->
+            cur.copy(
+                strategyId = session.strategyId.ifBlank { cur.strategyId },
+                symbol = session.symbol,
+                runAllStrategies = session.runAllStrategies,
+                startEquityUsd = session.startEquityUsd.takeIf { it > 0.0 } ?: cur.startEquityUsd,
+                riskPercent = session.riskPercent.takeIf { it > 0.0 } ?: cur.riskPercent,
+                useSmartExit = session.useSmartExit,
+                usePreserveMode = session.usePreserveMode,
+                useTimeStop = session.useTimeStop,
+                optimisticSameBarFill = session.optimisticSameBarFill,
+                maxBars = session.maxBars,
+                includeHiddenCrossLayer = session.includeHiddenCrossLayer,
+                compressionExpansion = session.compressionExpansion,
+                peymanCryptoPaper = session.peymanCryptoPaper,
+                conservativeCosts = session.conservativeCosts,
+            )
+        }
+        _selectedId.value = session.dataSetId.takeIf { it.isNotBlank() }
+        _cursor.value = session.cursorIndex.coerceAtLeast(0)
+        _restoredLinesFa.value = session.lastRunLinesFa
+        _restoredAtMs.value = session.lastRunAtMs
+    }
+
+    /** عکسِ لحظه‌ای از نشست فعلی؛ سمت IO نوشته می‌شود. */
+    fun persistSession(debounceMs: Long = 700L) {
+        persistJob?.cancel()
+        persistJob = viewModelScope.launch(Dispatchers.IO) {
+            if (debounceMs > 0) kotlinx.coroutines.delay(debounceMs)
+            val s = _settings.value
+            val session = BacktestSession(
+                dataSetId = _selectedId.value.orEmpty(),
+                cursorIndex = _cursor.value,
+                strategyId = s.strategyId,
+                symbol = s.symbol,
+                runAllStrategies = s.runAllStrategies,
+                startEquityUsd = s.startEquityUsd,
+                riskPercent = s.riskPercent,
+                useSmartExit = s.useSmartExit,
+                usePreserveMode = s.usePreserveMode,
+                useTimeStop = s.useTimeStop,
+                optimisticSameBarFill = s.optimisticSameBarFill,
+                maxBars = s.maxBars,
+                includeHiddenCrossLayer = s.includeHiddenCrossLayer,
+                compressionExpansion = s.compressionExpansion,
+                peymanCryptoPaper = s.peymanCryptoPaper,
+                conservativeCosts = s.conservativeCosts,
+                lastRunLinesFa = _restoredLinesFa.value,
+                lastRunAtMs = _restoredAtMs.value,
+            )
+            runCatching { sessionStore.save(session) }
+        }
     }
 
     fun refresh() {
@@ -215,8 +412,12 @@ class BacktestViewModel(
             val list = runCatching { store.list() }.getOrDefault(emptyList())
             withContext(Dispatchers.Main) {
                 _dataSets.value = list
-                if (_selectedId.value == null || list.none { it.id == _selectedId.value }) {
+                val wanted = _selectedId.value
+                if (wanted == null || list.none { it.id == wanted }) {
                     list.firstOrNull()?.let { select(it.id) }
+                } else if (_candles.value.isEmpty()) {
+                    // نشست قبلی همین فایل را باز داشت؛ کندل‌ها بدون ریست نقطهٔ چارت برمی‌گردند.
+                    select(wanted, keepPosition = true)
                 }
             }
         }
@@ -304,7 +505,11 @@ class BacktestViewModel(
         _statusFa.value = "تایم‌فریم ${role.label} حذف شد؛ از این به بعد از فایل ماشه ساخته می‌شود."
     }
 
-    fun select(id: String?) {
+    /**
+     * @param keepPosition وقتی نشستِ ذخیره‌شده بازیابی می‌شود: نقطهٔ چارت و نمادِ کاربر
+     *   دست‌نخورده می‌مانند تا «برگشتن به صفحه» همان چیزی باشد که رفته بود.
+     */
+    fun select(id: String?, keepPosition: Boolean = false) {
         if (id == null) {
             _selectedId.value = null
             _candles.value = emptyList()
@@ -322,11 +527,18 @@ class BacktestViewModel(
             val set = runCatching { store.list().firstOrNull { it.id == id } }.getOrNull()
             withContext(Dispatchers.Main) {
                 _candles.value = loaded
-                _settings.update { cur ->
-                    cur.copy(symbol = set?.symbol ?: cur.symbol.ifBlank { "XAU/USD" })
+                if (!keepPosition) {
+                    _settings.update { cur ->
+                        cur.copy(symbol = set?.symbol ?: cur.symbol.ifBlank { "XAU/USD" })
+                    }
                 }
-                // پیش‌فرض: صفحهٔ آخر داده، تا معامله‌های تازه دیده شوند.
-                _cursor.value = (loaded.size / 2).coerceAtLeast(1)
+                // پیش‌فرض: صفحهٔ آخر داده، تا معامله‌های تازه دیده شوند. در بازیابی نشست،
+                // همان کندلی که کاربر رویش بود برمی‌گردد (و اگر از داده بیرون زده، آخر داده).
+                _cursor.value = if (keepPosition && _cursor.value > 0) {
+                    _cursor.value.coerceIn(1, loaded.size.coerceAtLeast(1))
+                } else {
+                    (loaded.size / 2).coerceAtLeast(1)
+                }
                 _result.value = null
                 _archive.value = null
                 _archiveFiles.value = null
@@ -335,6 +547,7 @@ class BacktestViewModel(
                 _statusFa.value = if (loaded.isEmpty()) "" else
                     "${loaded.size} کندل ${set?.intervalLabel ?: ""} · ${set?.symbol ?: ""} آماده است"
                 _busy.value = false
+                persistSession(debounceMs = 0)
             }
         }
     }
@@ -356,6 +569,8 @@ class BacktestViewModel(
 
     fun updateSettings(block: (Settings) -> Settings) {
         _settings.update(block)
+        // «برمی‌گردم و همه‌چیز از اول» نباید برای کلیدها هم رخ بدهد.
+        persistSession()
     }
 
     // ─────────────────────────── بک‌تست پس‌زمینه ───────────────────────────
@@ -399,6 +614,7 @@ class BacktestViewModel(
             includeHiddenCrossLayer = s.includeHiddenCrossLayer,
             compressionExpansion = s.compressionExpansion,
             peymanCryptoPaper = s.peymanCryptoPaper,
+            conservativeCosts = s.conservativeCosts,
             cursorIndex = _cursor.value,
             noteFa = noteFa,
         )
@@ -442,6 +658,7 @@ class BacktestViewModel(
                 includeHiddenCrossLayer = spec.includeHiddenCrossLayer,
                 compressionExpansion = spec.compressionExpansion,
                 peymanCryptoPaper = spec.peymanCryptoPaper,
+                conservativeCosts = spec.conservativeCosts,
             )
         }
         if (spec.cursorIndex in 1.._candles.value.size) setCursor(spec.cursorIndex)
@@ -470,6 +687,7 @@ class BacktestViewModel(
         val max = _candles.value.size
         if (max <= 0) return
         _cursor.value = index.coerceIn(1, max)
+        persistSession()
     }
 
     fun stepCursor(delta: Int) = setCursor(_cursor.value + delta)
@@ -530,6 +748,7 @@ class BacktestViewModel(
                 } else {
                     com.aurum.edge.core.peyman.PeymanCryptoConfig()
                 },
+                costMultiplier = if (s.conservativeCosts) 3.0 else 1.0,
                 captureEntryReports = true,
                 // ── گیت عصبی = همان کلید «مانع» در بخش هوش عصبی ──────────────────
                 // پیش از این، بک‌تست هیچ‌گاه گیت را نمی‌پرسید؛ بنابراین روشن‌وخاموش
@@ -599,6 +818,15 @@ class BacktestViewModel(
                             }
                             append(" (${res.elapsedMs} میلی‌ثانیه)")
                         }
+                        // خلاصهٔ همین اجرا در نشست ذخیره می‌شود تا بعد از رفتن و برگشتن،
+                        // «چه فایلی با چه تنظیماتی چه نتیجه‌ای داد» از دست نرود.
+                        val headLines = buildList {
+                            add(_statusFa.value.substringAfter(": ").replace("\n", " "))
+                            addAll(res.periodSummariesFa)
+                        }
+                        _restoredLinesFa.value = headLines.take(64)
+                        _restoredAtMs.value = System.currentTimeMillis()
+                        persistSession(debounceMs = 0)
                     }
                 }
                 .onFailure { err ->

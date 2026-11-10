@@ -227,6 +227,17 @@ data class PaperTrade(
     val neoWaveFailedRuleIds: List<Int> = emptyList(),
     /** مسیر ورود: `CRYPTO_NW` (ورود با نئوویو در رمزارز) یا `CLASSIC`. */
     val neoWaveEntryPathTag: String = "",
+    /**
+     * منبع این ردیف: `LIVE` (معاملهٔ واقعی/کاغذی که کاربر یا ربات ثبت کرده) یا `BACKTEST`
+     * (بازپخش آرشیو بک‌تست).
+     *
+     * چرا لازم شد؟ درخواست کاربر: «سود هر معامله برود در ژورنال بنشیند، ولی پولش وارد پولم
+     * نشود.» پس ردیف‌های بک‌تست در ژورنال ثبت می‌شوند تا آمار و درس‌گیری از آن‌ها ساخته شود،
+     * اما هیچ‌جا موجودی حساب را جابه‌جا نمی‌کنند (`applyBalanceDelta` این‌ها را رد می‌کند).
+     */
+    val origin: String = ORIGIN_LIVE,
+    /** متن درسِ همین معامله (اگر موتور یادگیری برایش درسی ساخته باشد). */
+    val lessonFa: String = "",
 ) {
     val displayTradeNumber: Int
         get() = if (tradeNumber > 0) tradeNumber else ((kotlin.math.abs(id.hashCode()) % 9000) + 1)
@@ -320,6 +331,14 @@ data class PaperTrade(
 
     val estimatedRoundTripFeeUsd: Double
         get() = totalRoundTripFeeUsd
+
+    /** آیا این ردیف از بک‌تست آمده (و در نتیجه نباید موجودی را تغییر دهد)؟ */
+    val isBacktest: Boolean get() = origin == ORIGIN_BACKTEST
+
+    companion object {
+        const val ORIGIN_LIVE = "LIVE"
+        const val ORIGIN_BACKTEST = "BACKTEST"
+    }
 }
 
 data class AppSettings(

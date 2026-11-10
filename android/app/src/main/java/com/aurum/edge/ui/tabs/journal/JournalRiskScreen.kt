@@ -2566,6 +2566,14 @@ private fun ClosedJournalTradeRow(
                     text = trade.displayTradeNumberBadgeFa,
                     color = AurumColors.Gold,
                 )
+                // ردیف‌های بک‌تست در ژورنال می‌نشینند تا درسشان گرفته شود، ولی پولشان به
+                // موجودی اضافه نمی‌شود؛ این نشان همین را بی‌ابهام می‌کند.
+                if (trade.isBacktest) {
+                    Pill(
+                        text = "🧪 بک‌تست · بدون اثر روی پول",
+                        color = AurumColors.TextMuted,
+                    )
+                }
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -2725,6 +2733,14 @@ private fun ClosedJournalTradeRow(
                 }
             }
 
+            if (trade.isBacktest && trade.lessonFa.isNotBlank()) {
+                Text(
+                    text = "🎓 درس این معامله: ${trade.lessonFa}",
+                    color = AurumColors.Gold,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp,
+                )
+            }
             if (trade.note.isNotBlank()) {
                 Text(
                     text = "یادداشت: ${trade.note}",

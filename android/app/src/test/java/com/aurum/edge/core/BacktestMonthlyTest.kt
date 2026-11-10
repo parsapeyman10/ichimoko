@@ -93,12 +93,22 @@ class BacktestMonthlyTest {
     }
 
     @Test
-    fun `runAuto picks the monthly path only for heavy files`() {
+    fun `runAuto splits by calendar month and never by bar count`() {
         val light = series(months = 1, barsPerMonth = 500)
+        val heavy = series(months = 3)
+
+        // دادهٔ درون‌یک‌ماهه: یک اجرای کامل، بدون تکه‌تکه‌کردن — «اگر کوچک‌تر از یک ماه بود
+        // همان کافی است و کوچک‌ترش نکن».
+        assertEquals(1, BacktestReplayEngine.monthCount(light))
+        assertTrue(!BacktestReplayEngine.usesMonthlyMode(light, config()))
         assertTrue(
-            "فایل سبک باید یک‌جا اجرا شود (هیچ خط ماهانه‌ای ندارد)",
+            "دادهٔ یک‌ماهه نباید خط ماهانه بسازد",
             BacktestReplayEngine.runAuto(light, config()).periodSummariesFa.isEmpty(),
         )
-        assertEquals(20_000, BacktestReplayEngine.MONTHLY_MODE_MIN_BARS)
+
+        // دادهٔ چندماهه: ماه‌به‌ماه، هر ماه یک خط گزارش.
+        assertEquals(3, BacktestReplayEngine.monthCount(heavy))
+        assertTrue(BacktestReplayEngine.usesMonthlyMode(heavy, config()))
+        assertEquals(3, BacktestReplayEngine.runAuto(heavy, config()).periodSummariesFa.size)
     }
 }
