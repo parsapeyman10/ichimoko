@@ -5620,6 +5620,7 @@ object IchimokuStrategyEngine {
         val hasLockedInProfit =
             trade.note.contains(BE_TAG_MARK) ||
                 trade.note.contains(TRAIL_TAG_MARK) ||
+                trade.note.contains(STRUCT_TAG_MARK) ||
                 fixedStopLoss != (trade.initialStopLoss ?: fixedStopLoss)
         val reached3RCeilingForStandardTrade =
             trade.riskReward <= 3.0001 && currentRMultiple >= 3.0 && !hasLockedInProfit
@@ -5646,51 +5647,52 @@ object IchimokuStrategyEngine {
         // تا −۱R برمی‌گشت. اکنون حد ضرر پله‌ای در سود قفل می‌شود و حد سود جابه‌جا نمی‌شود تا
         // هندسهٔ اولیهٔ R:R دست‌نخورده بماند.
         if (config.enablePreserveMode) {
-            val hasMovedToBe = trade.note.contains(BE_TAG_MARK) || fixedStopLoss == trade.entry
-            if (currentRMultiple >= 1.0 && !hasMovedToBe) {
-                return PreserveModeEvaluation(
-                    tradeId = trade.id,
-                    newStopLoss = round2(trade.entry),
-                    stageTitleFa = "🛡️ ریسک‌فری در +${round2(currentRMultiple)}R (حد ضرر روی نقطهٔ ورود)",
-                    reasonFa = String.format(
-                        Locale.US,
-                        "سود باز به %.2fR رسید؛ حد ضرر به نقطهٔ ورود (%.2f) منتقل شد تا معامله بدون ریسک ادامه یابد",
-                        currentRMultiple,
-                        trade.entry,
-                    ),
-                    lockedRMultiple = round2(currentRMultiple),
-                    updatedStopLoss = round2(trade.entry),
-                    stopStageTag = "BE",
-                )
-            }
-            val trailAnchor = trigSnap.tenkan
-            // در خرید: حد ضرر روی تنکان (یا ۰٫۳۵ ATR عقب‌تر از قیمت، هرکدام نزدیک‌تر) قفل می‌شود.
-            val trailCandidate = if (isBuy) {
-                maxOf(trigSnap.tenkan, livePrice - trigSnap.atr14 * 0.35)
-            } else {
-                minOf(trigSnap.tenkan, livePrice + trigSnap.atr14 * 0.35)
-            }
-            val trailImproves = if (isBuy) {
-                trailCandidate > fixedStopLoss && trailCandidate < livePrice
-            } else {
-                trailCandidate < fixedStopLoss && trailCandidate > livePrice
-            }
-            if (currentRMultiple >= 2.0 && trailImproves) {
-                return PreserveModeEvaluation(
-                    tradeId = trade.id,
-                    newStopLoss = round2(trailCandidate),
-                    stageTitleFa = "🔒 قفل سود در +${round2(currentRMultiple)}R روی تنکان (${round2(trailAnchor)})",
-                    reasonFa = String.format(
-                        Locale.US,
-                        "سود باز به %.2fR رسید؛ حد ضرر روی تنکان (%.2f) با بافر %.2f ATR قفل شد",
-                        currentRMultiple,
-                        trailAnchor,
-                        trigSnap.atr14,
-                    ),
-                    lockedRMultiple = round2(currentRMultiple),
-                    updatedStopLoss = round2(trailCandidate),
-                    stopStageTag = "TRAIL",
-                )
+            // ── قاعدهٔ کاربر (جای قاعدهٔ قدیم «ریسک‌فری در +۱R و تریل در +۲R») ──
+            // ۱) تا وقتی سود باز به ۱٫۵R نرسیده، حق جابه‌جایی حد ضرر را نداریم.
+            // ۲) بعد از آن هم فقط روی یک **سطح ساختاری** (تنکان، یا ۰٫۳۵ ATR عقب‌تر از
+            //    قیمت) جابه‌جا می‌شود، و آن سطح باید سود **مثبتِ خالص بعد از کارمزد**
+            //    قفل کند؛ وگرنه جابه‌جایی یعنی «ریسک‌فری کاغذی» که در واقعیت ضرر است.
+            if (currentRMultiple >= MIN_R_TO_MOVE_STOP) {
+                val spec = VenueSpecs.of(trade.symbol)
+                val feePct = (spec.takerFeeBps * 2.0 + spec.spreadBps) / 10_000.0
+                val feePerUnit = trade.entry * feePct
+                val structuralAnchor = trigSnap.tenkan
+                val structuralCandidate = if (isBuy) {
+                    maxOf(trigSnap.tenkan, livePrice - trigSnap.atr14 * 0.35)
+                } else {
+                    minOf(trigSnap.tenkan, livePrice + trigSnap.atr14 * 0.35)
+                }
+                val improvesOnCurrentStop = if (isBuy) {
+                    structuralCandidate > fixedStopLoss && structuralCandidate < livePrice
+                } else {
+                    structuralCandidate < fixedStopLoss && structuralCandidate > livePrice
+                }
+                val lockedNetR = if (isBuy) {
+                    (structuralCandidate - trade.entry - feePerUnit) / oneRDistance
+                } else {
+                    (trade.entry - structuralCandidate - feePerUnit) / oneRDistance
+                }
+                if (improvesOnCurrentStop && lockedNetR > 0.0) {
+                    val tag = if (trade.note.contains(TRAIL_TAG_MARK)) "TRAIL" else "STRUCT"
+                    return PreserveModeEvaluation(
+                        tradeId = trade.id,
+                        newStopLoss = round2(structuralCandidate),
+                        stageTitleFa = "🔒 قفل سود در +${round2(currentRMultiple)}R روی سطح ساختاری " +
+                            "(${round2(structuralAnchor)})",
+                        reasonFa = String.format(
+                            Locale.US,
+                            "سود باز %.2fR (≥ %.1fR) شد؛ حد ضرر روی سطح ساختاری %.2f منتقل شد، " +
+                                "که بعد از کارمزد %.2fR سود خالص قفل می‌کند",
+                            currentRMultiple,
+                            MIN_R_TO_MOVE_STOP,
+                            structuralAnchor,
+                            lockedNetR,
+                        ),
+                        lockedRMultiple = round2(currentRMultiple),
+                        updatedStopLoss = round2(structuralCandidate),
+                        stopStageTag = tag,
+                    )
+                }
             }
         }
 
@@ -5704,6 +5706,12 @@ object IchimokuStrategyEngine {
      * (`PULLBACK_BOUNCE` و هم‌خانواده‌هایش) که در این پنجره به هدف نرسیده، دیگر «پولبک
      * در روند» نیست؛ تبدیل به معاملهٔ بلاتکلیف شده که فقط کارمزد و ریسک گپ می‌خرد.
      */
+    /**
+     * کمینهٔ سود باز (برحسب R) برای اینکه جابه‌جایی حد ضرر مجاز باشد.
+     * قاعدهٔ کاربر: «تا ۱٫۵R نشده، حق جابه‌جایی SL را نداریم».
+     */
+    const val MIN_R_TO_MOVE_STOP: Double = 1.5
+
     const val DEFAULT_MAX_HOLD_BARS: Int = 20
 
     /** اگر معامله در پایان پنجرهٔ زمانی حتی به این مقدار R نرسیده باشد، خروج اجباری است. */
@@ -5763,6 +5771,13 @@ object IchimokuStrategyEngine {
 
     /** نشانهٔ متنی مرحلهٔ تریل در یادداشت معامله. */
     const val TRAIL_TAG_MARK: String = "🔒 TRAIL"
+
+    /**
+     * نشانهٔ متنیِ اولین جابه‌جاییِ حد ضرر روی سطح ساختاری در سود.
+     * جدا از BE است چون دیگر «ریسک‌فری روی نقطهٔ ورود» نداریم: حد ضرر فقط جایی
+     * می‌رود که بعد از کارمزد سود مثبت قفل کند.
+     */
+    const val STRUCT_TAG_MARK: String = "🔒 STRUCT"
 
     private fun mergeNearbyLevels(levels: List<Double>, tolerance: Double): List<Double> {
         if (levels.isEmpty()) return emptyList()

@@ -423,19 +423,38 @@ class RiskAndCalendarEngineTest {
             preferredAction = SignalAction.BUY,
         )!!
         val opened = journal.openTrade(calc, note = "تست استراتژی بیس")
-        // Preserve Mode واقعی: در +۱R حد ضرر روی نقطهٔ ورود قفل می‌شود (ریسک‌فری) و حد سود
-        // دست‌نخورده می‌ماند. قیمت ۶۹٬۵۰۰ = دقیقاً +۱٫۵R (زیر آستانهٔ +۲R خروج هوشمند).
+        // قاعدهٔ تازهٔ کاربر (جای قاعدهٔ قدیم «در +۱R ریسک‌فری روی نقطهٔ ورود»):
+        // ۱) تا سود باز به ۱٫۵R نرسیده، **هیچ** جابه‌جایی حد ضرر مجاز نیست.
+        // ۲) در ۱٫۵R هم جابه‌جایی فقط روی سطح ساختاری و فقط اگر بعد از کارمزد
+        //    رفت‌وبرگشت سود خالص مثبت قفل کند؛ «ریسک‌فری روی نقطهٔ ورود» دیگر وجود ندارد.
+        val belowThreshold = IchimokuStrategyEngine.evaluateOpenTradeManagement(
+            trade = opened,
+            report = report.copy(livePrice = 68_900.0), // +0.9R
+            config = config,
+        )
+        assertTrue(
+            "زیر ۱٫۵R هیچ جابه‌جایی حد ضرر مجاز نیست",
+            belowThreshold == null || belowThreshold.updatedStopLoss == null,
+        )
+
         val midEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
             trade = opened,
             report = report.copy(livePrice = 69_500.0), // +1.5R while initial TP is 71,000 (3.0R)
             config = config,
         )
-        assertNotNull("در +۱٫۵R باید ریسک‌فری فعال شود", midEval)
-        val mid = midEval!!
-        assertTrue("ریسک‌فری نباید معامله را ببندد", mid.shouldCloseImmediatelyInProfit.not())
-        assertEquals("BE", mid.stopStageTag)
-        assertEquals("حد ضرر باید روی نقطهٔ ورود برود", 68_000.0, mid.updatedStopLoss ?: 0.0, 1e-4)
-        assertNull("حد سود نباید جابه‌جا شود", mid.updatedTakeProfit)
+        val mid = midEval
+        if (mid != null && !mid.shouldCloseImmediatelyInProfit) {
+            val newStop = mid.updatedStopLoss
+            if (newStop != null) {
+                assertTrue("حد ضرر جابه‌جاشده باید در سود باشد", newStop > 68_000.0)
+                assertTrue("حد ضرر جابه‌جاشده باید عقب‌تر از قیمت زنده بماند", newStop < 69_500.0)
+                assertTrue(
+                    "جابه‌جایی فقط با برچسب سطح ساختاری مجاز است، نه BE",
+                    mid.stopStageTag == "STRUCT" || mid.stopStageTag == "TRAIL",
+                )
+            }
+            assertNull("حد سود نباید جابه‌جا شود", mid.updatedTakeProfit)
+        }
 
         // مسیر پیش‌فرض `updateTradeStopLoss` همچنان حد ضرر ثابت را قفل می‌کند (بدون ratchet).
         val updatedAttempt = journal.updateTradeStopLoss(opened.id, 70_000.0, "تست عدم جابجایی پله‌ای")

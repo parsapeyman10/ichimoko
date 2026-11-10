@@ -430,7 +430,33 @@ object TradePlanGuard {
             stopDistance * desiredRr
         }
         val targetUpperBound = max(stopDistance * MIN_RR, min(stopDistance * MAX_RR, targetCeiling))
-        val targetDistance = structuredTargetDist.coerceIn(stopDistance * MIN_RR, targetUpperBound)
+
+        // ── قاعدهٔ کاربر: هدف باید حداقل **دو برابر کارمزد همان معامله** فاصله داشته باشد ──
+        // هدفی که فقط به‌اندازهٔ کارمزد است، در واقعیت صفر یا منفی است. اگر در سقف
+        // مجازِ همین نماد/تایم‌فریم چنین هدفی جا نشود، معامله رد می‌شود؛ نه اینکه
+        // هدف غیرواقعی گذاشته شود.
+        val spec = VenueSpecs.of(normalizedSymbol)
+        val roundTripFeePct = (spec.takerFeeBps * 2.0 + spec.spreadBps) / 10_000.0
+        val minTargetByFees = entryPrice * roundTripFeePct * MIN_TARGET_FEE_MULTIPLE
+        if (targetUpperBound < minTargetByFees) {
+            return emptyPlan.copy(
+                entryPrice = entryPrice,
+                atr = atr,
+                stopDistance = stopDistance,
+                verdict = TradePlanVerdict.REJECTED,
+                reasonsFa = listOf(
+                    String.format(
+                        Locale.US,
+                        "هدف حداقلی (دو برابر کارمزد رفت‌وبرگشت = %.5f) از سقف مجاز هدف در این " +
+                            "تایم‌فریم (%.5f) بزرگ‌تر است؛ این معامله بعد از کارمزد ارزش اجرا ندارد.",
+                        minTargetByFees,
+                        targetUpperBound,
+                    ),
+                ),
+            )
+        }
+        val targetFloor = max(stopDistance * MIN_RR, minTargetByFees)
+        val targetDistance = structuredTargetDist.coerceIn(targetFloor, targetUpperBound)
 
         val stopLoss = roundToTick(normalizedSymbol, (entryPrice - direction * stopDistance).coerceAtLeast(0.00001))
         val takeProfit = roundToTick(normalizedSymbol, (entryPrice + direction * targetDistance).coerceAtLeast(0.00001))
@@ -445,6 +471,9 @@ object TradePlanGuard {
         }
         if (abs(finalTarget - structuredTargetDist) / max(structuredTargetDist, 1e-9) > 0.03) {
             reasons += "حد سود به محدودهٔ قابل‌دسترس (سقف درصدی/ATR) قفل شد"
+        }
+        if (minTargetByFees > stopDistance * MIN_RR && finalTarget < minTargetByFees * 1.0001) {
+            reasons += "حد سود به کف «دو برابر کارمزد رفت‌وبرگشت» بالا رفت"
         }
         if (abs(rr - desiredRr) > 0.05) {
             reasons += String.format(Locale.US, "R:R از 1:%.2f به 1:%.2f تنظیم شد", desiredRr, rr)
@@ -566,6 +595,9 @@ object TradePlanGuard {
      * `lev = min(سقف مرجع نماد، floor(1 / (stopPct × 2.5 + کارمزد رفت‌وبرگشت + مارجین نگهداری)))`
      * تا لیکوییدیشن همیشه حداقل `۲.۵R` دورتر از حد ضرر بماند.
      */
+    /** هدف باید دست‌کم این‌قدر برابرِ کارمزد رفت‌وبرگشت فاصله داشته باشد. */
+    const val MIN_TARGET_FEE_MULTIPLE: Double = 2.0
+
     fun decideLeverage(
         symbol: String,
         action: SignalAction,
