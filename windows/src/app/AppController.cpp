@@ -108,7 +108,7 @@ void AppController::loadCsv(const QString& path) {
             if (!file.open(QIODevice::ReadOnly)) throw std::runtime_error("Cannot open CSV");
             const auto size = file.size();
             if (size <= 0) throw std::invalid_argument("CSV is empty");
-            const auto* mapped = file.map(0, size);
+            auto* mapped = file.map(0, size);
             if (!mapped) throw std::runtime_error("Cannot memory-map CSV");
             const std::string_view raw(reinterpret_cast<const char*>(mapped), static_cast<std::size_t>(size));
             outcome.data = std::make_shared<ParseResult>(parseDukascopyCsv(raw, name.toStdString()));

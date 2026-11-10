@@ -6,7 +6,7 @@
 
 namespace aurum {
 
-class CandleChart final : public QQuickPaintedItem {
+class CandleChart : public QQuickPaintedItem {
     Q_OBJECT
     Q_PROPERTY(QVariantList candles READ candles WRITE setCandles NOTIFY candlesChanged)
     QML_ELEMENT
