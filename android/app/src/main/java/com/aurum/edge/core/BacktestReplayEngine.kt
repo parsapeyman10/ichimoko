@@ -287,6 +287,176 @@ object BacktestReplayEngine {
         progress: ((Double) -> Unit)? = null,
     ): Result = runWithWindow(source, config, ENGINE_WINDOW_BARS, progress)
 
+    // ─────────────────────── اجرای ماه‌به‌ماه ───────────────────────
+
+    /** نتیجهٔ یک ماه. */
+    data class PeriodResult(
+        val label: String,
+        val fromMs: Long,
+        val toMs: Long,
+        val candles: Int,
+        val trades: List<Trade>,
+        val stats: Stats,
+        val elapsedMs: Long,
+    )
+
+    /**
+     * نتیجهٔ اجرای ماه‌به‌ماه.
+     *
+     * چرا این مسیر وجود دارد؟ فایل سنگین (چند صد هزار کندل m5 یا یک سال داده) یک‌جا نه
+     * حافظهٔ گوشی را راضی می‌کند نه صبر کاربر را؛ و بدتر: اگر وسط کار قطع شود هیچ گزارشی
+     * نمی‌ماند. این‌جا هر ماه یک بازهٔ مستقل است، نتیجه‌اش همان لحظه ساخته می‌شود و بعد
+     * ماه بعد.
+     */
+    data class PeriodicResult(
+        val periods: List<PeriodResult>,
+        val trades: List<Trade>,
+        val stats: List<Stats>,
+        val elapsedMs: Long,
+        val candlesUsed: Int,
+        /** ماه‌هایی که کندل کافی/داده نداشتند — برای شفافیت، نه پنهان‌کاری. */
+        val emptyMonths: Int,
+    ) {
+        val totals: Stats? get() = stats.firstOrNull { it.strategyId == "__ALL__" } ?: stats.firstOrNull()
+        val months: Int get() = periods.size
+
+        /** یک خط خلاصه برای هر ماه؛ همان چیزی که در نتیجهٔ بک‌تست دیده می‌شود. */
+        val summaryRows: List<String>
+            get() = periods.map { p ->
+                val st = p.stats
+                String.format(
+                    java.util.Locale.US,
+                    "%s → معامله=%d · برد=%.0f%% · خالص=%+.2f$ · PF=%.2f · انتظار=%+.3fR · کندل=%d",
+                    p.label, st.trades, st.winRatePct, st.netPnlUsd, st.profitFactor,
+                    st.expectancyR, p.candles,
+                )
+            }
+    }
+
+    /**
+     * بک‌تست ماه‌به‌ماه با «گرم‌کردنِ حمل‌شده».
+     *
+     * هر ماه جداگانه اجرا می‌شود، ولی پنجرهٔ ورودی‌اش از `warmupCarry` کندل **قبل** از شروع
+     * ماه شروع می‌شود تا اندیکاتورها (کومو، تنکان/کیجن، ATR) در کندل اول ماه از صفر شروع
+     * نکنند؛ بدون این، هر ماه چند معاملهٔ کاذب در روز اول می‌ساخت. انتهای پنجره هم `tailCarry`
+     * کندل جلوتر می‌رود تا معامله‌ای که آخر ماه باز شده فرصت بسته‌شدن طبیعی داشته باشد.
+     *
+     * معامله‌ها **بر اساس زمان ورود** به ماه نسبت داده می‌شوند، پس هیچ معامله‌ای دو بار
+     * شمرده نمی‌شود و هیچ معامله‌ای هم بین دو ماه گم نمی‌شود.
+     */
+    fun runPeriodic(
+        source: List<Candle>,
+        config: Config,
+        warmupCarry: Int = 360,
+        tailCarry: Int = 0,
+        progress: ((Double) -> Unit)? = null,
+    ): PeriodicResult {
+        val started = System.currentTimeMillis()
+        require(source.size >= config.warmupBars) {
+            "کندل کافی نیست: ${source.size} کندل خوانده شد ولی حداقل ${config.warmupBars} لازم است."
+        }
+        val ordered = source.sortedBy { it.time }
+        val zone = java.time.ZoneOffset.UTC
+        fun monthOf(ms: Long): java.time.YearMonth =
+            java.time.YearMonth.from(java.time.Instant.ofEpochMilli(ms).atZone(zone).toLocalDate())
+
+        val months = ordered.map { monthOf(it.time) }.distinct()
+        val tail = if (tailCarry > 0) {
+            tailCarry
+        } else {
+            maxOf(160, (config.maxHoldBars ?: IchimokuStrategyEngine.DEFAULT_MAX_HOLD_BARS) * 6)
+        }
+        val times = LongArray(ordered.size) { ordered[it].time }
+
+        val periods = ArrayList<PeriodResult>(months.size)
+        val allTrades = ArrayList<Trade>(1024)
+        var emptyMonths = 0
+        months.forEachIndexed { index, month ->
+            val fromMs = month.atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            val toMs = month.plusMonths(1).atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            val firstIdx = times.lowerBound(fromMs)
+            val lastIdx = times.lowerBound(toMs) // انحصاری
+            val candlesInMonth = lastIdx - firstIdx
+            val label = String.format(java.util.Locale.US, "%04d-%02d", month.year, month.monthValue)
+            if (candlesInMonth <= 0) {
+                emptyMonths++
+                progress?.invoke((index + 1).toDouble() / months.size)
+                return@forEachIndexed
+            }
+            val windowStart = (firstIdx - warmupCarry).coerceAtLeast(0)
+            val windowEnd = (lastIdx + tail).coerceAtMost(ordered.size)
+            val window = ordered.subList(windowStart, windowEnd)
+            if (window.size < config.warmupBars) {
+                // ماه ناقص (ابتدای فایل یا دادهٔ کم) — به‌جای استثنا، ماه خالی ثبت می‌شود.
+                emptyMonths++
+                periods += PeriodResult(
+                    label = label,
+                    fromMs = fromMs,
+                    toMs = toMs,
+                    candles = candlesInMonth,
+                    trades = emptyList(),
+                    stats = buildStats("__ALL__", "ماه $label", emptyList(), config.startEquityUsd),
+                    elapsedMs = 0L,
+                )
+                progress?.invoke((index + 1).toDouble() / months.size)
+                return@forEachIndexed
+            }
+            val monthStart = System.currentTimeMillis()
+            val res = runWithWindow(window, config.copy(maxBars = 0), ENGINE_WINDOW_BARS, null)
+            // فقط معامله‌هایی که **ورودشان** داخل همین ماه است؛ بقیه (گرم‌کردن یا ماه بعد)
+            // در ماه خودشان شمرده می‌شوند.
+            val monthTrades = res.trades.filter { it.entryTime in fromMs until toMs }
+            allTrades += monthTrades
+            periods += PeriodResult(
+                label = label,
+                fromMs = fromMs,
+                toMs = toMs,
+                candles = candlesInMonth,
+                trades = monthTrades,
+                stats = buildStats("__ALL__", "ماه $label", monthTrades, config.startEquityUsd),
+                elapsedMs = System.currentTimeMillis() - monthStart,
+            )
+            progress?.invoke((index + 1).toDouble() / months.size)
+        }
+
+        val byId = allTrades.groupBy { it.strategyId }
+        val stats = if (byId.size > 1) {
+            byId.map { (id, list) ->
+                val title = runCatching { BitcoinStrategyModel.fromId(id).titleFa }.getOrDefault(id)
+                buildStats(id, title, list, config.startEquityUsd)
+            } + buildStats("__ALL__", "مجموع همهٔ استراتژی‌ها", allTrades, config.startEquityUsd)
+        } else {
+            listOf(
+                buildStats(
+                    byId.keys.firstOrNull() ?: config.strategyId,
+                    byId.values.firstOrNull()?.firstOrNull()?.strategyTitleFa ?: "استراتژی",
+                    allTrades,
+                    config.startEquityUsd,
+                ),
+            )
+        }
+
+        return PeriodicResult(
+            periods = periods,
+            trades = allTrades,
+            stats = stats,
+            elapsedMs = System.currentTimeMillis() - started,
+            candlesUsed = ordered.size,
+            emptyMonths = emptyMonths,
+        )
+    }
+
+    /** ایندکس اولین عنصری که `>= target` است (جست‌وجوی دودویی روی آرایهٔ مرتب). */
+    private fun LongArray.lowerBound(target: Long): Int {
+        var lo = 0
+        var hi = size
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (this[mid] < target) lo = mid + 1 else hi = mid
+        }
+        return lo
+    }
+
     /**
      * همان `run` با پنجرهٔ دید قابل‌تنظیم — فقط برای آزمون این‌که بریدن پنجره نتیجه را عوض
      * نمی‌کند. مسیر اصلی همان `ENGINE_WINDOW_BARS` است.
