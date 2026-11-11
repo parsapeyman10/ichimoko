@@ -316,6 +316,11 @@ class Manual(FPDF):
                 self.cell(13, 6.2, fmt(pno), align="L", new_x="LMARGIN", new_y="NEXT")
 
 
+    def total_pages_fa(self) -> str:
+        fa = "۰۱۲۳۴۵۶۷۸۹"
+        n = getattr(self, "total_pages", 0) or 0
+        return "".join(fa[int(c)] for c in str(n)) if n else "—"
+
     def back_cover(self, version: str, code: str, date_fa: str) -> None:
         """پشت جلد: بستن دفترچه با یک صفحهٔ آرام و اطلاعات نسخه."""
         self.new_page("پشت جلد")
@@ -338,7 +343,7 @@ class Manual(FPDF):
             ["قلم", "مقدار"],
             [["نسخهٔ سند", f"{version} · کد {code}"],
              ["تاریخ", date_fa],
-             ["تعداد صفحه", "۲۴ صفحهٔ A4"],
+             ["تعداد صفحه", f"{self.total_pages_fa()} صفحهٔ A4"],
              ["قلم متن", "Vazirmatn (فارسی) · DejaVu (لاتین) · Noto Emoji"]],
             widths=[0.32, 0.68],
         )
@@ -360,14 +365,16 @@ class Manual(FPDF):
 
 
 def build(content_module, out_path: Path, toc_pages: dict[str, int] | None = None,
-          toc_slots: int = 1, toc_entries: list | None = None) -> tuple[dict[str, int], list]:
+          toc_slots: int = 1, toc_entries: list | None = None,
+          total_pages: int = 0) -> tuple[dict[str, int], list]:
     pdf = Manual()
     pdf._toc_pages = dict(toc_pages or {})
     pdf.toc_slots = toc_slots
     pdf.toc_entries = list(toc_entries or [])
+    pdf.total_pages = total_pages or 0
     content_module.render(pdf)
     pdf.output(str(out_path))
-    return dict(pdf._toc_pages), list(pdf.toc)
+    return dict(pdf._toc_pages), list(pdf.toc), pdf.pages_count
 
 
 def main() -> None:
@@ -379,12 +386,12 @@ def main() -> None:
     build_font.main()
 
     # گذر ۰: فقط تعداد سرفصل‌ها را می‌شمارد تا بدانیم فهرست چند صفحه می‌خواهد.
-    _, entries = build(content, Path("/tmp/_manual_pass0.pdf"), toc_slots=1)
+    _, entries, _ = build(content, Path("/tmp/_manual_pass0.pdf"), toc_slots=1)
     slots = max(1, -(-len(entries) // Manual.TOC_PER_PAGE))
     # گذر ۱: شمارهٔ صفحهٔ هر سر را با همان تعداد صفحهٔ فهرست جمع می‌کند.
-    pages, _ = build(content, Path("/tmp/_manual_pass1.pdf"), toc_slots=slots)
+    pages, _, total = build(content, Path("/tmp/_manual_pass1.pdf"), toc_slots=slots)
     # گذر ۲: نسخهٔ نهایی، با فهرست پُر‌شده.
-    build(content, OUT, pages, toc_slots=slots,
+    build(content, OUT, pages, toc_slots=slots, total_pages=total,
           toc_entries=[(lvl, txt, pages.get(txt, pno)) for lvl, txt, pno in entries])
     print(f"ساخته شد: {OUT}  ·  {len(entries)} سرفصل  ·  {slots} صفحه فهرست")
 
