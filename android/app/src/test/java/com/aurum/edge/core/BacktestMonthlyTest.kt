@@ -92,6 +92,45 @@ class BacktestMonthlyTest {
         assertTrue("منحنی سرمایه باید ساخته شود", result.equityCurve.isNotEmpty())
     }
 
+    // ─────────────────── رِنج/روند تایم بالاتر ───────────────────
+
+    @Test
+    fun `efficiency ratio is high on a straight trend and low on a zigzag`() {
+        val start = 1_735_689_600_000L
+        val step = 15 * 60_000L
+        val trend = (0 until 400).map { i ->
+            com.aurum.edge.domain.Candle(
+                time = start + i * step, open = 100.0 + i, high = 101.0 + i,
+                low = 99.0 + i, close = 100.0 + i, volume = 100.0, closed = true,
+            )
+        }
+        val zigzag = (0 until 400).map { i ->
+            val c = if (i % 2 == 0) 100.0 else 101.0
+            com.aurum.edge.domain.Candle(
+                time = start + i * step, open = c, high = c + 0.5,
+                low = c - 0.5, close = c, volume = 100.0, closed = true,
+            )
+        }
+        val trendEr = BacktestReplayEngine.higherTfEfficiencyRatio(trend, 399, 4)
+        val zigzagEr = BacktestReplayEngine.higherTfEfficiencyRatio(zigzag, 399, 4)
+        assertTrue("روند مستقیم باید ER نزدیک ۱ بدهد (شد: $trendEr)", trendEr > 0.9)
+        assertTrue("زیگزاگ باید ER نزدیک ۰ بدهد (شد: $zigzagEr)", zigzagEr < 0.1)
+        assertTrue("با دادهٔ کم، فیلتر نباید چیزی را رد کند", BacktestReplayEngine.higherTfEfficiencyRatio(trend, 10, 4).isNaN())
+    }
+
+    @Test
+    fun `higher timeframe factor matches the trigger interval`() {
+        assertEquals(4, BacktestReplayEngine.h1FactorOf(com.aurum.edge.domain.Interval.M15))
+        assertEquals(12, BacktestReplayEngine.h1FactorOf(com.aurum.edge.domain.Interval.M5))
+        assertEquals(2, BacktestReplayEngine.h1FactorOf(com.aurum.edge.domain.Interval.M30))
+    }
+
+    @Test
+    fun `range filter is off by default so behaviour stays frozen`() {
+        // «وقتی من در موردش صحبت نمی‌کنم باید فیکس بمونه» — فیلتر رِنج پیش‌فرض خاموش است.
+        assertTrue(!BacktestReplayEngine.Config().requireHigherTfTrend)
+    }
+
     @Test
     fun `runAuto splits by calendar month and never by bar count`() {
         val light = series(months = 1, barsPerMonth = 500)

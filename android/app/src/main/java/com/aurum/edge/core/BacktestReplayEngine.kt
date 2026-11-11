@@ -120,6 +120,18 @@ object BacktestReplayEngine {
          * است تا معلوم شود «آیا سود از هزینه‌های واقعی‌تر جان سالم به در می‌برد؟»
          */
         val costMultiplier: Double = 1.0,
+        /**
+         * فیلتر «رِنج تایم بالاتر»: وقتی روشن باشد، ورودی که تایم بالاتر (H1) در حالت رِنج
+         * است رد می‌شود.
+         *
+         * اندازه‌گیری روی XAU ۱۵دقیقه (۹۹۹ معامله): معامله‌هایی که H1 در رِنج بود (ER<۰٫۲۰)
+         * PF ۱٫۵۲ و +۰٫۳۳۳R دادند، در حالی که همان استراتژی در H1 روندی PF ۲٫۰۴ و +۰٫۴۰۹R
+         * داشت. پیش‌فرض **خاموش** است تا رفتار فعلی قفل بمانَد؛ روشن‌کردنش تصمیم صریح کاربر
+         * است، نه تغییر بی‌صدا.
+         */
+        val requireHigherTfTrend: Boolean = false,
+        /** کف «کارایی روند» تایم بالاتر (۰٫۲۰ = رِنج). */
+        val minHigherTfEfficiencyRatio: Double = 0.20,
     )
 
     /** یک معاملهٔ بک‌تست. جدا از `PaperTrade` نگه داشته می‌شود تا هیچ‌جا با ژورنال قاطی نشود. */
@@ -206,6 +218,8 @@ object BacktestReplayEngine {
         val neuralBlockedEntries: Int = 0,
         /** دلیل مسدودی گیت → تعداد. برای اینکه بشود دید «مانع» چه چیزی را گرفته است. */
         val neuralBlockReasons: Map<String, Int> = emptyMap(),
+        /** چند ورود به‌خاطر رِنج‌بودن تایم بالاتر رد شد (۰ = فیلتر خاموش). */
+        val rangeBlockedEntries: Int = 0,
         /** بیشترین شرطی که در یک کندل پاس شد؛ سقف واقعی همان بازه. */
         val maxConditionsPassed: Int = 0,
         /**
@@ -603,6 +617,7 @@ object BacktestReplayEngine {
 
         val states = models.associateWith { StrategyRunState(it) }
         val entryReports = LinkedHashMap<Long, StrategyEvaluationReport>()
+        var rangeBlocked = 0
         // شمارش مسدودی‌های گیت عصبی — تا «مانع» قابل‌اندازه‌گیری باشد، نه ادعا.
         var neuralBlocked = 0
         val neuralBlockReasons = LinkedHashMap<String, Int>()
@@ -728,6 +743,9 @@ object BacktestReplayEngine {
                     if (verdict?.blocks == true) {
                         neuralBlocked++
                         neuralBlockReasons[verdict.reasonFa] = (neuralBlockReasons[verdict.reasonFa] ?: 0) + 1
+                    } else if (config.requireHigherTfTrend && !higherTfTrendOk(triggerBars, i, config)) {
+                        // تایم بالاتر رِنج است: ورود در جهت روند انجام نمی‌شود، پس رد می‌شود.
+                        rangeBlocked++
                     } else {
                         state.openTrade = decision
                         if (config.captureEntryReports) entryReports.putIfAbsent(decision.entryTime, report)
@@ -783,6 +801,7 @@ object BacktestReplayEngine {
             evaluatedSteps = evaluated,
             skippedWarmupSteps = skipped,
             entryReports = entryReports,
+            rangeBlockedEntries = rangeBlocked,
             neuralBlockedEntries = neuralBlocked,
             neuralBlockReasons = neuralBlockReasons,
             maxConditionsPassed = maxConditionsPassed,
@@ -902,7 +921,9 @@ object BacktestReplayEngine {
                     val newStop = preserve.updatedStopLoss?.takeIf { it > 0.0 }
                     if (newStop != null) {
                         // حد ضرر فقط در جهت سود جابه‌جا می‌شود؛ هرگز عقب نمی‌رود.
+                        val before = open.stopLoss
                         open.stopLoss = if (isBuy) max(open.stopLoss, newStop) else min(open.stopLoss, newStop)
+                        if (open.stopLoss != before) open.stopMoved = true
                     }
                     if (preserve.shouldCloseImmediatelyInProfit) {
                         val exitPrice = preserve.closePrice?.takeIf { it > 0.0 } ?: bar.close
@@ -912,6 +933,53 @@ object BacktestReplayEngine {
             }
         }
         return null
+    }
+
+    /**
+     * «کارایی روند» (Efficiency Ratio) روی تایم بالاتر در یک نقطهٔ مشخص:
+     *   ER = |close[t] − close[t−k]| ÷ مجموع |تغییر کندل‌به‌کندل|
+     * ER نزدیک ۱ یعنی حرکت مستقیم (روند)، نزدیک ۰ یعنی بالا-پایین رفتن (رِنج).
+     * خروجی NaN یعنی دادهٔ کافی نیست و فیلتر نباید چیزی را رد کند.
+     */
+    /** آیا تایم بالاتر (H1) در این لحظه روند دارد؟ دادهٔ ناکافی = مجاز. */
+    internal fun higherTfTrendOk(
+        bars: List<com.aurum.edge.domain.Candle>,
+        index: Int,
+        config: Config,
+    ): Boolean {
+        val er = higherTfEfficiencyRatio(bars, index, h1FactorOf(config.triggerInterval))
+        if (er.isNaN()) return true
+        return er >= config.minHigherTfEfficiencyRatio
+    }
+
+    internal fun higherTfEfficiencyRatio(
+        bars: List<com.aurum.edge.domain.Candle>,
+        index: Int,
+        htfFactor: Int,
+        lookback: Int = 20,
+    ): Double {
+        if (htfFactor < 1 || lookback < 1) return Double.NaN
+        val lastIdx = index.coerceAtMost(bars.size - 1)
+        val needed = lookback * htfFactor
+        if (lastIdx - needed < 0) return Double.NaN
+        var net = 0.0
+        var path = 0.0
+        for (k in 1..lookback) {
+            val a = bars[lastIdx - (k - 1) * htfFactor].close
+            val b = bars[lastIdx - k * htfFactor].close
+            path += kotlin.math.abs(a - b)
+            if (k == lookback) net = kotlin.math.abs(bars[lastIdx].close - b)
+        }
+        return if (path <= 1e-12) 0.0 else net / path
+    }
+
+    /** نسبت کندل‌های تایم ماشه به H1 (برای محاسبهٔ ER تایم بالاتر). */
+    internal fun h1FactorOf(interval: com.aurum.edge.domain.Interval): Int = when (interval) {
+        com.aurum.edge.domain.Interval.M1 -> 60
+        com.aurum.edge.domain.Interval.M5 -> 12
+        com.aurum.edge.domain.Interval.M15 -> 4
+        com.aurum.edge.domain.Interval.M30 -> 2
+        else -> 1
     }
 
     internal fun closeAt(
@@ -975,6 +1043,14 @@ object BacktestReplayEngine {
         val initialStopLoss: Double,
         /** حجم پوزیشن بر پایهٔ ریسک درصدی سرمایه و فاصلهٔ حد ضرر. */
         val positionUnits: Double,
+        /**
+         * آیا حد ضرر این معامله یک‌بار جابه‌جا شده؟
+         *
+         * برای اینکه قاعدهٔ «جابه‌جایی دوم فقط روی سطح واقعی و با هدف ≥۲× کارمزد» در بک‌تست
+         * هم مثل معاملهٔ زنده اجرا شود؛ بدون این پرچم، موتور هر بار فکر می‌کرد اولین
+         * جابه‌جایی است و قاعده هیچ‌وقت در بک‌تست آزموده نمی‌شد.
+         */
+        var stopMoved: Boolean = false,
     ) {
         fun toPseudoPaperTrade(config: Config): PaperTrade = PaperTrade(
             id = "BT-$strategyId-$entryTime",
@@ -992,6 +1068,8 @@ object BacktestReplayEngine {
             strategyId = strategyId,
             strategyTitleFa = strategyTitleFa,
             leverage = PaperOrderRules.defaultLeverageFor(config.symbol),
+            // همان نشانه‌ای که موتور زنده در یادداشت معامله می‌گذارد.
+            note = if (stopMoved) IchimokuStrategyEngine.TRAIL_TAG_MARK else "",
         )
     }
 

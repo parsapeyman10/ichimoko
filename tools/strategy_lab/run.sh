@@ -98,4 +98,6 @@ if [[ "${3:-}" == "hx" ]]; then MAIN="HiddenCrossLabKt"; EXTRA=("${@:4}"); fi
 if [[ "${3:-}" == "diag" ]]; then MAIN="BtcDiagLabKt"; EXTRA=("${@:4}"); fi
 # حالت «mon»: بک‌تست ماه‌به‌ماه + مقایسه با اجرای یک‌جا + جدول هر ماه.
 if [[ "${3:-}" == "mon" ]]; then MAIN="MonthlyLabKt"; EXTRA=("${@:4}"); fi
+# حالت «rng»: دسته‌بندی معامله‌ها بر اساس رِنج/روند بودن بازار در لحظهٔ ورود.
+if [[ "${3:-}" == "rng" ]]; then MAIN="RangeLabKt"; EXTRA=("${@:4}"); fi
 "$JAVA_HOME/bin/java" -Dfile.encoding=UTF-8 -cp "$WORK/out:$STDLIB" "$MAIN" "$BARS" "$SEED" "${EXTRA[@]}"

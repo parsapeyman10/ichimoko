@@ -5704,12 +5704,50 @@ object IchimokuStrategyEngine {
                 val spec = VenueSpecs.of(trade.symbol)
                 val feePct = (spec.takerFeeBps * 2.0 + spec.spreadBps) / 10_000.0
                 val feePerUnit = trade.entry * feePct
-                val structuralAnchor = trigSnap.tenkan
-                val structuralCandidate = if (isBuy) {
-                    maxOf(trigSnap.tenkan, livePrice - trigSnap.atr14 * 0.35)
+                // آیا حد ضرر قبلاً یک‌بار جابه‌جا شده؟ (حالت «بعد از جابه‌جایی»)
+                val stopMovedBefore = hasLockedInProfit
+                /**
+                 * ── قاعدهٔ کاربر برای «جابه‌جایی دوم به بعد» ─────────────────────────
+                 * «SL بعد جابه‌جایی زمانی حق جابه‌جایی دارد که یک مقاومت با حد سود مثبت
+                 * داشته باشد؛ حد سود هم حداقل باید از کارمزد آن ترید دو برابر بیشتر باشد.»
+                 *
+                 * پس دو شرط اضافه شد:
+                 *  ۱) از جابه‌جایی دوم به بعد، لنگر باید **سطح واقعی** باشد (تنکان، کیجون یا
+                 *     لبهٔ کومو)، نه «۰٫۳۵ ATR عقب‌تر از قیمت» که سطح نیست و فقط فاصله است.
+                 *  ۲) از آن سطح تا حد سود، فاصله باید ≥ **۲ × کارمزد رفت‌وبرگشت** بمانَد؛
+                 *     یعنی هدفِ باقی‌مانده هنوز هزینهٔ دو معامله را می‌پوشاند. وگرنه قفل‌کردن
+                 *     یعنی «سود هدف کوچک‌تر از کارمزد».
+                 */
+                val levelTenkan = trigSnap.tenkan
+                val levelKijun = trigSnap.kijun
+                val levelKumoNear = if (isBuy) {
+                    maxOf(trigSnap.currentSpanA, trigSnap.currentSpanB)
                 } else {
-                    minOf(trigSnap.tenkan, livePrice + trigSnap.atr14 * 0.35)
+                    minOf(trigSnap.currentSpanA, trigSnap.currentSpanB)
                 }
+                val atrBuffer = if (isBuy) livePrice - trigSnap.atr14 * 0.35 else livePrice + trigSnap.atr14 * 0.35
+                val realLevels = listOf(levelTenkan, levelKijun, levelKumoNear)
+                    .filter { it > 0.0 && it.isFinite() }
+                    .filter { if (isBuy) it < livePrice else it > livePrice }
+                val bestRealLevel = if (isBuy) realLevels.maxOrNull() else realLevels.minOrNull()
+                val structuralAnchor = bestRealLevel ?: levelTenkan
+                val structuralCandidate = if (bestRealLevel == null) {
+                    atrBuffer // سطح واقعی پیدا نشد: فقط اولین جابه‌جایی مجاز است
+                } else if (isBuy) {
+                    // اولین جابه‌جایی می‌تواند «سطح یا بافر» هرکدام بهتر بود باشد؛
+                    // جابه‌جایی دوم به بعد فقط روی سطح واقعی.
+                    if (stopMovedBefore) bestRealLevel else maxOf(bestRealLevel, atrBuffer)
+                } else {
+                    if (stopMovedBefore) bestRealLevel else minOf(bestRealLevel, atrBuffer)
+                }
+                // فاصلهٔ هدف باقی‌مانده از لنگر جدید تا حد سود.
+                val targetDistanceFromCandidate = if (isBuy) {
+                    trade.takeProfit - structuralCandidate
+                } else {
+                    structuralCandidate - trade.takeProfit
+                }
+                val targetCoversDoubleFee = targetDistanceFromCandidate >= 2.0 * feePerUnit
+                val levelRequirementOk = if (stopMovedBefore) bestRealLevel != null && targetCoversDoubleFee else true
                 val improvesOnCurrentStop = if (isBuy) {
                     structuralCandidate > fixedStopLoss && structuralCandidate < livePrice
                 } else {
@@ -5723,7 +5761,7 @@ object IchimokuStrategyEngine {
                 // «سود مثبت» کافی نیست: در بازار پرنوسان باید حاشیهٔ امن هم داشته باشد،
                 // وگرنه یک کندل معمولی همان قفل را می‌زند و کارمزد دوباره پرداخت می‌شود.
                 val minLockedCushionR = 0.10 + 0.25 * (moveThresholdR - MIN_R_TO_MOVE_STOP) / 0.5
-                if (improvesOnCurrentStop && lockedNetR >= minLockedCushionR) {
+                if (improvesOnCurrentStop && lockedNetR >= minLockedCushionR && levelRequirementOk) {
                     val tag = if (trade.note.contains(TRAIL_TAG_MARK)) "TRAIL" else "STRUCT"
                     return PreserveModeEvaluation(
                         tradeId = trade.id,
@@ -5733,11 +5771,13 @@ object IchimokuStrategyEngine {
                         reasonFa = String.format(
                             Locale.US,
                             "سود باز %.2fR (≥ %.1fR) شد؛ حد ضرر روی سطح ساختاری %.2f منتقل شد، " +
-                                "که بعد از کارمزد %.2fR سود خالص قفل می‌کند",
+                                "که بعد از کارمزد %.2fR سود خالص قفل می‌کند؛ فاصلهٔ باقی‌مانده تا حد سود " +
+                                "%.2f برابر کارمزد رفت‌وبرگشت است",
                             currentRMultiple,
                             moveThresholdR,
                             structuralAnchor,
                             lockedNetR,
+                            if (feePerUnit > 0.0) targetDistanceFromCandidate / feePerUnit else 0.0,
                         ),
                         lockedRMultiple = round2(currentRMultiple),
                         updatedStopLoss = round2(structuralCandidate),
