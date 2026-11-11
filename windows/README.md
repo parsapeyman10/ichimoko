@@ -27,7 +27,7 @@
 
 ## Build با فایل آماده
 
-روی ویندوز فایل `windows\build_windows.bat` را اجرا کنید. این فایل Visual Studio 2022 را پیدا می‌کند، پروژه را در حالت Release می‌سازد و تست‌های Core را اجرا می‌کند. مسیر پیش‌فرض Qt برابر `C:\Qt\6.8.3\msvc2022_64` است؛ اگر Qt جای دیگری نصب است:
+روی ویندوز فایل `windows\build_windows.bat` را اجرا کنید. این فایل Visual Studio 2022، Kitهای Qt در درایوهای C/D و ابزارهای CMake/Ninja نصب‌شده توسط Qt را پیدا می‌کند، پروژه را در حالت Release می‌سازد و تست‌های Core را اجرا می‌کند. در Qt Maintenance Tool باید **MSVC 2022 64-bit** و **CMake/Ninja** نصب باشند. اگر Qt در مسیر غیرمعمول نصب است:
 
 ```bat
 windows\build_windows.bat "D:\Qt\6.8.3\msvc2022_64"
