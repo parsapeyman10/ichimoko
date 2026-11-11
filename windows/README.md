@@ -27,6 +27,8 @@
 
 ## Build با فایل آماده
 
+اگر Qt نصب نیست، ابتدا `windows\install_qt.bat` را اجرا کنید. این فایل Installer رسمی Qt را دانلود می‌کند، Qt 6.8.3 MSVC2022 64-bit و CMake/Ninja را انتخاب می‌کند و پس از نصب Build را شروع می‌کند. در پنجرهٔ نصب باید با حساب رایگان Qt وارد شوید و مجوزها را بررسی کنید. مسیر نصب پیش‌فرض `C:\Qt` است؛ برای مسیر دیگر `windows\install_qt.bat "D:\Qt"` را اجرا کنید.
+
 روی ویندوز فایل `windows\build_windows.bat` را اجرا کنید. این فایل Visual Studio 2022، Kitهای Qt در درایوهای C/D و ابزارهای CMake/Ninja نصب‌شده توسط Qt را پیدا می‌کند، پروژه را در حالت Release می‌سازد و تست‌های Core را اجرا می‌کند. در Qt Maintenance Tool باید **MSVC 2022 64-bit** و **CMake/Ninja** نصب باشند. اگر Qt در مسیر غیرمعمول نصب است:
 
 ```bat
