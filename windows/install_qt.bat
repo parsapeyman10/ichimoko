@@ -22,9 +22,9 @@ if errorlevel 1 (
 
 set "QT_INSTALLER=%TEMP%\aurum-qt-online-installer.exe"
 set "QT_DOWNLOAD=%TEMP%\aurum-qt-online-installer.download"
-set "QT_LOCAL=%SCRIPT_DIR%qt-unified-windows-x64-online.exe"
-set "QT_URL=https://download.qt.io/official_releases/online_installers/qt-unified-windows-x64-online.exe"
-set "QT_MIRROR=https://mirrors.ocf.berkeley.edu/qt/official_releases/online_installers/qt-unified-windows-x64-online.exe"
+set "QT_LOCAL=%SCRIPT_DIR%qt-online-installer-windows-x64-online.exe"
+set "QT_URL=https://download.qt.io/official_releases/online_installers/qt-online-installer-windows-x64-online.exe"
+set "QT_MIRROR=https://mirrors.ocf.berkeley.edu/qt/official_releases/online_installers/qt-online-installer-windows-x64-online.exe"
 
 echo.
 echo === Aurum Edge Qt setup ===
@@ -58,7 +58,7 @@ if errorlevel 1 (
     echo Check DNS/proxy/VPN settings, or manually download:
     echo   %QT_URL%
     echo Save it beside this batch file as:
-    echo   qt-unified-windows-x64-online.exe
+    echo   qt-online-installer-windows-x64-online.exe
     echo Then run this file again.
     goto :failed
 )
