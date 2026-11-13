@@ -13,6 +13,7 @@
 - فقط interval استاندارد **15m** پذیرفته است. روی interval دیگر dashboard عبارت `CHANGE TO 15m` را نشان می‌دهد و هیچ entry معتبری ایجاد نمی‌شود.
 - **هیچ اطلاعات یا کندل 30m، 1H یا timeframe دیگری ساخته، محاسبه یا مصرف نمی‌شود.** هیچ آرایه، bucket یا resampling مربوط به timeframe بالاتر در فایل وجود ندارد.
 - تمام bias، confirmation، trigger، gate و محاسبهٔ SL/TP فقط از کندل‌های کامل و native چارت 15m به‌دست می‌آیند.
+- هندسهٔ خطوط نیز native 15m است: فاصلهٔ Tenkan/Kijun برای تشخیص شروع expansion، و فاصلهٔ Kumo در محل فعلی قیمت برای تأیید ساختار استفاده می‌شود.
 - مسیرهای قبلی 5 دقیقه‌ای از تحویل عملیاتی کنار گذاشته شده‌اند.
 
 ## افزودن به GoCharting
@@ -61,6 +62,8 @@
 
 `Enable smart trend exit` به‌صورت پیش‌فرض فعال است و فقط پس از بسته‌شدن کندل 15m بررسی می‌شود. برای position long، خروج وقتی submit می‌شود که حداقل تعداد تنظیم‌شده‌ای از این سه تأیید خلاف‌روند رخ دهد: بسته‌شدن زیر Kijun، نزولی‌شدن وضعیت Tenkan/Kijun، و ورود/شکست Kumo به سمت پایین. برای position short همین معیارها به‌شکل معکوس اعمال می‌شوند.
 
+علاوه بر این تأییدها، فاصلهٔ Tenkan/Kijun باید در حال جمع‌شدن باشد؛ اگر خود Tenkan/Kijun خلاف جهت position cross کنند، همان تغییر ساختار خطی برای این بخش کافی است. بنابراین جمع‌شدن معمولی خطوط به‌تنهایی خروج ایجاد نمی‌کند و یک pullback عادی با پایان روند اشتباه گرفته نمی‌شود.
+
 ورودی `Smart exit: required confirmations` پیش‌فرض `2` از `3` است؛ بنابراین یک wick یا یک نشانهٔ منفرد position را نمی‌بندد. خروج هوشمند یک market-close شبیه‌سازی‌شده برای open بعدی است، هیچ reversal فوری ایجاد نمی‌کند و lock تک‌معامله‌ای تا fill خروج فعال می‌ماند.
 
 ## چارت خلوت و dashboard
@@ -72,7 +75,7 @@
 | `15m OK` / `CHANGE TO 15m` | اعتبار timeframe چارت |
 | `Data` | وضعیت warm-up native 15m |
 | `Bias` | جهت native 15m |
-| `Trigger` | Katana، Pullback یا Breakout |
+| `Trigger` | Katana، Pullback، Breakout یا `EXPANSION` (شروع بازشدن فاصلهٔ خطوط native 15m) |
 | `Conditions` و `Book gate` | گذر 17 شرط Lite و امتیاز gate |
 | `Model` | تأیید `NATIVE 15m ONLY` |
 | `SMART EXIT LONG/SHORT` | خروج هوشمند تأیید شده و market-close submit شده است |
@@ -81,7 +84,7 @@
 
 ## منطق و تنظیمات Lite
 
-نسخهٔ native-15m از Ichimoku `9/26/52/26`، ATR14، کیفیت candle/volume، Chikou، Kumo، hard-vetoهای `1/3/4/6/17` و triggerهای `Katana`، `Pullback` و `Breakout` استفاده می‌کند. R:R توسط کاربر، پیش از تعیین quantity، در بازهٔ `1.5R` تا `3R` انتخاب می‌شود؛ پیش‌فرض `2.25R` است.
+نسخهٔ native-15m از Ichimoku `9/26/52/26`، ATR14، کیفیت candle/volume، Chikou، Kumo و triggerهای `Katana`، `Pullback`، `Breakout` و `EXPANSION` استفاده می‌کند. `EXPANSION` فقط در شروع بازشدن فاصلهٔ Tenkan/Kijun و با Kumo دارای فاصلهٔ واقعی در موقعیت فعلی قیمت مجاز است. موقعیت قیمت نسبت به Kumo، جهت Tenkan/Kijun و expansion سه شرط سخت entry هستند؛ Chikou و جهت Kumo جلوتر، امتیاز کیفیت می‌دهند اما hard-block نیستند تا شروع موج 15m بی‌دلیل با تأخیر گرفته نشود. بنابراین ساختار تخت یا فشرده entry نمی‌گیرد. R:R توسط کاربر، پیش از تعیین quantity، در بازهٔ `1.5R` تا `3R` انتخاب می‌شود؛ پیش‌فرض `2.25R` است.
 
 `Round-trip cost fraction` به‌طور پیش‌فرض `0.0021` است و `commission_value=0.105` صرفاً تقریب هزینه در گزارش بک‌تست است. quantity، هزینه، ATR-extension، SL buffer و تنظیمات Smart Exit از تنظیمات Lipi قابل تغییرند. هیچ time-stop یا خروج اجباری بعد از 20 کندل در این نسخه وجود ندارد؛ position با SL، TP یا خروج هوشمند تأییدشده بسته می‌شود. تغییر تنظیمات، مقایسه با baseline مرجع را تغییر می‌دهد.
 

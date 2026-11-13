@@ -122,6 +122,25 @@ class Native15EngineTests(unittest.TestCase):
         self.assertEqual(trade.exit_time, bars[81].time)
         self.assertEqual(trade.exit, bars[81].open)
 
+    def test_smart_exit_requires_line_fade_or_tk_cross(self) -> None:
+        bars = candles(84)
+        bars[80] = engine.Candle(bars[80].time, 6.0, 7.0, 5.0, 6.5, 150.0)
+        indicators = engine.build_indicators(bars)
+        # Current TK gap is 2 ATR after a 3 ATR gap; price is below both
+        # Kijun and the current Kumo top, so the required adverse structure
+        # exists and the new contraction confirmation should permit an exit.
+        indicators.tenkan[79], indicators.kijun[79], indicators.atr[79] = 11.0, 8.0, 1.0
+        indicators.tenkan[78], indicators.kijun[78], indicators.atr[78] = 10.0, 8.0, 1.0
+        trade = engine.OpenTrade(0, bars[79].time, "LONG", "TEST", 10.0, 8.0, 14.0, 8.0, 2.0, 90.0)
+        values = (10.0, 8.0, 7.0, 6.0, 0.0, 0.0, 1.0)
+        with patch.object(engine, "_cloud_state", return_value=values):
+            self.assertTrue(engine.smart_exit(bars, indicators, 80, trade, engine.Settings(smart_exit_confirmations=2)))
+        # Same adverse price structure without contraction or a TK cross is
+        # treated as a pullback, not an automatic trend end.
+        no_fade_values = (11.0, 8.0, 7.0, 6.0, 0.0, 0.0, 1.0)
+        with patch.object(engine, "_cloud_state", return_value=no_fade_values):
+            self.assertFalse(engine.smart_exit(bars, indicators, 80, trade, engine.Settings(smart_exit_confirmations=2)))
+
     def test_next_open_gap_is_filled_not_silently_cancelled(self) -> None:
         bars = candles(84)
         bars[80] = engine.Candle(bars[80].time, 98.0, 101.0, 97.5, 100.0, 150.0)
@@ -134,6 +153,24 @@ class Native15EngineTests(unittest.TestCase):
         self.assertEqual(len(result.trades), 1)
         self.assertEqual(result.trades[0].entry, 98.0)
         self.assertEqual(result.diagnostics["gap_entry_outside_frozen_bracket"], 1)
+
+    def test_same_trend_reentry_stays_blocked_until_native_reset(self) -> None:
+        bars = candles(85)
+        bars[80] = engine.Candle(bars[80].time, 108.0, 110.0, 107.0, 108.0, 150.0)
+
+        def fake_signal(_bars: list[engine.Candle], _indicators: engine.Indicators, index: int, _settings: engine.Settings) -> engine.Signal | None:
+            if index == 79:
+                return signal_at(index, bars, stop=100.0, target=109.0)
+            if index == 81:
+                return signal_at(index, bars, stop=100.0, target=110.0)
+            return None
+
+        with patch.object(engine, "evaluate_signal", side_effect=fake_signal):
+            result = engine.run_backtest(bars, engine.Settings(round_trip_cost_fraction=0.0, smart_exit_enabled=False))
+        self.assertEqual(len(result.trades), 1)
+        self.assertEqual(result.trades[0].exit_reason, "TAKE_PROFIT")
+        self.assertEqual(len(result.signals), 1)
+        self.assertEqual(result.diagnostics["blocked_same_trend_reentry"], 1)
 
     def test_no_fixed_20_bar_exit_and_report_files(self) -> None:
         bars = candles(112)

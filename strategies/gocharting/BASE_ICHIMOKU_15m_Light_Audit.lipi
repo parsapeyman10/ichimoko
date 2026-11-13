@@ -38,6 +38,12 @@ float currentB15 = spanB15[DISPLACEMENT - 1]
 float top15 = math.max(currentA15, currentB15)
 float bottom15 = math.min(currentA15, currentB15)
 float atr15 = math.max(talib.atr(14), close * 0.0005)
+// Native 15m line geometry. The TK gap identifies a fresh squeeze expansion;
+// the Kumo gap is measured where the cloud is currently visible to price.
+float tkGapAtr15 = math.abs(tenkan15 - kijun15) / math.max(atr15, 0.00000001)
+float visibleKumoGapAtr15 = math.abs(currentA15 - currentB15) / math.max(atr15, 0.00000001)
+bool tkGapExpanding15 = tkGapAtr15 > tkGapAtr15[1] and tkGapAtr15[1] <= tkGapAtr15[2]
+bool tkGapContracting15 = tkGapAtr15 < tkGapAtr15[1] and tkGapAtr15[1] >= tkGapAtr15[2]
 float priorHigh15 = talib.highest(high[1], 20)
 float priorLow15 = talib.lowest(low[1], 20)
 float chikouPeak15 = talib.highest(close[1], KIJUN)
@@ -67,7 +73,10 @@ bool c1 = isLong ? bullishBias : bearishBias
 bool c2 = isLong ? tenkan15 >= kijun15 : tenkan15 <= kijun15
 bool c3 = isLong ? tenkan15 >= tenkan15[1] - atr15 * 0.05 : tenkan15 <= tenkan15[1] + atr15 * 0.05
 bool c4 = isLong ? (spanA15 > spanB15 and spanA15 >= spanA15[1]) : (spanA15 < spanB15 and spanA15 <= spanA15[1])
-bool c5 = math.abs(spanA15 - spanB15) / math.max(atr15, 0.00000001) >= 0.05
+// A new trend leg must show a fresh Tenkan/Kijun expansion while the
+// visible native-15m Kumo has real separation; a flat/squeezed structure is
+// not sufficient for an entry.
+bool c5 = tkGapExpanding15 and visibleKumoGapAtr15 >= 0.05
 bool c6 = isLong ? chikouBull15 : chikouBear15
 bool c7 = isLong ? close >= chikouPeak15 - atr15 * 0.15 : close <= chikouTrough15 + atr15 * 0.15
 bool c8 = math.abs(close - kijun15) / atr15 <= maxKijunExtensionAtr and not (nativeKijunFlat and nativeSsbFlat)
@@ -82,7 +91,10 @@ bool c15 = c13 and c8 and (isLong ? tenkan15 >= kijun15 : tenkan15 <= kijun15)
 bool triggerKatana = isLong ? (talib.crossover(tenkan15, kijun15) and close > top15 and close > open) : (talib.crossunder(tenkan15, kijun15) and close < bottom15 and close < open)
 bool triggerPullback = isLong ? (low <= math.max(tenkan15, kijun15) + atr15 * 0.25 and close > tenkan15 and close > top15 and close > open) : (high >= math.min(tenkan15, kijun15) - atr15 * 0.25 and close < tenkan15 and close < bottom15 and close < open)
 bool triggerBreakout = isLong ? (close > priorHigh15 and close > top15 + atr15 * 0.10 and close >= chikouPeak15 and close > open) : (close < priorLow15 and close < bottom15 - atr15 * 0.10 and close <= chikouTrough15 and close < open)
-bool triggerFired = triggerKatana or triggerPullback or triggerBreakout
+// This catches the fresh native-15m line expansion visible in the marked
+// chart examples without waiting for a separate higher-timeframe condition.
+bool triggerExpansion = isLong ? (c5 and close > top15 and close > tenkan15 and close > open) : (c5 and close < bottom15 and close < tenkan15 and close < open)
+bool triggerFired = triggerKatana or triggerPullback or triggerBreakout or triggerExpansion
 
 float entryAnchor = close
 float stopFloor = math.max(close * 0.0025, atr15 * 0.80)
@@ -105,7 +117,10 @@ float triggerScore = (c2 ? 0.6 : 0.0) + (c7 ? 0.6 : 0.0) + (c10 ? 0.8 : 0.0) + (
 float bookPct = (regimeScore + qualityScore + triggerScore) / 17.0 * 100.0
 float qualityPct = qualityScore / 5.2 * 100.0
 float triggerPct = triggerScore / 6.6 * 100.0
-bool hardVetoPassed = c1 and c3 and c4 and c6 and c17
+// For a fresh 15m expansion, current price/Kumo placement and TK direction
+// are non-negotiable. Future-cloud and Chikou remain scored confirmations,
+// not hard blocks that would delay the marked early trend entries.
+bool hardVetoPassed = c1 and c2 and c3 and c5 and c17
 bool bookFires = hardVetoPassed and qualityPct >= 60.0 and triggerPct >= 60.0 and bookPct >= 70.0
 int passedCount = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0) + (c6 ? 1 : 0) + (c7 ? 1 : 0) + (c8 ? 1 : 0) + (c9 ? 1 : 0) + (c10 ? 1 : 0) + (c11 ? 1 : 0) + (c12 ? 1 : 0) + (c13 ? 1 : 0) + (c14 ? 1 : 0) + (c15 ? 1 : 0) + (c16 ? 1 : 0) + (c17 ? 1 : 0)
 
@@ -115,17 +130,21 @@ bool debugSignal = debugVirtualTriggerTrades and rawTrigger
 bool entryDecision = strictSignal or debugSignal
 
 // Smart exit is confirmed only on a closed 15m candle. A long must turn
-// adverse in at least two of: Kijun, TK state, cloud state. Shorts mirror it.
+// adverse in at least two of: Kijun, TK state, cloud state. Line contraction
+// is additionally required unless TK itself has crossed against the trade;
+// this avoids treating an ordinary pullback as a finished trend.
 bool smartLongKijun = close < kijun15
 bool smartLongTk = tenkan15 < kijun15
 bool smartLongCloud = close < top15
+bool smartLongLineFade = tkGapContracting15 or smartLongTk
 int smartLongCount = (smartLongKijun ? 1 : 0) + (smartLongTk ? 1 : 0) + (smartLongCloud ? 1 : 0)
 bool smartShortKijun = close > kijun15
 bool smartShortTk = tenkan15 > kijun15
 bool smartShortCloud = close > bottom15
+bool smartShortLineFade = tkGapContracting15 or smartShortTk
 int smartShortCount = (smartShortKijun ? 1 : 0) + (smartShortTk ? 1 : 0) + (smartShortCloud ? 1 : 0)
-bool smartExitLong = enableSmartExit and closed15m and strategy.position_size > 0 and smartLongCount >= smartExitConfirmations
-bool smartExitShort = enableSmartExit and closed15m and strategy.position_size < 0 and smartShortCount >= smartExitConfirmations
+bool smartExitLong = enableSmartExit and closed15m and strategy.position_size > 0 and smartLongLineFade and smartLongCount >= smartExitConfirmations
+bool smartExitShort = enableSmartExit and closed15m and strategy.position_size < 0 and smartShortLineFade and smartShortCount >= smartExitConfirmations
 
 // One lifecycle lock covers both the next-open pending order and the open
 // position. A same-direction re-entry lock remains after an exit, so one
@@ -279,7 +298,7 @@ if barstate.islast {
     table.cell(dashboard, 0, 2, "Bias")
     table.cell(dashboard, 1, 2, dataReady ? (isLong ? "LONG" : "SHORT") : "-")
     table.cell(dashboard, 0, 3, "Trigger")
-    table.cell(dashboard, 1, 3, triggerKatana ? "KATANA" : triggerPullback ? "PULLBACK" : triggerBreakout ? "BREAKOUT" : "-", textcolor=triggerFired ? color.aqua : color.gray)
+    table.cell(dashboard, 1, 3, triggerKatana ? "KATANA" : triggerPullback ? "PULLBACK" : triggerBreakout ? "BREAKOUT" : triggerExpansion ? "EXPANSION" : "-", textcolor=triggerFired ? color.aqua : color.gray)
     table.cell(dashboard, 0, 4, "Conditions")
     table.cell(dashboard, 1, 4, str.tostring(passedCount) + " / 17")
     table.cell(dashboard, 0, 5, "Book gate")

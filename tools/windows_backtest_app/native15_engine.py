@@ -385,8 +385,13 @@ def evaluate_signal(candles: Sequence[Candle], indicators: Indicators, index: in
         return None
     tenkan, kijun, current_a, current_b, future_a, future_b, atr = values
     previous_tenkan = indicators.tenkan[index - 1]
+    previous_kijun = indicators.kijun[index - 1]
+    previous_atr = indicators.atr[index - 1]
+    older_tenkan = indicators.tenkan[index - 2]
+    older_kijun = indicators.kijun[index - 2]
+    older_atr = indicators.atr[index - 2]
     previous_future_a = indicators.span_a[index - 1]
-    if previous_tenkan is None or previous_future_a is None:
+    if any(item is None for item in (previous_tenkan, previous_kijun, previous_atr, older_tenkan, older_kijun, older_atr, previous_future_a)):
         return None
     candle = candles[index]
     top, bottom = max(current_a, current_b), min(current_a, current_b)
@@ -416,13 +421,23 @@ def evaluate_signal(candles: Sequence[Candle], indicators: Indicators, index: in
     chikou_bull = candle.close > chikou_high
     chikou_bear = candle.close < chikou_low
     prior_tenkan = _ready_value(previous_tenkan)
-    prior_kijun = _ready_value(indicators.kijun[index - 1])
+    prior_kijun = _ready_value(previous_kijun)
+    prior_atr = _ready_value(previous_atr)
+    older_tenkan_value = _ready_value(older_tenkan)
+    older_kijun_value = _ready_value(older_kijun)
+    older_atr_value = _ready_value(older_atr)
+    tk_gap = abs(tenkan - kijun) / max(atr, EPS)
+    previous_tk_gap = abs(prior_tenkan - prior_kijun) / max(prior_atr, EPS)
+    older_tk_gap = abs(older_tenkan_value - older_kijun_value) / max(older_atr_value, EPS)
+    tk_gap_expanding = tk_gap > previous_tk_gap and previous_tk_gap <= older_tk_gap
 
     c1 = bullish if is_long else bearish
     c2 = tenkan >= kijun if is_long else tenkan <= kijun
     c3 = tenkan >= prior_tenkan - atr * 0.05 if is_long else tenkan <= prior_tenkan + atr * 0.05
     c4 = (future_a > future_b and future_a >= _ready_value(previous_future_a)) if is_long else (future_a < future_b and future_a <= _ready_value(previous_future_a))
-    c5 = abs(future_a - future_b) / max(atr, EPS) >= 0.05
+    # Fresh TK expansion is the primary line-geometry gate. The Kumo width is
+    # measured at the price's current chart location, not 26 bars ahead.
+    c5 = tk_gap_expanding and abs(current_a - current_b) / max(atr, EPS) >= 0.05
     c6 = chikou_bull if is_long else chikou_bear
     c7 = candle.close >= chikou_peak - atr * 0.15 if is_long else candle.close <= chikou_trough + atr * 0.15
     c8 = abs(candle.close - kijun) / max(atr, EPS) <= settings.max_kijun_extension_atr and not (kijun_flat and ssb_flat)
@@ -439,7 +454,8 @@ def evaluate_signal(candles: Sequence[Candle], indicators: Indicators, index: in
     trigger_katana = (cross_up and candle.close > top and candle.close > candle.open) if is_long else (cross_down and candle.close < bottom and candle.close < candle.open)
     trigger_pullback = (candle.low <= max(tenkan, kijun) + atr * 0.25 and candle.close > tenkan and candle.close > top and candle.close > candle.open) if is_long else (candle.high >= min(tenkan, kijun) - atr * 0.25 and candle.close < tenkan and candle.close < bottom and candle.close < candle.open)
     trigger_breakout = (candle.close > prior_high and candle.close > top + atr * 0.10 and candle.close >= chikou_peak and candle.close > candle.open) if is_long else (candle.close < prior_low and candle.close < bottom - atr * 0.10 and candle.close <= chikou_trough and candle.close < candle.open)
-    trigger = "KATANA" if trigger_katana else "PULLBACK" if trigger_pullback else "BREAKOUT" if trigger_breakout else ""
+    trigger_expansion = (c5 and candle.close > top and candle.close > tenkan and candle.close > candle.open) if is_long else (c5 and candle.close < bottom and candle.close < tenkan and candle.close < candle.open)
+    trigger = "KATANA" if trigger_katana else "PULLBACK" if trigger_pullback else "BREAKOUT" if trigger_breakout else "EXPANSION" if trigger_expansion else ""
 
     stop_floor = max(candle.close * 0.0025, atr * 0.80)
     stop_ceiling = max(stop_floor, atr * 2.10)
@@ -458,7 +474,10 @@ def evaluate_signal(candles: Sequence[Candle], indicators: Indicators, index: in
     quality = (0.6 if c5 else 0.0) + (1.0 if c8 else 0.0) + (1.0 if c9 else 0.0) + (1.0 if c13 else 0.0) + (0.6 if c14 else 0.0) + (1.0 if c15 else 0.0)
     trigger_score = (0.6 if c2 else 0.0) + (0.6 if c7 else 0.0) + (0.8 if c10 else 0.0) + (1.2 if c11 else 0.0) + (1.0 if c12 else 0.0) + (1.2 if c16 else 0.0) + (1.2 if c17 else 0.0)
     gate = (regime + quality + trigger_score) / 17.0 * 100.0
-    hard_veto = c1 and c3 and c4 and c6 and c17
+    # Price/Kumo placement, TK direction and a fresh TK expansion are the
+    # non-negotiable native-15m geometry. Future-cloud and Chikou contribute
+    # to quality, rather than delaying early expansion entries as hard vetoes.
+    hard_veto = c1 and c2 and c3 and c5 and c17
     book_fires = hard_veto and quality / 5.2 * 100.0 >= 60.0 and trigger_score / 6.6 * 100.0 >= 60.0 and gate >= 70.0
     if not trigger or not book_fires:
         return None
@@ -475,18 +494,32 @@ def evaluate_signal(candles: Sequence[Candle], indicators: Indicators, index: in
 
 
 def smart_exit(candles: Sequence[Candle], indicators: Indicators, index: int, trade: OpenTrade, settings: Settings) -> bool:
-    """Return true only after 2/3 (or user-selected 3/3) confirmed adverse signs."""
+    """Require adverse native-15m structure plus TK contraction/cross confirmation."""
     values = _cloud_state(candles, indicators, index)
     if values is None or not settings.smart_exit_enabled:
         return False
-    tenkan, kijun, current_a, current_b, _future_a, _future_b, _atr = values
+    tenkan, kijun, current_a, current_b, _future_a, _future_b, atr = values
+    previous_tenkan = indicators.tenkan[index - 1]
+    previous_kijun = indicators.kijun[index - 1]
+    previous_atr = indicators.atr[index - 1]
+    older_tenkan = indicators.tenkan[index - 2]
+    older_kijun = indicators.kijun[index - 2]
+    older_atr = indicators.atr[index - 2]
+    if any(item is None for item in (previous_tenkan, previous_kijun, previous_atr, older_tenkan, older_kijun, older_atr)):
+        return False
+    tk_gap = abs(tenkan - kijun) / max(atr, EPS)
+    previous_tk_gap = abs(_ready_value(previous_tenkan) - _ready_value(previous_kijun)) / max(_ready_value(previous_atr), EPS)
+    older_tk_gap = abs(_ready_value(older_tenkan) - _ready_value(older_kijun)) / max(_ready_value(older_atr), EPS)
+    tk_gap_contracting = tk_gap < previous_tk_gap and previous_tk_gap >= older_tk_gap
     top, bottom = max(current_a, current_b), min(current_a, current_b)
     close = candles[index].close
     if trade.side == "LONG":
-        confirmations = int(close < kijun) + int(tenkan < kijun) + int(close < top)
+        tk_crossed_against = tenkan < kijun
+        confirmations = int(close < kijun) + int(tk_crossed_against) + int(close < top)
     else:
-        confirmations = int(close > kijun) + int(tenkan > kijun) + int(close > bottom)
-    return confirmations >= settings.smart_exit_confirmations
+        tk_crossed_against = tenkan > kijun
+        confirmations = int(close > kijun) + int(tk_crossed_against) + int(close > bottom)
+    return (tk_gap_contracting or tk_crossed_against) and confirmations >= settings.smart_exit_confirmations
 
 
 def _close(open_trade: OpenTrade, price: float, exit_time: int, reason: str, equity: float, settings: Settings, number: int) -> ClosedTrade:
@@ -567,6 +600,10 @@ def run_backtest(candles: Sequence[Candle], settings: Settings, audit: Optional[
     pending_entry: Optional[Signal] = None
     pending_smart_exit = False
     open_trade: Optional[OpenTrade] = None
+    # One entry per direction per native-15m Ichimoku leg. A completed trade
+    # does not re-arm that same direction until TK/Kumo structure resets.
+    long_trend_entry_armed = True
+    short_trend_entry_armed = True
     diagnostics: Counter[str] = Counter()
 
     for index, candle in enumerate(bars):
@@ -626,11 +663,30 @@ def run_backtest(candles: Sequence[Candle], settings: Settings, audit: Optional[
             pending_smart_exit = True
             diagnostics["smart_exit_signals"] += 1
 
+        # Re-arm a direction only when the same native-15m Ichimoku structure
+        # has reset. This mirrors the Lipi strategy's same-trend re-entry lock.
+        line_values = _cloud_state(bars, indicator, index)
+        if line_values is not None:
+            tenkan, kijun, current_a, current_b, _future_a, _future_b, _atr = line_values
+            top, bottom = max(current_a, current_b), min(current_a, current_b)
+            if tenkan < kijun or candle.close <= bottom:
+                long_trend_entry_armed = True
+            if tenkan > kijun or candle.close >= top:
+                short_trend_entry_armed = True
+
         if open_trade is None and pending_entry is None and not pending_smart_exit and not closed_this_bar:
             signal = evaluate_signal(bars, indicator, index, config)
             if signal is not None:
-                signals.append(signal)
-                pending_entry = signal
+                direction_armed = long_trend_entry_armed if signal.side == "LONG" else short_trend_entry_armed
+                if direction_armed:
+                    signals.append(signal)
+                    pending_entry = signal
+                    if signal.side == "LONG":
+                        long_trend_entry_armed = False
+                    else:
+                        short_trend_entry_armed = False
+                else:
+                    diagnostics["blocked_same_trend_reentry"] += 1
 
     result_audit = audit if audit is not None else CsvAudit(accepted_rows=len(bars), first_time=bars[0].time, last_time=bars[-1].time)
     summary = _summary(trades, config.start_equity, equity_curve)
