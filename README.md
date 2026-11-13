@@ -19,4 +19,4 @@
 [`strategies/gocharting/README_BASE_ICHIMOKU_15M_LIGHT_AUDIT_FA.md`](strategies/gocharting/README_BASE_ICHIMOKU_15M_LIGHT_AUDIT_FA.md)
 آمده است. فایل عملیاتی سبک فقط برای چارت **15m**،
 [`BASE_ICHIMOKU_15m_Light_Audit.lipi`](strategies/gocharting/BASE_ICHIMOKU_15m_Light_Audit.lipi)،
-تمام محاسبات را فقط از کندل‌های native 15m انجام می‌دهد و هیچ داده یا محاسبهٔ 30m/1H ندارد. برای هر معاملهٔ شبیه‌سازی‌شده، Entry، SL و TP واقعیِ bracket روی چارت باقی می‌ماند. این strategy فقط بک‌تست/شبیه‌سازی است و سفارش واقعی ارسال نمی‌کند.
+تمام محاسبات را فقط از کندل‌های native 15m انجام می‌دهد و هیچ داده یا محاسبهٔ 30m/1H ندارد. هیچ خطی روی چارت رسم نمی‌کند و Entry/SL/TP واقعیِ bracket را فقط در label معامله نشان می‌دهد؛ R:R نیز پیش از quantity توسط کاربر تعیین می‌شود. این strategy فقط بک‌تست/شبیه‌سازی است و سفارش واقعی ارسال نمی‌کند.

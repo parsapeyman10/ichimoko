@@ -37,28 +37,26 @@
 
 مثلث `LITE L` یا `LITE S` فقط روی **fill واقعی و پذیرفته‌شده** رسم می‌شود، نه روی signal submit‌شده یا signal تکراری زمان lock.
 
-## نمایش واقعی Entry / SL / TP
+## Entry / SL / TP بدون هیچ خط روی چارت
 
-برای هر معاملهٔ واقعی سه drawing روی چارت ایجاد می‌شود:
+هیچ `plot()`، Tenkan/Kijun، خط Entry، خط SL یا خط TP در این نسخه رسم نمی‌شود. برای هر fill واقعی فقط یک label کوچک کنار کندل قرار می‌گیرد که این اطلاعات را نگه می‌دارد:
 
-| رنگ/شکل | معنا |
-|---|---|
-| خط نقطه‌چین نقره‌ای | قیمت fill واقعی `strategy.position_avg_price` |
-| خط قرمز | `stop` دقیق ارسال‌شده به `strategy.exit` |
-| خط سبز | `limit` دقیق ارسال‌شده به `strategy.exit` |
+- قیمت fill واقعی `strategy.position_avg_price`
+- `stop` دقیق ارسال‌شده به `strategy.exit`
+- `limit` دقیق ارسال‌شده به `strategy.exit`
+- R:R انتخاب‌شده توسط کاربر
 
-SL و TP روی کندل signal محاسبه و در `pendingStopPrice` و `pendingTargetPrice` freeze می‌شوند. پس از آن‌که GoCharting fill را گزارش کرد، دقیقاً همان دو مقدار به `strategy.exit` فرستاده و تا خروج معامله بدون باز‌محاسبه حفظ می‌شوند. بنابراین در صورت gap، خط Entry قیمت fill شبیه‌ساز را نشان می‌دهد و خطوط قرمز/سبز همچنان stop/limit واقعی همان bracket هستند.
+SL و TP روی کندل signal محاسبه و در `pendingStopPrice` و `pendingTargetPrice` freeze می‌شوند. پس از گزارش fill توسط GoCharting، دقیقاً همان دو مقدار به `strategy.exit` فرستاده و تا خروج معامله بدون باز‌محاسبه حفظ می‌شوند. در صورت gap، label قیمت fill شبیه‌ساز را نشان می‌دهد و SL/TP همچنان stop/limit واقعی همان bracket هستند.
 
-سه خط از bar ورود تا bar خروج امتداد دارند و بعد از خروج باقی می‌مانند. برای کنترل سقف drawingهای GoCharting، 150 bracket کامل آخر (450 خط و 150 label) نگه‌داری می‌شود؛ ورود bracket جدیدتر، قدیمی‌ترین bracket را حذف می‌کند.
+برای کنترل سقف objectهای GoCharting، 150 label معاملهٔ آخر نگه‌داری می‌شود؛ با ایجاد label جدیدتر، قدیمی‌ترین مورد حذف می‌شود.
+
+## R:R پیش از اندازهٔ معامله
+
+ورودی `Target R:R — set before backtest quantity` پیش از ورودی quantity قرار دارد. ابتدا R:R دلخواه را در بازهٔ `1.50` تا `3.00` انتخاب کنید و سپس `Backtest quantity (set after R:R)` را برای اندازهٔ معامله وارد کنید. مقدار پیش‌فرض `2.25` است و همان مقدار هم target bracket و هم label هر معامله را تعیین می‌کند.
 
 ## چارت خلوت و dashboard
 
-فقط دو راهنمای ایچیموکو native-15m نمایش داده می‌شوند:
-
-- Tenkan 15m (آبی)
-- Kijun 15m (نارنجی)
-
-خط 30m، خط 1H، جدول شمارش HTF و محاسبهٔ HTF وجود ندارد. نشانگرهای diagnostic خام (`RAW` و `LOCK`) نیز پیش‌فرض خاموش هستند؛ فقط برای عیب‌یابی گزینهٔ `DEBUG: show raw triggers rejected by gate` را فعال کنید.
+روی نمودار فقط کندل‌ها، marker fill واقعی (`LITE L/S`) و label قیمت معامله دیده می‌شوند؛ **هیچ خطی رسم نمی‌شود**. خط 30m، خط 1H، جدول شمارش HTF و محاسبهٔ HTF نیز وجود ندارد. نشانگرهای diagnostic خام (`RAW` و `LOCK`) پیش‌فرض خاموش هستند؛ فقط برای عیب‌یابی گزینهٔ `DEBUG: show raw triggers rejected by gate` را فعال کنید.
 
 | ردیف dashboard | معنا |
 |---|---|
@@ -72,8 +70,8 @@ SL و TP روی کندل signal محاسبه و در `pendingStopPrice` و `pend
 
 ## منطق و تنظیمات Lite
 
-نسخهٔ native-15m از Ichimoku `9/26/52/26`، ATR14، کیفیت candle/volume، Chikou، Kumo، hard-vetoهای `1/3/4/6/17` و triggerهای `Katana`، `Pullback` و `Breakout` استفاده می‌کند. هدف پیش‌فرض `2.25R` است و corridor R:R بین `1.5R` تا `3R` کنترل می‌شود.
+نسخهٔ native-15m از Ichimoku `9/26/52/26`، ATR14، کیفیت candle/volume، Chikou، Kumo، hard-vetoهای `1/3/4/6/17` و triggerهای `Katana`، `Pullback` و `Breakout` استفاده می‌کند. R:R توسط کاربر، پیش از تعیین quantity، در بازهٔ `1.5R` تا `3R` انتخاب می‌شود؛ پیش‌فرض `2.25R` است.
 
 `Round-trip cost fraction` به‌طور پیش‌فرض `0.0021` است و `commission_value=0.105` صرفاً تقریب هزینه در گزارش بک‌تست است. quantity، هزینه، ATR-extension، SL buffer و time stop از تنظیمات Lipi قابل تغییرند. تغییر آن‌ها مقایسه با baseline مرجع را تغییر می‌دهد.
 
-> هشدار: این ابزار توصیهٔ سرمایه‌گذاری نیست. بک‌تست، markerها و خطوط bracket صرفاً برای visual audit هستند، نه اتصال یا مجوز اجرای معاملهٔ واقعی.
+> هشدار: این ابزار توصیهٔ سرمایه‌گذاری نیست. بک‌تست و marker/labelهای آن صرفاً برای visual audit هستند، نه اتصال یا مجوز اجرای معاملهٔ واقعی.
