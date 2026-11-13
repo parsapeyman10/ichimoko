@@ -1365,7 +1365,10 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
 
         val allTrades = trades.value
         val equity = calc.accountBalance.takeIf { it.isFinite() && it > 0.0 } ?: cfg.accountBalance
-        val peakSeed = cfg.initialCapital.coerceAtLeast(equity)
+        // قله فقط وقتی معنا دارد که معاملهٔ بسته‌شده‌ای وجود داشته باشد؛ وگرنه «افت سرمایه»
+        // صرفاً فاصلهٔ موجودی از سرمایهٔ اولیه است و نباید ورود خودکار را قفل کند (R23).
+        val hasClosed = allTrades.any { !it.isOpen }
+        val peakSeed = if (hasClosed) cfg.initialCapital.coerceAtLeast(equity) else equity
         val peak = maxOf(equity, TradingHabitsPolicy.peakEquityUsd(allTrades, peakSeed))
         val streak = TradingHabitsPolicy.lossStreak(allTrades)
         val requestedRiskPct = if (equity > 0.0) calc.riskBudgetUsd / equity * 100.0 else cfg.riskPercent
@@ -1427,6 +1430,31 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         } else {
             "🎩 لایهٔ عادت‌های معاملاتی خاموش شد (ورود خودکار بدون داوری رفتاری)"
         }
+    }
+
+    /**
+     * ذخیرهٔ اعداد لایهٔ رفتاری از کارت تنظیمات.
+     *
+     * سقف‌ها با بازهٔ ایمن محدود می‌شوند تا یک عدد اشتباه (مثلاً ۵۰٪ ریسک) کل حساب را به باد
+     * ندهد؛ خودِ کتاب هم ۱٪ و ۳٪ را سقف می‌داند و بالاتر را «مشکل حجم حساب» می‌نامد.
+     */
+    fun saveHabitsLimits(
+        maxRiskPerTradePct: Double,
+        maxOpenRiskPct: Double,
+        minRiskReward: Double,
+        stopAtrMultiple: Double,
+        haltDrawdownPct: Double,
+    ) {
+        container.settingsStore.update {
+            it.copy(
+                habitsMaxRiskPerTradePct = maxRiskPerTradePct.coerceIn(0.05, 5.0),
+                habitsMaxOpenRiskPct = maxOpenRiskPct.coerceIn(0.25, 20.0),
+                habitsMinRiskReward = minRiskReward.coerceIn(1.0, 5.0),
+                habitsStopAtrMultiple = stopAtrMultiple.coerceIn(0.0, 5.0),
+                habitsHaltDrawdownPct = haltDrawdownPct.coerceIn(2.0, 60.0),
+            )
+        }
+        _toast.value = "🎩 اعداد لایهٔ عادت‌های معاملاتی ذخیره شد"
     }
 
     /** بازگرداندن اعداد لایه به همان اعداد صریح کتاب (۱٪ · ۳٪ · ۲R · ۱×ATR · ۱۵٪). */

@@ -422,6 +422,22 @@ fun main(args: Array<String>) {
         )
     }
 
+    // ── ۳-ب) به تفکیک مدل: کدام مدل با قواعد کتاب سالم‌تر است؟ ────────────────
+    println("\n── به تفکیک ۵ مدل (لایهٔ عادت‌ها + قفل سود · ریسک ۱٪)")
+    println("${"مدل".padEnd(44)}${"معامله".padStart(8)}${"برد".padStart(7)}${"انتظار".padStart(9)}${"PF".padStart(7)}${"خالص".padStart(11)}${"افت".padStart(8)}")
+    println("-".repeat(104))
+    models.forEach { model ->
+        val list = allTrades.filter { it.strategyId == model }
+        if (list.isEmpty()) { println(model.take(42).padEnd(44) + "— بدون معامله"); return@forEach }
+        val rep = replay(list, book, 1.0, true)
+        val title = BitcoinStrategyModel.fromId(model).titleFa.take(42)
+        println(
+            title.padEnd(44) + rep.taken.toString().padStart(8) + pct(rep.winRatePct).padStart(7) +
+                (f2(rep.expectancyR) + "R").padStart(9) + f2(rep.profitFactor).padStart(7) +
+                (f2(rep.netPct) + "%").padStart(11) + pct(rep.maxDrawdownPct).padStart(8),
+        )
+    }
+
     // ── ۴) مونت‌کارلو ────────────────────────────────────────────────────────
     println("\n── مونت‌کارلو (۲۰۰۰ بازآرایی ترتیب معامله‌ها)")
     val mcNaive = monteCarlo(allTrades, null, 1.0, 2000, 7L)

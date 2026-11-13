@@ -495,6 +495,9 @@ fun SettingsScreen(
                     trades = trades,
                     onToggleEnabled = { viewModel.setHabitsGuardEnabled(it) },
                     onResetToBookDefaults = { viewModel.resetHabitsToBookDefaults() },
+                    onSaveLimits = { risk, open, rr, atr, halt ->
+                        viewModel.saveHabitsLimits(risk, open, rr, atr, halt)
+                    },
                 )
 
                 // داوری خودکار پلن حد ضرر / حد سود / اهرم برای همهٔ نمادها

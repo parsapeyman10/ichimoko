@@ -1013,7 +1013,15 @@ internal fun TradingHabitsCard(
     trades: List<com.aurum.edge.core.PaperTrade>,
     onToggleEnabled: (Boolean) -> Unit,
     onResetToBookDefaults: () -> Unit,
+    onSaveLimits: (Double, Double, Double, Double, Double) -> Unit,
 ) {
+    var editing by rememberSaveable { mutableStateOf(false) }
+    fun fmt(v: Double): String = String.format(Locale.US, "%.2f", v).trimEnd('0').trimEnd('.')
+    var riskText by rememberSaveable(settings.habitsMaxRiskPerTradePct) { mutableStateOf(fmt(settings.habitsMaxRiskPerTradePct)) }
+    var openText by rememberSaveable(settings.habitsMaxOpenRiskPct) { mutableStateOf(fmt(settings.habitsMaxOpenRiskPct)) }
+    var rrText by rememberSaveable(settings.habitsMinRiskReward) { mutableStateOf(fmt(settings.habitsMinRiskReward)) }
+    var atrText by rememberSaveable(settings.habitsStopAtrMultiple) { mutableStateOf(fmt(settings.habitsStopAtrMultiple)) }
+    var haltText by rememberSaveable(settings.habitsHaltDrawdownPct) { mutableStateOf(fmt(settings.habitsHaltDrawdownPct)) }
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
     val equity = settings.accountBalance
     val peak = remember(trades, equity, settings.initialCapital) {
@@ -1177,12 +1185,97 @@ internal fun TradingHabitsCard(
                 color = AurumColors.Cyan,
                 modifier = Modifier.clickable { onResetToBookDefaults() },
             )
-            Text(
-                text = "کتاب: «سیستم را بر اساس دردی که تحمل می‌کنی بساز» (R23) — اعداد پیش‌فرض همان اعداد صریح کتاب‌اند.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.weight(1f),
+            Pill(
+                text = if (editing) "بستن ویرایش" else "✎ ویرایش اعداد",
+                color = AurumColors.Gold,
+                modifier = Modifier.clickable { editing = !editing },
             )
+        }
+
+        if (editing) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.SurfaceAlt.copy(alpha = 0.6f))
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = riskText,
+                        onValueChange = { riskText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("ریسک هر معامله ٪") },
+                        supportingText = { Text("کتاب R32: ۱٪ سقف") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = openText,
+                        onValueChange = { openText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("ریسک باز کل ٪") },
+                        supportingText = { Text("کتاب R34: ۳٪ سقف") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = rrText,
+                        onValueChange = { rrText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("کف R:R") },
+                        supportingText = { Text("کتاب R03: ۲") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = atrText,
+                        onValueChange = { atrText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("حد ضرر ≥ ... ×ATR") },
+                        supportingText = { Text("کتاب R39: ۱") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                OutlinedTextField(
+                    value = haltText,
+                    onValueChange = { haltText = it.filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("قفل ورود پس از افت از قله ٪") },
+                    supportingText = { Text("کتاب R23: آستانهٔ دردی که تحمل می‌کنی (پیش‌فرض ۱۵٪)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = {
+                        onSaveLimits(
+                            riskText.toDoubleOrNull() ?: settings.habitsMaxRiskPerTradePct,
+                            openText.toDoubleOrNull() ?: settings.habitsMaxOpenRiskPct,
+                            rrText.toDoubleOrNull() ?: settings.habitsMinRiskReward,
+                            atrText.toDoubleOrNull() ?: settings.habitsStopAtrMultiple,
+                            haltText.toDoubleOrNull() ?: settings.habitsHaltDrawdownPct,
+                        )
+                        editing = false
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Gold,
+                        contentColor = Color(0xFF14100A),
+                    ),
+                ) {
+                    Text("ذخیرهٔ اعداد لایه", fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    text = "کتاب: «سیستم را بر اساس دردی که تحمل می‌کنی بساز» (R23). اعداد پیش‌فرض همان اعداد صریح کتاب‌اند.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                )
+            }
         }
     }
 }
