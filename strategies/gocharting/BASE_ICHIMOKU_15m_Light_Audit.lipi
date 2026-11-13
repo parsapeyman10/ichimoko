@@ -3,9 +3,9 @@
 //
 // This native-only Lite version deliberately calculates no 30m, 1H or other
 // higher-timeframe candles. Every decision comes from a confirmed 15m candle.
-// No indicator, entry, stop or target line is drawn on the chart.
+// Only the real SL and TP levels are drawn; no indicator or entry line is shown.
 // Orders are simulated by GoCharting only; nothing is routed to an exchange.
-strategy("BASE Ichimoku native 15m audit", overlay=true, initial_capital=1000, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission_percent, commission_value=0.105, pyramiding=0, process_orders_on_close=false, max_labels_count=500)
+strategy("BASE Ichimoku native 15m audit", overlay=true, initial_capital=1000, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission_percent, commission_value=0.105, pyramiding=0, process_orders_on_close=false, max_lines_count=500)
 
 int TENKAN = input.int(9, "Tenkan", minval=2)
 int KIJUN = input.int(26, "Kijun", minval=2)
@@ -115,15 +115,19 @@ bool entryDecision = strictSignal or debugSignal
 
 // One lifecycle lock covers both the next-open pending order and the open
 // position. It blocks repeated Long/Short orders until that trade has ended.
-int MAX_RETAINED_TRADE_LABELS = 150
+int MAX_RETAINED_BRACKETS = 200
 static int tradeLockState = 0 // 0=idle, 1=submitted/pending, 2=open
 static int lockedSignalBar = na
 static int pendingSide = 0
 static float pendingStopPrice = na
 static float pendingTargetPrice = na
 static int observedClosedTrades = 0
-static label latestTradeLabel = na
-static array<label> tradeLabelHistory = array.new<label>(0)
+static line activeStopLine = na
+static line activeTargetLine = na
+static float activeStopPrice = na
+static float activeTargetPrice = na
+static bool bracketIsLive = false
+static array<line> bracketHistory = array.new<line>(0)
 
 // A closed-trade count also catches a fill and exit within one historical bar.
 bool tradeClosedThisBar = strategy.closedtrades > observedClosedTrades
@@ -162,44 +166,49 @@ if strategy.position_size < 0 and tradeLockState != 0 {
     strategy.exit("Lite Short exit", from_entry="Lite Short", stop=pendingStopPrice, limit=pendingTargetPrice)
 }
 
-// No horizontal drawings are created. A compact price label preserves the
-// actual entry and exact submitted bracket prices without drawing any line.
+// The chart shows only the exact real SL (red) and TP (green). There is no
+// entry line, formula label or numeric annotation on the chart.
 bool actualLongEntry = justOpened and strategy.position_size > 0
 bool actualShortEntry = justOpened and strategy.position_size < 0
 bool actualLongFillAndExit = filledAndClosedThisBar and pendingSide == 1
 bool actualShortFillAndExit = filledAndClosedThisBar and pendingSide == -1
 if justOpened {
     tradeLockState := 2
-    float filledEntryPrice = strategy.position_avg_price
-    string entryText = (strategy.position_size > 0 ? "LONG" : "SHORT") + "\nEntry " + str.tostring(filledEntryPrice, "#.##") + "\nSL " + str.tostring(pendingStopPrice, "#.##") + "\nTP " + str.tostring(pendingTargetPrice, "#.##") + "\nR:R " + str.tostring(targetRr, "#.##")
-    if strategy.position_size > 0 {
-        latestTradeLabel := label.new(bar_index, low, entryText, yloc=yloc.belowbar, style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small)
-    } else {
-        latestTradeLabel := label.new(bar_index, high, entryText, yloc=yloc.abovebar, style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
-    }
-    array.push(tradeLabelHistory, latestTradeLabel)
-    if array.length(tradeLabelHistory) > MAX_RETAINED_TRADE_LABELS {
-        label.delete(array.shift(tradeLabelHistory))
-    }
+    activeStopPrice := pendingStopPrice
+    activeTargetPrice := pendingTargetPrice
+    activeStopLine := line.new(lockedSignalBar + 1, activeStopPrice, bar_index, activeStopPrice, extend=extend.none, color=color.red, style=line.style_solid, width=2)
+    activeTargetLine := line.new(lockedSignalBar + 1, activeTargetPrice, bar_index, activeTargetPrice, extend=extend.none, color=color.lime, style=line.style_solid, width=2)
+    bracketIsLive := true
 }
 
-// Preserve the price details even if a trade fills and exits within one
-// historical candle. This is still label-only; it creates no chart line.
+// Keep SL/TP visible even if a trade fills and exits within one historical bar.
 if filledAndClosedThisBar {
-    float completedEntryPrice = strategy.closedtrades_entry_price(strategy.closedtrades - 1)
-    string completedText = (pendingSide == 1 ? "LONG" : "SHORT") + "\nEntry " + str.tostring(completedEntryPrice, "#.##") + "\nSL " + str.tostring(pendingStopPrice, "#.##") + "\nTP " + str.tostring(pendingTargetPrice, "#.##") + "\nR:R " + str.tostring(targetRr, "#.##")
-    if pendingSide == 1 {
-        latestTradeLabel := label.new(lockedSignalBar + 1, low, completedText, yloc=yloc.belowbar, style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small)
-    } else {
-        latestTradeLabel := label.new(lockedSignalBar + 1, high, completedText, yloc=yloc.abovebar, style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
-    }
-    array.push(tradeLabelHistory, latestTradeLabel)
-    if array.length(tradeLabelHistory) > MAX_RETAINED_TRADE_LABELS {
-        label.delete(array.shift(tradeLabelHistory))
-    }
+    activeStopPrice := pendingStopPrice
+    activeTargetPrice := pendingTargetPrice
+    activeStopLine := line.new(lockedSignalBar + 1, activeStopPrice, bar_index, activeStopPrice, extend=extend.none, color=color.red, style=line.style_solid, width=2)
+    activeTargetLine := line.new(lockedSignalBar + 1, activeTargetPrice, bar_index, activeTargetPrice, extend=extend.none, color=color.lime, style=line.style_solid, width=2)
+    bracketIsLive := true
+}
+
+if strategy.position_size != 0 and bracketIsLive and not justOpened {
+    line.set_xy2(activeStopLine, bar_index, activeStopPrice)
+    line.set_xy2(activeTargetLine, bar_index, activeTargetPrice)
 }
 
 if tradeClosedThisBar {
+    if bracketIsLive {
+        line.set_xy2(activeStopLine, bar_index, activeStopPrice)
+        line.set_xy2(activeTargetLine, bar_index, activeTargetPrice)
+        array.push(bracketHistory, activeStopLine)
+        array.push(bracketHistory, activeTargetLine)
+        if array.length(bracketHistory) > MAX_RETAINED_BRACKETS * 2 {
+            line.delete(array.shift(bracketHistory))
+            line.delete(array.shift(bracketHistory))
+        }
+    }
+    bracketIsLive := false
+    activeStopPrice := na
+    activeTargetPrice := na
     tradeLockState := 0
     lockedSignalBar := na
     pendingSide := 0
@@ -221,7 +230,7 @@ if strategy.position_size < 0 and strategy.opentrades > 0 and bar_index - strate
     strategy.close("Lite Short", comment="time stop")
 }
 
-// No plot() call is used: the chart remains free of indicator and bracket lines.
+// No indicator plot() call is used; only the real red SL and green TP lines are drawn.
 plotshape(actualLongEntry, title="Accepted Lite long entry", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.normal, text="LITE L")
 plotshape(actualShortEntry, title="Accepted Lite short entry", location=location.abovebar, shape=shape.triangledown, color=color.red, size=size.normal, text="LITE S")
 plotshape(actualLongFillAndExit, title="Accepted Lite long fill and exit", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.normal, text="LITE L")
