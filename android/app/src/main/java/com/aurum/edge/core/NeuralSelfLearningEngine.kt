@@ -265,7 +265,7 @@ data class NeuralFeatureRegressionSlope(
 @Serializable
 data class NeuralParameterRegressionReport(
     val strategyId: String = "ALL",
-    val strategyTitleFa: String = "تمام ۱۶ استراتژی (رگرسیون جامع)",
+    val strategyTitleFa: String = "تمام مدل‌های فعال (رگرسیون جامع)",
     val regressionMethodFa: String = "Ridge L2 + Huber Robust IRLS + Walk-Forward CV + Empirical Bayes (2026 SOTA)",
     val ridgeLambda: Double = 0.25,
     val huberDelta: Double = 1.35,
@@ -528,6 +528,27 @@ data class NeuralMarketInference(
     val newsImpactSummaryFa: String = "",
 )
 
+/**
+ * گزارش پاک‌سازی داده‌های هوش مصنوعی استراتژی‌های حذف‌شده.
+ * هیچ عددی در آن ساختگی نیست؛ همه از نقشه‌های واقعی مغز شمرده می‌شوند.
+ */
+data class OrphanStrategyDataPurgeReport(
+    val knownStrategyIds: Int,
+    val removedProfiles: Int,
+    val removedCategoryBestStrategy: Int,
+    val removedReplaySamples: Int,
+    val remainingProfiles: Int,
+) {
+    val summaryFa: String
+        get() = if (removedProfiles == 0 && removedCategoryBestStrategy == 0 && removedReplaySamples == 0) {
+            "هیچ دادهٔ یتیمی از استراتژی‌های حذف‌شده پیدا نشد؛ $remainingProfiles مدل فعلی دست‌نخورده است."
+        } else {
+            "پاک‌شد: $removedProfiles پروفایل تیونینگ، $removedCategoryBestStrategy برچسب «بهترین استراتژی دسته» " +
+                "و $removedReplaySamples نمونهٔ تجربهٔ مربوط به استراتژی‌های حذف‌شده. " +
+                "$remainingProfiles مدل فعلی دست‌نخورده ماند."
+        }
+}
+
 class NeuralSelfLearningEngine(
     context: Context? = null,
     private val storageFile: File? = context?.let { File(it.filesDir, "neural_self_learning_v1.json") },
@@ -688,7 +709,7 @@ class NeuralSelfLearningEngine(
             }
         }
         if (total == 0) {
-            insightsFeed += "📚 وضعیت پایه (دانش اولیه ۲۴ استراتژی): شبکه عصبی با دانش پایه ایچیموکو (تقویت کارایی روند ER14، ضخامت ابر آینده ۲۶ کندلی و جریمه کشیدگی C-Clamp و شدوهای فیک‌بریک‌اوت) مقداردهی شده و به محض بسته شدن اولین معامله، وزن‌ها را با الگوریتم AdamW به‌روزرسانی می‌کند."
+            insightsFeed += "📚 وضعیت پایه (دانش اولیهٔ ایچیموکو): شبکه عصبی با دانش پایه ایچیموکو (تقویت کارایی روند ER14، ضخامت ابر آینده ۲۶ کندلی و جریمه کشیدگی C-Clamp و شدوهای فیک‌بریک‌اوت) مقداردهی شده و به محض بسته شدن اولین معامله، وزن‌ها را با الگوریتم AdamW به‌روزرسانی می‌کند."
         } else {
             insightsFeed += String.format(
                 Locale.US,
@@ -1099,6 +1120,57 @@ class NeuralSelfLearningEngine(
         } else {
             withProfiles
         }
+    }
+
+    /**
+     * پاک‌سازی «داده‌های هوش مصنوعی استراتژی‌هایی که دیگر وجود ندارند».
+     *
+     * چرا لازم است؟ با حذف ۱۴ مدل (ترکیب‌ها، متود جامع ۹ لایه، BTC ۵۲ کندلی، پارسا و
+     * هیدن کراس) پروفایل‌های تیونینگ آن‌ها در فایل مغز باقی می‌مانند؛ نه جایی برای نمایش
+     * دارند و نه در آموزش شرکت می‌کنند. این تابع فقط ردیف‌های «یتیم» (پروفایل استراتژی و
+     * برچسب «بهترین استراتژی دسته») و تجربه‌های بافر تکرار مربوط به آن مدل‌ها را حذف می‌کند
+     * و به هیچ وزن شبکهٔ عصبی دست نمی‌زند.
+     */
+    @Synchronized
+    fun purgeOrphanStrategyData(): OrphanStrategyDataPurgeReport {
+        val knownIds = BitcoinStrategyModel.entries.map { it.id }.toSet()
+        val cur = persistedState
+        val params = cur.autoTunedParameters
+
+        val orphanProfiles = params.perStrategyProfiles.keys.filterNot { it in knownIds }
+        val keptProfiles = params.perStrategyProfiles.filterKeys { it in knownIds }
+        val orphanCategoryBest = params.bestStrategyByCategory.filterValues { it !in knownIds }
+        val keptCategoryBest = params.bestStrategyByCategory.filterValues { it in knownIds }
+        val keptBuffer = cur.replayBuffer.filter { it.strategyId in knownIds }
+        val orphanBuffer = cur.replayBuffer.size - keptBuffer.size
+        if (orphanProfiles.isEmpty() && orphanCategoryBest.isEmpty() && orphanBuffer == 0) {
+            return OrphanStrategyDataPurgeReport(
+                knownStrategyIds = knownIds.size,
+                removedProfiles = 0,
+                removedCategoryBestStrategy = 0,
+                removedReplaySamples = 0,
+                remainingProfiles = keptProfiles.size,
+            )
+        }
+
+        persistState(
+            cur.copy(
+                replayBuffer = keptBuffer,
+                autoTunedParameters = params.copy(
+                    perStrategyProfiles = LinkedHashMap(keptProfiles),
+                    bestStrategyByCategory = LinkedHashMap(keptCategoryBest),
+                    tuningSummaryFa = "دادهٔ هوش مصنوعی استراتژی‌های حذف‌شده پاک شد؛ " +
+                        "${keptProfiles.size} مدل باقی‌مانده دست‌نخورده است.",
+                ),
+            ),
+        )
+        return OrphanStrategyDataPurgeReport(
+            knownStrategyIds = knownIds.size,
+            removedProfiles = orphanProfiles.size,
+            removedCategoryBestStrategy = orphanCategoryBest.size,
+            removedReplaySamples = orphanBuffer,
+            remainingProfiles = keptProfiles.size,
+        )
     }
 
     private fun sanitizeLoadedState(loaded: NeuralNetworkPersistedState): NeuralNetworkPersistedState {
@@ -3387,7 +3459,7 @@ class NeuralSelfLearningEngine(
         val isAll = strategyId.equals("ALL", ignoreCase = true)
         val normId = if (isAll) "ALL" else BitcoinStrategyModel.normalizeStrategyId(strategyId)
         val modelOrNull = if (isAll) null else BitcoinStrategyModel.fromId(normId)
-        val stratTitleFa = modelOrNull?.titleFa ?: "تمام ۱۶ استراتژی (رگرسیون ماتریسی جامع)"
+        val stratTitleFa = modelOrNull?.titleFa ?: "تمام مدل‌های فعال (رگرسیون ماتریسی جامع)"
 
         val filteredSamples = if (isAll) {
             cur.replayBuffer
@@ -4322,9 +4394,9 @@ class NeuralSelfLearningEngine(
                         val l = list.size - w
                         val thompsonMean = (w + 2.0) / (w + l + 3.0)
                         thompsonMean * (1.0 + list.map { it.achievedR }.average().coerceAtLeast(-0.5) * 0.35)
-                    }?.key ?: BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
+                    }?.key ?: BitcoinStrategyModel.BASE_ICHIMOKU.id
             } else {
-                BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
+                BitcoinStrategyModel.BASE_ICHIMOKU.id
             }
             ac.code to bestId
         }

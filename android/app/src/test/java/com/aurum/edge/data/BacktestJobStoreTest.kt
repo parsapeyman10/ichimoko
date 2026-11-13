@@ -34,7 +34,6 @@ class BacktestJobStoreTest {
         maxBars = 0,
         includeHiddenCrossLayer = false,
         compressionExpansion = false,
-        peymanCryptoPaper = true,
         cursorIndex = 5_000,
         noteFa = "اجرای شبانه",
     )
@@ -45,7 +44,6 @@ class BacktestJobStoreTest {
         val decoded = json.decodeFromString(BacktestJobSpec.serializer(), encoded)
         assertEquals(spec(), decoded)
         // «تغییر دادن و اجرای دوباره» فقط وقتی معنا دارد که همهٔ پارامترها برگردند.
-        assertEquals("peyman-crypto", decoded.peymanCryptoPaper.let { if (it) "peyman-crypto" else "disabled" })
         assertEquals(0.5, decoded.riskPercent, 1e-9)
         assertEquals(5_000, decoded.cursorIndex)
     }

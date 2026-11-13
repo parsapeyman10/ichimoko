@@ -146,11 +146,7 @@ class SettingsStore(context: Context) {
             ?.takeIf { it.isNotBlank() }
             ?.let { raw -> runCatching { KEY_JSON.decodeFromString(customStrategiesSerializer, raw) }.getOrNull() }
             ?: emptyList()
-        val normalizedStoredBtcId = if (storedBtcStrategyId in BitcoinStrategyModel.legacyIndividualDriveIds) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
-        } else {
-            storedBtcStrategyId
-        }
+        val normalizedStoredBtcId = storedBtcStrategyId
         val validStrategyId = if (
             (
                 BitcoinStrategyModel.entries.any { it.id == normalizedStoredBtcId } &&
@@ -177,22 +173,11 @@ class SettingsStore(context: Context) {
                 .split(',')
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
-                .map { id ->
-                    if (id in BitcoinStrategyModel.legacyIndividualDriveIds) {
-                        BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
-                    } else {
-                        id
-                    }
-                }
                 .filter { id -> id in allKnownIds }
                 .toSet()
             cleaned.ifEmpty { defaultAllIds }
         }
-        val storedEnabledIds = (if (runAllSim && rawParsedEnabledIds.size >= 15) {
-            rawParsedEnabledIds + BitcoinStrategyModel.drivePdfStrategyIds
-        } else {
-            rawParsedEnabledIds
-        })
+        val storedEnabledIds = rawParsedEnabledIds
             // استراتژی‌های موقتاً خاموش (فعلاً جایگاه ۱۶) هرگز به‌صورت خودکار روشن نمی‌شوند؛
             // کاربر می‌تواند بعداً از تنظیمات دوباره فعالشان کند.
             .minus(BitcoinStrategyModel.temporarilyDisabledIds)

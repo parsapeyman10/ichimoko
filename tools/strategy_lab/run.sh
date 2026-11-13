@@ -52,11 +52,8 @@ FILES=(
   domain/Candle.kt domain/Interval.kt domain/SignalAction.kt
   domain/FeedMode.kt domain/FeedStatus.kt
   core/Models.kt core/V1Universe.kt core/VenueSpecs.kt core/MarketHours.kt core/MarketState.kt
-  core/PaperOrderRules.kt core/TradePlanGuard.kt core/HiddenCrossEngine.kt core/ParsaLineTurnEngine.kt core/CompressionExpansionEngine.kt core/NeoWaveEngine.kt
-  core/peyman/PeymanCryptoModels.kt core/peyman/PeymanMarketContextEngine.kt
-  core/peyman/NeoWaveCountEnsemble.kt core/peyman/CryptoStructuralBreakEngine.kt
-  core/peyman/CryptoExecutionQualityGate.kt core/peyman/PeymanCryptoEngine.kt
-  core/NeoWaveNeuralAdvisor.kt core/RiskAndCalendarEngine.kt core/SessionExitPlanner.kt
+  core/PaperOrderRules.kt core/TradePlanGuard.kt core/HiddenCrossEngine.kt core/CompressionExpansionEngine.kt
+  core/RiskAndCalendarEngine.kt core/SessionExitPlanner.kt
   core/TradingPerformanceAnalytics.kt core/NeuralGatePolicy.kt core/EntrySafetyGate.kt
   core/IchimokuStrategyEngine.kt core/BacktestSeries.kt core/BacktestReplayEngine.kt
   core/BacktestCsvReader.kt core/BacktestCsvLimits.kt core/BacktestTradeArchive.kt
@@ -90,10 +87,6 @@ if [[ "${3:-}" == "robust" ]]; then MAIN="RobustKt"; fi
 if [[ "${3:-}" == "btc" ]]; then MAIN="BtcKt"; fi
 # حالت «csv»: مسیر فایل‌ها از آرگومان چهارم شروع می‌شود (سوم خودِ کلیدواژه است).
 if [[ "${3:-}" == "csv" ]]; then MAIN="CsvLabKt"; EXTRA=("${@:4}"); fi
-# چرتکهٔ کامل «پیمان کریپتو» روی هر کندل: راهنمای PeymanLab.kt
-if [[ "${3:-}" == "pey" ]]; then MAIN="PeymanLabKt"; EXTRA=("${@:4}"); fi
-# حالت «hx»: سنجش A/B هیدن کراس (مستقل، بیس با لایه، بیس بدون لایه) + سرشماری قواعد.
-if [[ "${3:-}" == "hx" ]]; then MAIN="HiddenCrossLabKt"; EXTRA=("${@:4}"); fi
 # حالت «diag»: چرا روی یک نماد بک‌تست صفر معامله می‌سازد (آمادگی، SL/TP، جهت).
 if [[ "${3:-}" == "diag" ]]; then MAIN="BtcDiagLabKt"; EXTRA=("${@:4}"); fi
 # حالت «mon»: بک‌تست ماه‌به‌ماه + مقایسه با اجرای یک‌جا + جدول هر ماه.

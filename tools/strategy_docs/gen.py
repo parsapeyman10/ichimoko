@@ -131,8 +131,7 @@ def _block(text: str, anchor: str) -> str:
 def condition_sets() -> dict[str, list[tuple[int, str]]]:
     text = ENGINE.read_text(encoding="utf-8")
     sets = {}
-    for key, anchor in (("main", "val baseSixteenConditions = listOf("),
-                        ("btc", "val btc52Conditions = listOf(")):
+    for key, anchor in (("main", "val baseSixteenConditions = listOf("),):
         rows = CHECK_RE.findall(_block(text, anchor))
         uniq = {}
         for idx, label in rows:
@@ -173,83 +172,10 @@ EXTRA_SEGMENTS = {
     "plan": "موتور واحد ایمن‌سازی پلن",
 }
 
-SPECIAL = {
-    "DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER": {
-        "slug": "peyman-drive-books",
-        "code_files": [
-            "core/NeoWaveEngine.kt",
-            "core/peyman/PeymanCryptoEngine.kt",
-            "core/peyman/PeymanCryptoModels.kt",
-            "core/peyman/PeymanMarketContextEngine.kt",
-            "core/peyman/CryptoStructuralBreakEngine.kt",
-            "core/peyman/NeoWaveCountEnsemble.kt",
-            "core/peyman/CryptoExecutionQualityGate.kt",
-        ],
-        "segments": ["دروازه‌بندی مکتبی بیس", "گیت کیجون", "لایهٔ اختیاری نئوویو",
-                     "پیمان: شمارش موج", "مسیر ورود رمزارز", "موتور «پیمان کریپتو",
-                     "سیاست «فقط پیمان"],
-        "functions": ["driveBookPlaybook", "bookConfluenceGate"],
-        "anchor_blocks": [
-            ("نُه لایهٔ ساختاری پیمان (شرط‌های خودِ روش)", "        // ۱. لایهٔ ساختاری ۱ (TuAnh)",
-             "        val flags = listOf(book1"),
-            ("وزن‌دهی بیزین و R:R پله‌ای اجماع", "        val flags = listOf(book1",
-             "        return Unified9BookConsensusResult("),
-        ],
-        "extra_md": """### چطور اجماع ساخته می‌شود
-
-نُه لایه هر کدام یک «کتاب» جدا هستند؛ هر لایه یا پاس است یا رد، و جمعشان تصمیم می‌سازد
-(`evaluateUnified9BookConsensus` در `core/IchimokuStrategyEngine.kt`):
-
-| تعداد لایهٔ پاس | R:R پویا |
-|---|---|
-| ۸ یا بیشتر | ۲٫۸۵ |
-| ۷ | ۲٫۷۰ |
-| ۶ | ۲٫۵۵ |
-| ۵ | ۲٫۴۰ |
-| کمتر از ۵ | ۲٫۲۵ (پایه) |
-
-احتمال برد هم جدا حساب می‌شود: جمع وزن‌های شرطی (پیشین ۰٫۱۵ ≈ ۵۳٫۷٪) و بعد
-`100 / (1 + e^(−logOdds))` که در بازهٔ **۱۸٪ تا ۹۷٫۵٪** محدود می‌شود. اگر لایهٔ چیکو رد باشد و
-کیجون هم تخت باشد، **۰٫۳۵** از وزن کم می‌شود.
-
-> دروازهٔ `bookConfluenceGate` (اجماع مکتبی بیس) فقط روی مدل بیس اثر دارد؛ برای پیمان،
-> ۵۲ کندلی، پارسا و هیدن کراس دخالت نمی‌کند و منطق AND داخلی خودشان دست‌نخورده می‌ماند.
-""",
-        "notes": "نُه لایهٔ ساختاری که باید هم‌جهت باشند. کدش از موتور "
-                 "ایچیموکو جدا شده و در `core/peyman/` و `NeoWaveEngine` است.",
-    },
-    "BTC_52_CANDLE_REGIME": {
-        "slug": "btc-52-candle",
-        "code_files": [],
-        "segments": ["محاسبه «عدد مناسب R:R»", "موتور واحد ایمن‌سازی پلن"],
-        "functions": [],
-        "cond_set": "btc",
-        "anchor_blocks": [
-            ("جهت و جایگاه ساختاری ۵۲ کندلی", "        val long52Context ="),
-            ("پنجرهٔ بسته و ماشهٔ شکست/بازآزمایی ۵۲ کندلی", "        val closedTriggerBars ="),
-            ("شرط‌های شارپ/چیکو برای ۵۲ کندلی", "        val btc52BreakoutOk ="),
-        ],
-        "notes": "ده شرط مستقل روی ساختار ۵۲ کندلی؛ شرط‌هایش با ۱۵ روش ایچیموکو یکی نیست. "
-                 "برای همین فهرست شرط‌هایش جدا نوشته شده است.",
-    },
-    "PARSA_52_LINE_TURN": {
-        "slug": "parsa-52-line-turn",
-        "code_files": ["core/ParsaLineTurnEngine.kt"],
-        "segments": ["پارسا:"],
-        "functions": [],
-        "engine_rules": "core/ParsaLineTurnEngine.kt",
-        "notes": "سه شرط هستهٔ سخت + پنج شرط کیفیت؛ اگر یکی از سه شرط هسته نباشد، ورود نیست.",
-    },
-    "HIDDEN_CROSS": {
-        "slug": "hidden-cross",
-        "code_files": ["core/HiddenCrossEngine.kt"],
-        "segments": ["روش مستقل «هیدن کراس»", "هیدن کراس: دقیقاً همان"],
-        "functions": [],
-        "engine_rules": "core/HiddenCrossEngine.kt",
-        "notes": "پنج شرط، دقیقاً همان چیزی که در اسلایدهای استاد بود: ورود روی بازگشت به خط تاج، "
-                 "نه روی شکست.",
-    },
-}
+# مدل‌های ویژه‌ای باقی نمانده‌اند: با حذف ترکیب‌ها، متود جامع ۹ لایه (پیمان)، BTC ۵۲ کندلی،
+# پارسا و هیدن کراس، تنها پنج مدل ایچیموکو در enum مانده است که همه‌شان از یک خط لولهٔ مشترک
+# می‌گذرند. ساختار این دیکشنری برای آینده نگه داشته شده است.
+SPECIAL: dict[str, dict] = {}
 
 
 def slugify(e: dict) -> str:
@@ -704,7 +630,7 @@ docs/strategies/AurumEdge-Strategies-FA.zip
 # یا فقط یکی
 sed -n '1,200p' docs/strategies/01-base-ichimoku.md"""))
     out.append("\n## موتور مشترک\n\n")
-    out.append("پانزده روش ایچیموکو یک موتور مشترک دارند؛ شرط‌ها، فرمول R:R، اندازهٔ پوزیشن "
+    out.append("پنج روش ایچیموکو یک موتور مشترک دارند؛ شرط‌ها، فرمول R:R، اندازهٔ پوزیشن "
                "و دروازهٔ ایمنی همه از یک‌جا می‌آید. جزئیاتش در [00-shared-pipeline.md](00-shared-pipeline.md) "
                "است تا در هر سند تکرار نشود.\n")
     out.append("\n## کد اختصاصی هر روش\n\n")
@@ -712,9 +638,9 @@ sed -n '1,200p' docs/strategies/01-base-ichimoku.md"""))
         out.append("| فایل | مربوط به |\n|---|---|\n")
         for f in sorted(set(used_files)):
             out.append(f"| `code/{f}` | سند همان پوشه |\n")
-    out.append("\n## شرط‌های ۱۰گانهٔ ۵۲ کندلی (BTC)\n\n")
+    out.append("\n## شرط‌های ۱۷گانهٔ مشترک (همهٔ ۵ روش)\n\n")
     out.append("| # | شرط |\n|---|---|\n")
-    for idx, label in sets["btc"]:
+    for idx, label in sets["main"]:
         out.append(f"| {fa(idx)} | {strip_no(label)} |\n")
     (OUT / "README.md").write_text("".join(out), encoding="utf-8")
 

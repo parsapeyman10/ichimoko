@@ -100,12 +100,7 @@ fun BitcoinIchimokuStrategyCard(
     val selectedId = settings.selectedBitcoinStrategyId
     val selectedChecklistCount = dualReports[focusedSymbol]
         ?.reportFor(focusedInterval, selectedId)?.conditions?.size
-        ?: when (selectedId) {
-            BitcoinStrategyModel.BTC_52_CANDLE_REGIME.id -> 10
-            BitcoinStrategyModel.PARSA_52_LINE_TURN.id -> 9
-            BitcoinStrategyModel.HIDDEN_CROSS.id -> 10
-            else -> 16
-        }
+        ?: 17
     val executionEnabled = settings.autoPaperTrading
     val activeTitle = settings.activeBitcoinStrategyTitleFa()
     val currentConfig = settings.activeBitcoinStrategyConfig()
@@ -258,39 +253,6 @@ fun BitcoinIchimokuStrategyCard(
             )
         }
 
-        // ── لایهٔ اختیاری نئوویو (NeoWave) ─────────────────────────────────────
-        Text(
-            "توجه: لایهٔ نئوویو–الیوت فقط در «استراتژی ۱۶» ادغام می‌شود؛ هیچ روش دیگری محاسبهٔ نئوویو ندارد.",
-            style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.TextMuted,
-            modifier = Modifier.padding(bottom = 4.dp),
-        )
-        val focusedReportForNeoWave = dualReports[focusedSymbol]?.reportFor(focusedInterval, selectedId) ?: report
-        NeoWaveOptionCard(
-            // لایهٔ نئوویو–الیوت به‌صورت داخلی در استراتژی ۱۶ ادغام شده و کلید کاربر ندارد.
-            enabled = true,
-            minRulesPassed = settings.baseStrategyConfig.neoWaveMinRulesPassed,
-            minConfidencePct = settings.baseStrategyConfig.neoWaveMinConfidencePct,
-            statusBadge = focusedReportForNeoWave?.neoWaveBadgeFa.orEmpty(),
-            onToggle = { on ->
-                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveEnabled = on))
-            },
-            onRulesChange = { rules ->
-                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveMinRulesPassed = rules))
-            },
-            onConfidenceChange = { pct ->
-                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveMinConfidencePct = pct))
-            },
-            autoTuneEnabled = settings.baseStrategyConfig.neoWaveAutoTuneEnabled,
-            autoRules = settings.baseStrategyConfig.neoWaveAutoRules,
-            autoConfidencePct = settings.baseStrategyConfig.neoWaveAutoConfidencePct,
-            autoSamples = settings.baseStrategyConfig.neoWaveAutoSamples,
-            autoBasisFa = settings.baseStrategyConfig.neoWaveAutoBasisFa,
-            onAutoTuneToggle = { on ->
-                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveAutoTuneEnabled = on))
-            },
-            onRetrainNeural = { viewModel.retrainNeoWaveNeuralTuningNow() },
-        )
     }
 }
 
@@ -526,12 +488,7 @@ private fun Live12ConditionChecklistPage(
         }
 
         if (report == null) {
-            val expectedChecklistCount = when (selectedStrategyId) {
-                BitcoinStrategyModel.BTC_52_CANDLE_REGIME.id -> 10
-                BitcoinStrategyModel.PARSA_52_LINE_TURN.id -> 9
-                BitcoinStrategyModel.HIDDEN_CROSS.id -> 10
-                else -> 16
-            }
+            val expectedChecklistCount = 17
             Text(
                 text = "در حال محاسبه چک‌لیست $expectedChecklistCount شرطی $focusedSymbol (${focusedInterval.label})...",
                 style = MaterialTheme.typography.labelSmall,

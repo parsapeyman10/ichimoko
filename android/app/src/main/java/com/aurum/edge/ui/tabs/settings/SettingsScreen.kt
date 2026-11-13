@@ -601,6 +601,33 @@ fun SettingsScreen(
                     isBackfilling = isBackfilling,
                     onSyncGap = { hours -> viewModel.syncAllOpenAndActiveSymbolsGap(hoursOverride = hours, notifyOnSuccess = true) },
                 )
+                SectionCard(
+                    title = "🗄️ داده و نگهداری",
+                    subtitle = descOrNull("پاک‌سازی دادهٔ هوش مصنوعی استراتژی‌هایی که دیگر در برنامه وجود ندارند"),
+                    initiallyExpanded = false,
+                ) {
+                    Text(
+                        text = "۱۴ مدل استراتژی (ترکیب‌های دوتایی/سه‌تایی، متود جامع ۹ لایه، BTC ۵۲ کندلی، پارسا و هیدن کراس) " +
+                            "از برنامه حذف شده‌اند. پروفایل‌های تیونینگ، برچسب بهترین استراتژی دسته و نمونه‌های تجربهٔ " +
+                            "آن‌ها هنوز در حافظهٔ شبکه عصبی باقی مانده‌اند؛ این کلید فقط همان دادهٔ یتیم را پاک می‌کند " +
+                            "و به وزن‌های شبکه، ژورنال یا معاملات دست نمی‌زند.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Pill(
+                        text = "🧹 پاک‌سازی دادهٔ هوش مصنوعی استراتژی‌های حذف‌شده",
+                        color = AurumColors.Red,
+                        modifier = Modifier.clickable { viewModel.purgeOrphanAiStrategyData() },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "ترکیب فعلی: ${BitcoinStrategyModel.entries.size} مدل — " +
+                            BitcoinStrategyModel.entries.joinToString(" · ") { it.titleFa },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                    )
+                }
             }
         }
     }
@@ -671,7 +698,7 @@ fun NeuralDirectNavigationCard(
             }
             AnimatedVisibility(visible = showDescriptions) {
                 Text(
-                    text = "شبکه عصبی صفحه اختصاصی خود را دارد؛ برای مشاهده آموخته‌ها، کالبدشکافی معاملات، ماتریس ۲۴ استراتژی و تنظیمات کامل مغز عصبی ضربه بزنید.",
+                    text = "شبکه عصبی صفحه اختصاصی خود را دارد؛ برای مشاهده آموخته‌ها، کالبدشکافی معاملات، ماتریس مدل‌ها و تنظیمات کامل مغز عصبی ضربه بزنید.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary.copy(alpha = 0.72f),
                 )

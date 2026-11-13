@@ -37,7 +37,6 @@ data class BacktestJobSpec(
     val maxBars: Int,
     val includeHiddenCrossLayer: Boolean,
     val compressionExpansion: Boolean,
-    val peymanCryptoPaper: Boolean,
     /** تا کدام کندل اجرا شود (۰ یا بیشتر از طول داده = همهٔ کندل‌ها). */
     val cursorIndex: Int,
     /**

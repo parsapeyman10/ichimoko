@@ -73,7 +73,7 @@ fun diagnose(candles: List<Candle>, label: String, warmup: Int = 120, includeHid
     val triggerSize = Interval.M15.millis
     val cfg = BaseStrategyConfig(includeHiddenCrossLayer = includeHidden)
 
-    val pass = IntArray(17)
+    val pass = IntArray(18)
     val failTitle = LinkedHashMap<String, Int>()
     val failWhenRegime = LinkedHashMap<String, Int>()
     var evaluated = 0
@@ -115,7 +115,7 @@ fun diagnose(candles: List<Candle>, label: String, warmup: Int = 120, includeHid
     println("── $label · $evaluated ارزیابی · ${dt}ms · ${f2(dt.toDouble() / max(1, evaluated))}ms/ارزیابی")
     println("   سیگنال actionable=$signals (${pct(signals, evaluated)}) · watch=$watch")
     if (gateN > 0) println("   میانگین امتیاز هم‌گرایی مکتبی = ${f2(gateSum / gateN)}%")
-    println("   نرخ پاس شرط‌ها: " + (1..16).joinToString(" ") { "$it:${pct(pass[it], evaluated)}" })
+    println("   نرخ پاس شرط‌ها: " + (1..17).joinToString(" ") { "$it:${pct(pass[it], evaluated)}" })
     println("   توزیع تعداد شرط پاس‌شده: " + scoreDist.toSortedMap().entries.joinToString(" ") { "${it.key}:${it.value}" })
     println("   وقتی رژیم (۱/۳/۴/۶) درست است، سدها:")
     failWhenRegime.entries.sortedByDescending { it.value }.take(9).forEach { println("      ${it.value}× ${it.key}") }

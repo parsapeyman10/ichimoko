@@ -70,7 +70,6 @@ class JournalStore(
         }
         return list.map { t ->
             val assigned = numberedById[t.id] ?: t.tradeNumber
-            val isLegacyDrive = t.strategyId.trim() in BitcoinStrategyModel.legacyIndividualDriveIds
             // حد ضرر ممکن است در مرحلهٔ ریسک‌فری/تریل به سود منتقل شده باشد. بازنویسی آن با
             // `initialStopLoss` یعنی پاک‌شدن Preserve Mode در هر بار بارگذاری ژورنال.
             val preservedSl = if (t.note.contains(IchimokuStrategyEngine.BE_TAG_MARK) ||
@@ -91,23 +90,6 @@ class JournalStore(
             val needsFixedSlReset = t.stopLoss != fixedSl || t.initialStopLoss == null ||
                 t.riskReward != clampedRr || t.optimalRiskReward != clampedOptRr
             when {
-                isLegacyDrive && (t.tradeNumber != assigned || needsFixedSlReset) -> t.copy(
-                    tradeNumber = assigned,
-                    stopLoss = fixedSl,
-                    initialStopLoss = fixedSl,
-                    riskReward = clampedRr,
-                    optimalRiskReward = clampedOptRr,
-                    strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
-                    strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
-                )
-                isLegacyDrive -> t.copy(
-                    stopLoss = fixedSl,
-                    initialStopLoss = fixedSl,
-                    riskReward = clampedRr,
-                    optimalRiskReward = clampedOptRr,
-                    strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
-                    strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
-                )
                 t.tradeNumber != assigned || needsFixedSlReset -> t.copy(
                     tradeNumber = assigned,
                     stopLoss = fixedSl,

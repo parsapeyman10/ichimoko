@@ -102,10 +102,7 @@ class BaseStrategyDeepDiveTest {
         macro: List<Candle> = bullishPullbackSeries(Interval.H4.millis),
         strategy: List<Candle> = bullishPullbackSeries(Interval.H1.millis),
         trigger: List<Candle> = bullishPullbackSeries(Interval.M15.millis),
-        // سری مرجع این تست‌ها رمزارزی است و رفتار «بیس» را می‌سنجد؛ سیاست «فقط پیمان روی
-        // رمزارز» عمداً خاموش می‌شود تا خودِ شروط بیس آزموده شوند (سیاست در
-        // PeymanStrategyTest جداگانه تست می‌شود).
-        config: BaseStrategyConfig = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = false),
+        config: BaseStrategyConfig = BaseStrategyConfig(),
         symbol: String = "BTC/USDT",
     ) = IchimokuStrategyEngine.evaluateBitcoinStrategy(
         activeModel = BitcoinStrategyModel.BASE_ICHIMOKU,
@@ -115,30 +112,6 @@ class BaseStrategyDeepDiveTest {
         triggerCandles = trigger,
         symbolInput = symbol,
     )
-
-    @Test
-    fun `crypto symbols trade the base strategy by default and stop only if the peyman monopoly is turned on`() {
-        // ۳.۹.۶۷: انحصار «فقط پیمان» پیش‌فرض خاموش شد، چون پیمان خودش پیش‌فرض DISABLED است و
-        // نتیجه‌اش این بود که رمزارز هیچ‌وقت معامله نمی‌کرد (BTC: صفر معامله در ۶۴٬۸۳۴ کندل).
-        val trading = evaluate(config = BaseStrategyConfig())
-        assertEquals(SignalAction.BUY, trading.action)
-
-        // و اگر کاربر انحصار را روشن کند، همان سری و همان استراتژی باید مسدود شود.
-        val blocked = evaluate(config = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = true))
-        assertEquals(SignalAction.NO_TRADE, blocked.action)
-        assertTrue(blocked.readiness != StrategyReadinessState.SIGNAL_BUY)
-    }
-
-    @Test
-    fun `the peyman-only policy changes nothing on non crypto symbols`() {
-        val withPolicy = evaluate(config = BaseStrategyConfig(), symbol = "XAU/USD")
-        val withoutPolicy = evaluate(
-            config = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = false),
-            symbol = "XAU/USD",
-        )
-        assertEquals(withoutPolicy.action, withPolicy.action)
-        assertEquals(withoutPolicy.readiness, withPolicy.readiness)
-    }
 
     // ─────────────────────────── مبنا ───────────────────────────
 
@@ -278,8 +251,8 @@ class BaseStrategyDeepDiveTest {
 
     @Test
     fun `hidden cross layer can be removed from the base strategy`() {
-        val withLayer = evaluate(config = BaseStrategyConfig(includeHiddenCrossLayer = true, cryptoSymbolsOnlyPeyman = false))
-        val pureBase = evaluate(config = BaseStrategyConfig(includeHiddenCrossLayer = false, cryptoSymbolsOnlyPeyman = false))
+        val withLayer = evaluate(config = BaseStrategyConfig(includeHiddenCrossLayer = true))
+        val pureBase = evaluate(config = BaseStrategyConfig(includeHiddenCrossLayer = false))
 
         val withDetail = withLayer.conditions.first { it.index == 9 }.detailFa
         val pureDetail = pureBase.conditions.first { it.index == 9 }.detailFa

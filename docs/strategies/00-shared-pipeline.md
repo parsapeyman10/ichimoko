@@ -50,7 +50,7 @@
 
 ## ۴) کد مشترک
 
-**Check 1: 3-TF Kumo Regime Alignment (4H / 1H / 15m)** — خطوط ۳۵۸۲ تا ۳۵۹۹، `core/IchimokuStrategyEngine.kt`
+**Check 1: 3-TF Kumo Regime Alignment (4H / 1H / 15m)** — خطوط ۲۸۶۵ تا ۲۸۸۲، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 1: 3-TF Kumo Regime Alignment (4H / 1H / 15m) ───────────────
@@ -72,7 +72,7 @@
         }
 ```
 
-**Check 2: Sanyaku 5-Line Order (Price > Tenkan >= Kijun > Kumo)** — خطوط ۳۶۰۰ تا ۳۶۱۱، `core/IchimokuStrategyEngine.kt`
+**Check 2: Sanyaku 5-Line Order (Price > Tenkan >= Kijun > Kumo)** — خطوط ۲۸۸۳ تا ۲۸۹۴، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 2: Sanyaku 5-Line Order (Price > Tenkan >= Kijun > Kumo) ─────
@@ -88,7 +88,7 @@
         }
 ```
 
-**Check 4: Future Kumo Direction & Non-diverging Span B (26 bars ahead)** — خطوط ۳۶۳۱ تا ۳۶۴۲، `core/IchimokuStrategyEngine.kt`
+**Check 4: Future Kumo Direction & Non-diverging Span B (26 bars ahead)** — خطوط ۲۹۱۴ تا ۲۹۲۵، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 4: Future Kumo Direction & Non-diverging Span B (26 bars ahead) ──
@@ -104,7 +104,7 @@
         val cond4Detail = "Future SSA=${stratSnap.futureSpanA} vs SSB=${stratSnap.futureSpanB} (${if (stratSnap.isFutureKumoBullish) "صعودی" else "نزولی"})"
 ```
 
-**Check 6: Chikou Span 3D Open Space (26 bars back + 6-bar corridor)** — خطوط ۳۶۵۴ تا ۳۶۶۷، `core/IchimokuStrategyEngine.kt`
+**Check 6: Chikou Span 3D Open Space (26 bars back + 6-bar corridor)** — خطوط ۲۹۳۷ تا ۲۹۵۰، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 6: Chikou Span 3D Open Space (26 bars back + 6-bar corridor) ──
@@ -122,8 +122,7 @@
         }
 ```
 
-**Compute Sniper Entry Zone & Tight Structural SL (متود یکپارچه با جامع بیس)** — خطوط ۳۹۴۶ تا ۴۰۴۲، `core/IchimokuStrategyEngine.kt`
-<details><summary>کد کامل (۹۶ خط)</summary>
+**Compute Sniper Entry Zone & Tight Structural SL (متود یکپارچه با جامع بیس)** — خطوط ۳۰۹۵ تا ۳۱۶۳، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Compute Sniper Entry Zone & Tight Structural SL (متود یکپارچه با جامع بیس) ──
@@ -177,25 +176,7 @@
             triggerInterval = effectiveConfig.triggerInterval,
             activeModel = activeModel,
         )
-        val specialStopAnchor = when {
-            isBtc52Model && isLong -> trigSnap.prior52Low - trigSnap.atr14 * effectiveConfig.slBufferAtr
-            isBtc52Model -> trigSnap.prior52High + trigSnap.atr14 * effectiveConfig.slBufferAtr
-            // هیدن کراس: ۱R پشت خودِ نوار ابر مخفی قفل می‌شود؛ اگر به ورود چسبیده باشد،
-            // سنگر ساختاری ۵ کندلی جای آن را می‌گیرد (بدون تورم مصنوعی ۱R).
-            isHiddenCrossModel && isLong -> min(
-                trigSnap.hiddenCloudBottom - trigSnap.atr14 * effectiveConfig.slBufferAtr,
-                trigSnap.low - trigSnap.atr14 * effectiveConfig.slBufferAtr,
-            )
-            isHiddenCrossModel -> max(
-                trigSnap.hiddenCloudTop + trigSnap.atr14 * effectiveConfig.slBufferAtr,
-                trigSnap.high + trigSnap.atr14 * effectiveConfig.slBufferAtr,
-            )
-            isParsaModel && isLong && trigSnap.currentSpanB < referenceEntryForSl ->
-                trigSnap.currentSpanB - trigSnap.atr14 * effectiveConfig.slBufferAtr
-            isParsaModel && !isLong && trigSnap.currentSpanB > referenceEntryForSl ->
-                trigSnap.currentSpanB + trigSnap.atr14 * effectiveConfig.slBufferAtr
-            else -> null
-        }
+        val specialStopAnchor: Double? = null
         val rawTechnicalSl = specialStopAnchor?.let { structural ->
             if (isLong) min(baseTechnicalSl, structural) else max(baseTechnicalSl, structural)
         } ?: baseTechnicalSl
@@ -206,17 +187,7 @@
         ).coerceAtLeast(minSafeStopDist)
 
         // حد ضرر ساختاری (Kijun / Senkou B / 5-Bar Fractal + ATR Buffer) کاملاً ثابت و غیرپله‌ای است
-        // قاعدهٔ تازهٔ استراتژی ۱۶: حد ضرر بالای خط ۲۶ (برای خرید) و با فاصله از کندل؛ اگر جمع نشود، پلن مسدود می‌شود.
-        val kijunStopRule = if (KIJUN_LAYER_IN_STRATEGY_16_ENABLED && activeModel.isNeoWaveElliottStrategy) {
-            applyKijunStopRules(
-                isLong = isLong,
-                candidateStop = rawTechnicalSl,
-                triggerSnapshot = trigSnap,
-            )
-        } else {
-            null
-        }
-        val technicalSl = kijunStopRule?.stop ?: rawTechnicalSl
+        val technicalSl = rawTechnicalSl
 
         val stopDist = max(
             abs(sniperOptimal - technicalSl),
@@ -224,10 +195,7 @@
         ).coerceAtLeast(minSafeStopDist)
 ```
 
-</details>
-
-
-**Check 11: Price Action Candle Body, Close Location, Volume Momentum & Drive PDF Book Rules** — خطوط ۴۰۵۳ تا ۴۱۰۰، `core/IchimokuStrategyEngine.kt`
+**Check 11: Price Action Candle Body, Close Location, Volume Momentum & Drive PDF Book Rules** — خطوط ۳۱۷۴ تا ۳۲۲۱، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 11: Price Action Candle Body, Close Location, Volume Momentum & Drive PDF Book Rules ──
@@ -279,8 +247,7 @@
         }
 ```
 
-**محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:1.50 .. 1:3.00] برای تمام ۱۶ استراتژی** — خطوط ۴۱۰۱ تا ۴۱۸۹، `core/IchimokuStrategyEngine.kt`
-<details><summary>کد کامل (۸۸ خط)</summary>
+**محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:1.50 .. 1:3.00] برای تمام ۱۶ استراتژی** — خطوط ۳۲۲۲ تا ۳۳۰۱، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:1.50 .. 1:3.00] برای تمام ۱۶ استراتژی ──
@@ -337,20 +304,11 @@
         val hiddenCrossCrownInCorridor = hiddenCrossCrownPrice > 0.0 &&
             (abs(hiddenCrossCrownPrice - entryAnchorForTp) / stopDist) in requiredMinRr..maxAllowedRr
         val rawPrimaryTp = when {
-            isBtc52Model && isLong -> entryAnchorForTp + btc52TargetDistance
-            isBtc52Model -> (entryAnchorForTp - btc52TargetDistance).coerceAtLeast(0.00001)
-            isHiddenCrossModel && hiddenCrossCrownInCorridor -> hiddenCrossCrownPrice
-            isParsaModel && isLong -> entryAnchorForTp + optTpDist
-            isParsaModel -> (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
             chosenWavePair != null -> chosenWavePair.second
             isLong -> entryAnchorForTp + optTpDist
             else -> (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
         }
         val selectedWaveLabel = when {
-            isBtc52Model -> "امتداد دامنهٔ ساختار ۵۲ کندلی"
-            isHiddenCrossModel && hiddenCrossCrownInCorridor -> "تاج کراس برابری (نصف اندازهٔ کراس)"
-            isHiddenCrossModel -> "هدف بهینه پس از کراس برابری"
-            isParsaModel -> "هدف حرکتی پس از چرخش Senkou A"
             chosenWavePair != null -> chosenWavePair.first
             else -> String.format(Locale.US, "موج بهینه هوسودا (%.2fR)", computedOptimalRr)
         }
@@ -373,10 +331,7 @@
         }
 ```
 
-</details>
-
-
-**Check 12: Room to HTF Plateau & Optimal R:R strictly in [1:1.50 .. 1:3.00]** — خطوط ۴۱۹۰ تا ۴۲۲۸، `core/IchimokuStrategyEngine.kt`
+**Check 12: Room to HTF Plateau & Optimal R:R strictly in [1:1.50 .. 1:3.00]** — خطوط ۳۳۰۲ تا ۳۳۴۰، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 12: Room to HTF Plateau & Optimal R:R strictly in [1:1.50 .. 1:3.00] ──
@@ -419,8 +374,8 @@
         }
 ```
 
-**موتور واحد ایمن‌سازی پلن (Trade Plan Guard)** — خطوط ۴۲۲۹ تا ۴۳۲۲، `core/IchimokuStrategyEngine.kt`
-<details><summary>کد کامل (۹۳ خط)</summary>
+**موتور واحد ایمن‌سازی پلن (Trade Plan Guard)** — خطوط ۳۳۴۱ تا ۳۴۳۱، `core/IchimokuStrategyEngine.kt`
+<details><summary>کد کامل (۹۰ خط)</summary>
 
 ```kotlin
         // ── موتور واحد ایمن‌سازی پلن (Trade Plan Guard) ─────────────────────────
@@ -466,9 +421,6 @@
         val riskDistSniper = round2(finalStopDist)
         val slBasisTextFa = buildString {
             append("هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون۲۶ (${round2(trigSnap.kijun)}) + کیجون۳۰/EMA34 + لبه کومو")
-            if (activeModel == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
-                append(" + هندسهٔ الیوت–نئوویو (نسخهٔ پیمان، هم‌تراز جامع بیس)")
-            }
             append(String.format(Locale.US, " + سپر ضد شدو (%.2f ATR) در دالان [0.80..2.10 ATR]", slBuffer))
             append(" + قفل سقف درصدی نوسان " + effectiveConfig.triggerInterval.label)
         }
@@ -521,7 +473,7 @@
 </details>
 
 
-**Check 13: Directional Efficiency Ratio (Kaufman ER) & Anti-Chop Filter** — خطوط ۴۳۲۳ تا ۴۳۳۱، `core/IchimokuStrategyEngine.kt`
+**Check 13: Directional Efficiency Ratio (Kaufman ER) & Anti-Chop Filter** — خطوط ۳۴۳۲ تا ۳۴۴۰، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 13: Directional Efficiency Ratio (Kaufman ER) & Anti-Chop Filter ──
@@ -534,7 +486,7 @@
         )
 ```
 
-**Check 14: Anti-Fakeout Wick Guard & Liquidity Sweep Filter** — خطوط ۴۳۳۲ تا ۴۳۴۴، `core/IchimokuStrategyEngine.kt`
+**Check 14: Anti-Fakeout Wick Guard & Liquidity Sweep Filter** — خطوط ۳۴۴۱ تا ۳۴۵۳، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 14: Anti-Fakeout Wick Guard & Liquidity Sweep Filter ────────
@@ -551,7 +503,7 @@
         )
 ```
 
-**Check 15: Core-Trend Phase Classification (Genesis / Core vs Exhaustion)** — خطوط ۴۳۴۵ تا ۴۳۴۸، `core/IchimokuStrategyEngine.kt`
+**Check 15: Core-Trend Phase Classification (Genesis / Core vs Exhaustion)** — خطوط ۳۴۵۴ تا ۳۴۵۷، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 15: Core-Trend Phase Classification (Genesis / Core vs Exhaustion) ──
@@ -559,7 +511,7 @@
         val cond15Detail = "${trendPhase.badgeFa} · کندل $waveBars موج · فاصله کیجون: ${String.format(Locale.US, "%.2f", extAtr)} ATR"
 ```
 
-**Check 16: Sniper Entry Precision & Anti-Chase Pocket** — خطوط ۴۳۴۹ تا ۴۳۵۳، `core/IchimokuStrategyEngine.kt`
+**Check 16: Sniper Entry Precision & Anti-Chase Pocket** — خطوط ۳۴۵۸ تا ۳۴۶۲، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 16: Sniper Entry Precision & Anti-Chase Pocket ──────────────
@@ -568,7 +520,7 @@
         val cond16Passed = distToSniperAtr <= maxSniperDist && distFromTenkanAtr <= (maxSniperDist + 0.50)
 ```
 
-**Check 17 — اقتصاد معامله: نسبت هزینهٔ اجرا به ۱R** — خطوط ۴۳۵۴ تا ۴۳۷۸، `core/IchimokuStrategyEngine.kt`
+**Check 17 — اقتصاد معامله: نسبت هزینهٔ اجرا به ۱R** — خطوط ۳۴۶۳ تا ۳۴۸۷، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── Check 17 — اقتصاد معامله: نسبت هزینهٔ اجرا به ۱R ─────────────────
@@ -597,8 +549,7 @@
         )
 ```
 
-**ماشهٔ «فشردگی → انبساط» (فقط بیس و فقط با Feature Flag)** — خطوط ۴۳۷۹ تا ۴۴۷۹، `core/IchimokuStrategyEngine.kt`
-<details><summary>کد کامل (۱۰۱ خط)</summary>
+**ماشهٔ «فشردگی → انبساط» (فقط بیس و فقط با Feature Flag)** — خطوط ۳۴۸۸ تا ۳۵۷۳، `core/IchimokuStrategyEngine.kt`
 
 ```kotlin
         // ── ماشهٔ «فشردگی → انبساط» (فقط بیس و فقط با Feature Flag) ─────────────
@@ -657,6 +608,7 @@
         }
         // اولویت: اگر ماشهٔ فشردگی معتبر است همان انتخاب می‌شود، وگرنه ماشهٔ قبلی دست‌نخورده.
         val effectiveTriggerType = compressionTrigger ?: triggerType
+        val triggerFired = effectiveTriggerType != StrategyTriggerType.NONE
 
         val baseSixteenConditions = listOf(
             StrategyConditionCheck(1, "۱. رژیم کوموی ۳ تایم‌فریم (${config.macroInterval.label}/${config.strategyInterval.label}/${config.triggerInterval.label})", cond1Passed, cond1Detail),
@@ -683,29 +635,9 @@
             StrategyConditionCheck(17, "۱۷. اقتصاد اجرا — هزینهٔ رفت‌وبرگشت در برابر ۱R", cond17Passed, cond17Detail),
         )
 
-        val btc52Conditions = listOf(
-            StrategyConditionCheck(1, "۱. دادهٔ بستهٔ کامل پنجرهٔ ۵۲ کندلی", closedTriggerBars.size >= 53, "${closedTriggerBars.size} کندل بسته؛ برای سطح شکست به ۵۲ کندل قبل + کندل جاری نیاز است."),
-            StrategyConditionCheck(2, "۲. جهت و جایگاه ساختاری ۵۲ کندلی", if (isLong) long52Context else short52Context, String.format(Locale.US, "شیب رگرسیون=%+.2f ATR/کندل · تغییر=%+.2f ATR · دامنه=%.1f ATR", trigSnap.regressionSlope52AtrPerBar, trigSnap.closeChange52Atr, trigSnap.range52Atr)),
-            StrategyConditionCheck(3, "۳. شکست بسته‌شده یا بازآزمایی مرز ۵۲ کندلی", btc52BreakoutOk, "مرز قبلی: ${if (isLong) trigSnap.prior52High else trigSnap.prior52Low} · کندل جاری در محاسبهٔ مرز وارد نشده است."),
-            StrategyConditionCheck(4, "۴. فشردگی/همگرایی پیش از گسترش", trigSnap.compressionRatio26 <= 1.20 || trigSnap.isBollingerSqueeze, String.format(Locale.US, "نسبت دامنهٔ ۲۶ کندل اخیر به ۲۶ کندل قبل=%.2f · فشردگی بولینگر=%s", trigSnap.compressionRatio26, trigSnap.isBollingerSqueeze)),
-            StrategyConditionCheck(5, "۵. همسویی ابر و تایم‌فریم بالاتر", if (isLong) trigSnap.isFutureKumoBullish && (macroSnap == null || !macroSnap.isPriceBelowKumo) else trigSnap.isFutureKumoBearish && (macroSnap == null || !macroSnap.isPriceAboveKumo), "ابر آینده و تایم‌فریم بالاتر نباید جهت معامله را نقض کنند."),
-            StrategyConditionCheck(6, "۶. شیب Tenkan/Kijun و Senkou A", if (isLong) trigSnap.tenkanSlopeAtrPerBar > 0.0 && trigSnap.kijunSlopeAtrPerBar >= -0.05 && trigSnap.senkouSpanASlopeAtrPerBar >= -0.02 else trigSnap.tenkanSlopeAtrPerBar < 0.0 && trigSnap.kijunSlopeAtrPerBar <= 0.05 && trigSnap.senkouSpanASlopeAtrPerBar <= 0.02, String.format(Locale.US, "شیب TK=%+.2f/%+.2f ATR · شیب SSA=%+.2f ATR", trigSnap.tenkanSlopeAtrPerBar, trigSnap.kijunSlopeAtrPerBar, trigSnap.senkouSpanASlopeAtrPerBar)),
-            StrategyConditionCheck(7, "۷. آزادی Chikou در مسیر معامله", btc52ChikouOk, if (btc52ChikouOk) "چیکو از قیمت/کندل متناظر، TK و ابر آزاد است." else "چیکو با کندل‌ها یا ابر برخورد دارد."),
-            StrategyConditionCheck(8, "۸. کیفیت حرکت شارپ (بدنه، حجم یا گسترش ATR)", btc52SharpMoveOk, String.format(Locale.US, "بدنه=%.0f%% · حجم=%.2fx · ATR گسترش=%.2fx", trigSnap.candleBodyRatio * 100.0, trigSnap.volumeRatio20, trigSnap.atrExpansionRatio52)),
-            StrategyConditionCheck(9, "۹. فاصلهٔ قابل‌تعقیب از Kijun", trigSnap.distanceToKijunAtr <= 1.65, String.format(Locale.US, "%.2f ATR (حداکثر ۱٫۶۵)", trigSnap.distanceToKijunAtr)),
-            StrategyConditionCheck(10, "۱۰. پلن نهایی و R:R حداقل ۱:۱٫۵", cond12Passed && guardedPlan.isUsable, cond12Detail),
-        )
-        val parsaConditions = parsaSpec.rules.map {
-            StrategyConditionCheck(it.index, it.titleFa, it.passed, it.detailFa)
-        } + listOf(
-            // شرط نهم به پلن واقعی گره خورده است؛ اگر «همیشه تیک» بود، یک شرط بی‌معنا
-            // در گزارش می‌ماند.
-            StrategyConditionCheck(9, "۹. پلن نهایی و R:R حداقل ۱:۱٫۵", cond12Passed && guardedPlan.isUsable, cond12Detail),
-        )
+        val conditions: List<StrategyConditionCheck> = baseSixteenConditions
+        val requiredIndicesForModel: Set<Int> = (1..17).toSet()
 ```
-
-</details>
-
 
 ## ۵) دروازه‌های ایمنی و یادگیری عصبی
 پیش از ثبت هر سفارش، `EntrySafetyGate` و `NeuralGatePolicy` یک لایهٔ جدا هستند: پیش‌فرض‌ها سقفِ پوزیشن هم‌زمان ۰ (یعنی بی‌نهایت)، سقف هر نماد ۰، حداکثر سن سیگنال ۳ کندل، و سقف نسبت هزینه/ریسک ۰٫۲۵. هفت ترمز عصبی هم در `core/NeuralGatePolicy.kt` تعریف شده‌اند. توضیح کامل: `docs/NEURAL_GATE_AND_SAFETY_FA.md`.

@@ -443,7 +443,6 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                     listOf(
                         "همه" to "ALL",
                         "بیس ۴گانه" to BitcoinStrategyModel.BASE_ICHIMOKU.id,
-                        "هیدن کراس" to BitcoinStrategyModel.HIDDEN_CROSS.id,
                         "پاتل" to BitcoinStrategyModel.PATEL_KIJUN_PULLBACK.id,
                         "تاتل" to BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT.id,
                         "هوسودا" to BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE.id,
@@ -499,10 +498,6 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 // ماشهٔ «فشردگی → انبساط» فقط روی «بیس». خاموش = خروجی بیس مو‌به‌مو مثل قبل.
                 ToggleRow("ماشهٔ فشردگی → انبساط (بیس)", settings.compressionExpansion) { on ->
                     vm.updateSettings { s -> s.copy(compressionExpansion = on) }
-                }
-                // موتور «پیمان کریپتو»: خاموش = رفتار قبلی؛ روشن = معاملهٔ کاغذی روی رمزارز.
-                ToggleRow("پیمان کریپتو حرفه‌ای (فقط رمزارز)", settings.peymanCryptoPaper) { on ->
-                    vm.updateSettings { s -> s.copy(peymanCryptoPaper = on) }
                 }
                 // ── هزینهٔ محافظه‌کارانه ──────────────────────────────────────────
                 // «اگر به سوددهی کمک می‌کند انجام بده»: این کلید سود را بیشتر نشان نمی‌دهد،

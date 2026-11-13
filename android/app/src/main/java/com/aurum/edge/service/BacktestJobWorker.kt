@@ -12,7 +12,6 @@ import androidx.work.workDataOf
 import com.aurum.edge.core.BacktestNeuralTrainer
 import com.aurum.edge.core.BacktestReplayEngine
 import com.aurum.edge.core.BacktestTradeArchive
-import com.aurum.edge.core.peyman.PeymanCryptoConfig
 import com.aurum.edge.data.BacktestArchiveStore
 import com.aurum.edge.data.BacktestDataStore
 import com.aurum.edge.data.BacktestJob
@@ -75,11 +74,6 @@ class BacktestJobWorker(
                 macroCandlesOverride = emptyList(),
                 strategyCandlesOverride = emptyList(),
                 compressionExpansionEnabled = spec.compressionExpansion,
-                peymanCryptoConfig = if (spec.peymanCryptoPaper) {
-                    PeymanCryptoConfig.PAPER
-                } else {
-                    PeymanCryptoConfig()
-                },
                 costMultiplier = if (spec.conservativeCosts) 3.0 else 1.0,
                 captureEntryReports = false,
                 neuralGate = trainer.entryGate(),

@@ -69,7 +69,6 @@ fun NeuralBrainScreen(
 
     var assistantSymbol by rememberSaveable { mutableStateOf(V1Universe.allSymbols.first()) }
     var assistantTfLabel by rememberSaveable { mutableStateOf(Interval.M15.label) }
-    var matrixFilter by rememberSaveable { mutableIntStateOf(0) } // 0 = همه ۲۴ استراتژی, 1 = ۹ لایهٔ ساختاری, 2 = ۱۵ ترکیب پایه
 
     val assistantInterval = if (assistantTfLabel == Interval.M5.label) Interval.M5 else Interval.M15
 
@@ -733,7 +732,7 @@ fun NeuralBrainScreen(
         SectionCard(
             title = "🛠️ نکات قابل اصلاح و ارتقاء بعدی از نگاه دستیار ایچیموکو (${visibleImprovementNotes.size} نکته)",
             onCopy = { viewModel.copyAssistantImprovementNotes(visibleImprovementNotes) },
-            subtitle = "عیب‌یابی خودکار معاملات، استاپ‌ها و گلوگاه‌های ۲۴ استراتژی به همراه دستور دقیق اصلاح برای آپدیت‌های بعدی یا اعمال فوری",
+            subtitle = "عیب‌یابی خودکار معاملات، استاپ‌ها و گلوگاه‌های مدل‌های فعال به همراه دستور دقیق اصلاح برای آپدیت‌های بعدی یا اعمال فوری",
             initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1547,7 +1546,7 @@ fun NeuralBrainScreen(
             initiallyExpanded = false,
         ) {
             var selectedStratId by rememberSaveable {
-                mutableStateOf(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+                mutableStateOf(BitcoinStrategyModel.BASE_ICHIMOKU.id)
             }
             var showParamsDrawer by rememberSaveable { mutableStateOf(false) }
             var showFeaturesDrawer by rememberSaveable { mutableStateOf(false) }
@@ -1987,41 +1986,16 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۱-ج. ماتریس برتری ترید به تفکیک ۱۶ استراتژی (متود جامع + ۱۵ ترکیب پایه) ──
+        // ── ۱-ج. ماتریس برتری ترید به تفکیک ۵ مدل باقی‌مانده (بیس + چهار تک‌مدل) ──
         SectionCard(
-            title = "🏆 ماتریس برتری ترید ۱۶ استراتژی (نرخ برد، Profit Factor و امید ریاضی E[R])",
+            title = "🏆 ماتریس برتری ترید ${neuralState.strategyEdgeMatrix.size} مدل (نرخ برد، Profit Factor و امید ریاضی E[R])",
             onCopy = { viewModel.copyNeuralBrainSection("matrix") },
-            subtitle = "رتبه‌بندی تریدی تمام ۱۵ ترکیب ایچیموکو و استراتژی پیمان بر اساس بازدهی واقعی و امتیاز لبه ترید",
+            subtitle = "رتبه‌بندی تریدی مدل‌های ایچیموکو (بیس + چهار تک‌مدل) بر اساس بازدهی واقعی و امتیاز لبه ترید",
             initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Pill(
-                        text = "همه (۱۶)",
-                        color = if (matrixFilter == 0) AurumColors.Gold else AurumColors.TextMuted,
-                        modifier = Modifier.clickable { matrixFilter = 0 },
-                    )
-                    Pill(
-                        text = "📚 متود جامع",
-                        color = if (matrixFilter == 1) AurumColors.Cyan else AurumColors.TextMuted,
-                        modifier = Modifier.clickable { matrixFilter = 1 },
-                    )
-                    Pill(
-                        text = "⚡ ۱۵ ترکیب پایه",
-                        color = if (matrixFilter == 2) AurumColors.Green else AurumColors.TextMuted,
-                        modifier = Modifier.clickable { matrixFilter = 2 },
-                    )
-                }
-
-                val filteredMatrix = remember(neuralState.strategyEdgeMatrix, matrixFilter) {
-                    when (matrixFilter) {
-                        1 -> neuralState.strategyEdgeMatrix.filter { it.isDriveBookStrategy }
-                        2 -> neuralState.strategyEdgeMatrix.filter { !it.isDriveBookStrategy }
-                        else -> neuralState.strategyEdgeMatrix
-                    }
+                val filteredMatrix = remember(neuralState.strategyEdgeMatrix) {
+                    neuralState.strategyEdgeMatrix
                 }
 
                 filteredMatrix.forEach { item ->

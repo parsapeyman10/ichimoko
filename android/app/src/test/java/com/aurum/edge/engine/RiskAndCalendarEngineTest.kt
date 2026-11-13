@@ -373,7 +373,7 @@ class RiskAndCalendarEngineTest {
 
         // این تست رفتار «بیس» را روی سری رمزارزی می‌سنجد؛ سیاست «فقط پیمان روی رمزارز»
         // عمداً خاموش است تا خودِ شروط بیس آزموده شوند (سیاست جای دیگری تست شده است).
-        val config = BaseStrategyConfig(cryptoSymbolsOnlyPeyman = false)
+        val config = BaseStrategyConfig()
         val dualReport = IchimokuStrategyEngine.evaluateDualTimeframeStrategy(
             activeModel = BitcoinStrategyModel.BASE_ICHIMOKU,
             config = config,
@@ -545,35 +545,22 @@ class RiskAndCalendarEngineTest {
         assertEquals(SymbolPollTier.OPEN_POSITION, openTier)
         assertEquals(15_000L, openTier.tickIntervalMs)
 
-        // 5. Verify all strategies (4-book combinations + Unified 9-Book Drive Master Method) evaluate simultaneously on 15m and 5m + R:R Breakdown & Optimal R:R
-        assertEquals(19, BitcoinStrategyModel.entries.size)
-        assertEquals(16, BitcoinStrategyModel.neuralLearningModels.size)
-        assertEquals(1, BitcoinStrategyModel.drivePdfStrategies.size)
-        assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.drivePdfStrategies.single())
-        // استراتژی ۱۶ (پیمان) دوباره فعال شد، پس هر ۱۶ روش ارزیابی می‌شوند.
-        assertEquals(16, dualReport.reports15mByStrategy.size)
-        assertEquals(16, dualReport.reports5mByStrategy.size)
-        BitcoinStrategyModel.legacyIndividualDriveIds.forEach { legacyId ->
-            assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.fromId(legacyId))
-            assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id, BitcoinStrategyModel.normalizeStrategyId(legacyId))
-        }
-        // استراتژی پیمان (جایگاه ۱۶) به درخواست کاربر دوباره فعال شد: دیگر در فهرست
-        // موقتاً خاموش نیست و مثل بقیهٔ روش‌ها در ارزیابی و بک‌تست شرکت می‌کند.
-        assertFalse(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.isTemporarilyDisabled)
-        assertEquals(16, BitcoinStrategyModel.activeStrategyIds.size)
+        // 5. تنها ۵ مدل باقی مانده‌اند (بیس + چهار تک‌استراتژی) و همگی هم‌زمان روی ۱۵m و ۵m ارزیابی می‌شوند.
+        assertEquals(5, BitcoinStrategyModel.entries.size)
+        assertEquals(5, BitcoinStrategyModel.neuralLearningModels.size)
+        assertEquals(5, dualReport.reports15mByStrategy.size)
+        assertEquals(5, dualReport.reports5mByStrategy.size)
+        assertEquals(5, BitcoinStrategyModel.activeStrategyIds.size)
         assertNotNull(
-            dualReport.reports15mByStrategy[BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id]
+            dualReport.reports15mByStrategy[BitcoinStrategyModel.BASE_ICHIMOKU.id]
         )
         BitcoinStrategyModel.entries.filter { it.id in BitcoinStrategyModel.activeStrategyIds }.forEach { model ->
             val rep15 = dualReport.reportFor(Interval.M15, model.id)
             val rep5 = dualReport.reportFor(Interval.M5, model.id)
             assertNotNull(rep15)
             assertNotNull(rep5)
-            // 3.9.57: شرط ۱۷ «اقتصاد اجرا» اضافه شد؛ هر استراتژی همان ۱۷ شرط مشترک را می‌سازد —
-            // به‌جز استراتژی پیمان که چک‌لیست اختصاصی الیوت–نئوویو دارد (۸ شرط + قواعد
-            // نئوویو برای نمایش). پیش از این پیمان خاموش بود و این حلقه هرگز به آن نمی‌رسید.
-            val expectedConditions = if (model.isDrivePdfStrategy) 8 else 17
-            assertEquals(expectedConditions, rep15!!.conditions.size)
+            // همهٔ مدل‌های باقی‌مانده همان ۱۷ شرط مشترک بیس را می‌سازند.
+            assertEquals(17, rep15!!.conditions.size)
             assertNotNull(rep15.rrBreakdown)
             assertTrue((rep15.optimalRiskReward ?: 0.0) >= 1.5)
             assertTrue((rep15.riskReward ?: 0.0) >= 1.5)
@@ -591,11 +578,12 @@ class RiskAndCalendarEngineTest {
         assertTrue(snap.tenkan7 > 0.0 && snap.kijun22 > 0.0 && snap.senkouB44 > 0.0)
         assertTrue(snap.adx14 > 0.0 && snap.kellySignalCount in 1..5 && snap.kellyWinProbabilityPercent in 48..76)
 
-        // v3.9.47: پیمان فقط لایهٔ الیوت/نئوویو را نگه داشته و بقیهٔ لایه‌ها پاک شده‌اند.
-        val paymanPlaybook = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.driveBookPlaybook()
-        assertTrue(paymanPlaybook.authorAndEdition.contains("Elliott"))
-        assertTrue(paymanPlaybook.entryChecklistStepsFa.none { it.contains("لایه") })
-        assertTrue(paymanPlaybook.strategyId == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+        // دفترچهٔ قوانین هر ۵ مدل باقی‌مانده پر است و شناسه‌اش با خودِ مدل می‌خواند.
+        BitcoinStrategyModel.entries.forEach { model ->
+            val spec = model.driveBookPlaybook()
+            assertTrue(spec.strategyId == model.id)
+            assertTrue(spec.entryChecklistStepsFa.isNotEmpty())
+        }
 
         // Verify Trend Loss In Profit Detector (v3.9.47: خروج هوشمند فقط بالای +۲R مجاز است)
         val tradeInProfitAt63k = calc.copy(
@@ -969,7 +957,7 @@ class RiskAndCalendarEngineTest {
 
         // آرشیو تصویری حذف شد: نه فایل تصویری ساخته می‌شود، نه متادیتا داخل تصویر جاسازی می‌شود.
         // معاملهٔ نمونه برای تست‌های PDF و شمارهٔ نمایشی لازم است.
-        assertTrue(BitcoinStrategyModel.HIDDEN_CROSS.id.isNotBlank())
+        assertTrue(BitcoinStrategyModel.BASE_ICHIMOKU.id.isNotBlank())
 
         val sampleTrade = com.aurum.edge.core.PaperTrade(
             id = "SNAP_TEST_1",
@@ -983,12 +971,12 @@ class RiskAndCalendarEngineTest {
             confidence = 91.0,
             openedAt = 1_760_200_000_000L,
             fixedRiskUsd = 5.0,
-            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
-            strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
+            strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+            strategyTitleFa = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
         )
 
-        // Verify all 9 Drive PDF strategies have complete DriveBookPlaybookSpec + live telemetry + dedicated 17 conditions
-        BitcoinStrategyModel.drivePdfStrategies.forEach { driveModel ->
+        // هر ۵ مدل باقی‌مانده دفترچهٔ کامل + ۱۷ شرط اختصاصی دارند.
+        BitcoinStrategyModel.entries.forEach { driveModel ->
             val spec = driveModel.driveBookPlaybook()
             assertTrue(spec.bookFileTitle.isNotBlank())
             assertTrue(spec.ichimokuSettingsFa.isNotBlank())
@@ -1009,7 +997,7 @@ class RiskAndCalendarEngineTest {
 
         // Verify Trading-Focused Neural Engine analytics & MasterIchimokuTradingAssistant improvement notes
         val summaryAfter = neuralEngine.state.value
-        assertEquals(16, summaryAfter.strategyEdgeMatrix.size)
+        assertEquals(5, summaryAfter.strategyEdgeMatrix.size)
         // زمان‌بندی سشن‌ها از یادگیری حذف شد: هیچ لبهٔ سشنی ساخته نمی‌شود (تنها وظیفهٔ زمانی،
         // جلوگیری از نگه‌داشتن معامله در بازار بسته است که در EntrySafetyGate/MarketHours است).
         assertTrue(summaryAfter.sessionEdges.isEmpty())
@@ -1111,20 +1099,16 @@ class RiskAndCalendarEngineTest {
 
         // Verify v3.9.23 features:
         // 1. Unified Drive R:R method is identical to Base Ichimoku (baseOptimalRr = 2.25, same structural SL/TP & R:R formula)
-        assertEquals(
-            BitcoinStrategyModel.BASE_ICHIMOKU.baseOptimalRr,
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.baseOptimalRr,
-            1e-6,
-        )
+        assertEquals(2.25, BitcoinStrategyModel.BASE_ICHIMOKU.baseOptimalRr, 1e-6)
         // 2. All 16 learned neural features (0..15) are tunable specifically per strategy across all 16 strategies
-        assertEquals(16, tunedParams.perStrategyProfiles.size)
+        assertEquals(5, tunedParams.perStrategyProfiles.size)
         BitcoinStrategyModel.neuralLearningModels.forEach { stratModel ->
             val prof = tunedParams.perStrategyProfiles[stratModel.id]
             assertNotNull("Missing profile for ${stratModel.id}", prof)
             assertEquals(16, prof!!.featureTunings.size)
         }
         val tunedFeatProfile = neuralEngineV3919.tuneStrategyFeature(
-            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+            strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
             featureIndex = 10,
             tuningMultiplier = 1.65,
             learnedWeight = 0.88,
@@ -1134,7 +1118,7 @@ class RiskAndCalendarEngineTest {
         assertTrue(tunedFeatProfile.featureTunings[10].isManuallyTuned)
 
         val tunedStratParams = neuralEngineV3919.tuneStrategyParameters(
-            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+            strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
             minRiskReward = 2.10,
             maxKijunExtensionAtr = 1.55,
         )
@@ -1142,8 +1126,8 @@ class RiskAndCalendarEngineTest {
         assertEquals(1.55, tunedStratParams.maxKijunExtensionAtr, 1e-4)
 
         val appliedCfg = neuralEngineV3919.applyAutoTunedParametersToConfig(BaseStrategyConfig())
-        assertEquals(16, appliedCfg.perStrategyOverrides.size)
-        val driveEffectiveCfg = appliedCfg.resolveForStrategy(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+        assertEquals(5, appliedCfg.perStrategyOverrides.size)
+        val driveEffectiveCfg = appliedCfg.resolveForStrategy(BitcoinStrategyModel.BASE_ICHIMOKU.id)
         assertEquals(2.10, driveEffectiveCfg.minRiskReward, 1e-4)
         assertEquals(1.55, driveEffectiveCfg.maxKijunExtensionAtr, 1e-4)
 

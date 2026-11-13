@@ -52,7 +52,7 @@
 ### بخش‌های موتور (`core/IchimokuStrategyEngine.kt`)
 کد شرط‌های مشترک (۱، ۲، ۴، ۶ و ۱۱ تا ۱۷) این‌جا تکرار نشده؛ در سند [00-shared-pipeline.md](00-shared-pipeline.md) است. پایین فقط کد شرط‌های مکتبیِ همین روش آمده.
 
-**Check 5: Future Kumo Thickness & Twist Immunity (الیوت + پلویل)** — خطوط ۳۶۴۳ تا ۳۶۵۳
+**Check 5: Future Kumo Thickness & Twist Immunity (الیوت + پلویل)** — خطوط ۲۹۲۶ تا ۲۹۳۶
 
 ```kotlin
         // ── Check 5: Future Kumo Thickness & Twist Immunity (الیوت + پلویل) ────
@@ -66,8 +66,8 @@
             trigSnap.futureKumoThicknessAtr,
         )
 ```
-**Check 9: Flat SSB Gravity & Katana Equilibrium Filter (تاتل + پلویل)** — خطوط ۳۶۹۲ تا ۳۸۰۲
-<details><summary>کد کامل (۱۱۱ خط)</summary>
+**Check 9: Flat SSB Gravity & Katana Equilibrium Filter (تاتل + پلویل)** — خطوط ۲۹۷۵ تا ۳۰۹۴
+<details><summary>کد کامل (۱۱۹ خط)</summary>
 
 ```kotlin
         // ── Check 9: Flat SSB Gravity & Katana Equilibrium Filter (تاتل + پلویل) ──
@@ -181,6 +181,14 @@
         } else {
             trigSnap.close < trigSnap.kijun && (macroSnap == null || !macroSnap.isPriceAboveKumo)
         }
+        val triggerType = detectEntryTrigger(
+            direction = candidateDirection,
+            bars = closedTriggerBars,
+            trigSnap = trigSnap,
+            stratSnap = stratSnap,
+            config = effectiveConfig,
+            activeModel = activeModel,
+        )
 ```
 
 </details>

@@ -282,11 +282,6 @@ class BacktestViewModel(
          */
         val compressionExpansion: Boolean = false,
         /**
-         * موتور «پیمان کریپتو» در حالت معاملهٔ کاغذی.
-         * خاموش = `DISABLED` (هیچ ارزیابی‌ای انجام نمی‌شود و رفتار قبلی دست‌نخورده است).
-         */
-        val peymanCryptoPaper: Boolean = false,
-        /**
          * هزینهٔ محافظه‌کارانه: کارمزد + اسپرد × ۳.
          *
          * «اگر به سودده‌بودن کمک می‌کند انجام بده.» — کم‌کردن هزینه سود را *بیشتر* نشان می‌دهد،
@@ -366,7 +361,6 @@ class BacktestViewModel(
                 maxBars = session.maxBars,
                 includeHiddenCrossLayer = session.includeHiddenCrossLayer,
                 compressionExpansion = session.compressionExpansion,
-                peymanCryptoPaper = session.peymanCryptoPaper,
                 conservativeCosts = session.conservativeCosts,
             )
         }
@@ -397,7 +391,6 @@ class BacktestViewModel(
                 maxBars = s.maxBars,
                 includeHiddenCrossLayer = s.includeHiddenCrossLayer,
                 compressionExpansion = s.compressionExpansion,
-                peymanCryptoPaper = s.peymanCryptoPaper,
                 conservativeCosts = s.conservativeCosts,
                 lastRunLinesFa = _restoredLinesFa.value,
                 lastRunAtMs = _restoredAtMs.value,
@@ -613,7 +606,6 @@ class BacktestViewModel(
             maxBars = s.maxBars,
             includeHiddenCrossLayer = s.includeHiddenCrossLayer,
             compressionExpansion = s.compressionExpansion,
-            peymanCryptoPaper = s.peymanCryptoPaper,
             conservativeCosts = s.conservativeCosts,
             cursorIndex = _cursor.value,
             noteFa = noteFa,
@@ -657,7 +649,6 @@ class BacktestViewModel(
                 maxBars = spec.maxBars,
                 includeHiddenCrossLayer = spec.includeHiddenCrossLayer,
                 compressionExpansion = spec.compressionExpansion,
-                peymanCryptoPaper = spec.peymanCryptoPaper,
                 conservativeCosts = spec.conservativeCosts,
             )
         }
@@ -743,11 +734,6 @@ class BacktestViewModel(
                 macroCandlesOverride = htfNow[Interval.H4].orEmpty(),
                 strategyCandlesOverride = htfNow[Interval.H1].orEmpty(),
                 compressionExpansionEnabled = s.compressionExpansion,
-                peymanCryptoConfig = if (s.peymanCryptoPaper) {
-                    com.aurum.edge.core.peyman.PeymanCryptoConfig.PAPER
-                } else {
-                    com.aurum.edge.core.peyman.PeymanCryptoConfig()
-                },
                 costMultiplier = if (s.conservativeCosts) 3.0 else 1.0,
                 captureEntryReports = true,
                 // ── گیت عصبی = همان کلید «مانع» در بخش هوش عصبی ──────────────────

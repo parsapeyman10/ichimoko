@@ -670,16 +670,9 @@ object RiskAndCalendarEngine {
         trades: List<PaperTrade>,
         customStrategies: List<CustomStrategySlot> = emptyList(),
     ): List<StrategyJournalCategoryStats> {
-        val normalizedTrades = trades.map { trade ->
-            if (trade.strategyId.trim() in BitcoinStrategyModel.legacyIndividualDriveIds) {
-                trade.copy(
-                    strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
-                    strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
-                )
-            } else {
-                trade
-            }
-        }
+        // استراتژی‌های ادغام‌شده (پیمان/نئوویو) حذف شده‌اند؛ معاملات قدیمی ژورنال
+        // با شناسهٔ خودشان در دستهٔ «سایر» باقی می‌مانند و بازنویسی نمی‌شوند.
+        val normalizedTrades = trades
         val orderedStrategyDefs = buildList {
             BitcoinStrategyModel.entries.forEach { add(it.id to it.titleFa) }
             customStrategies.forEach { add(it.id to it.titleFa) }

@@ -52,7 +52,7 @@
 ### بخش‌های موتور (`core/IchimokuStrategyEngine.kt`)
 کد شرط‌های مشترک (۱، ۲، ۴، ۶ و ۱۱ تا ۱۷) این‌جا تکرار نشده؛ در سند [00-shared-pipeline.md](00-shared-pipeline.md) است. پایین فقط کد شرط‌های مکتبیِ همین روش آمده.
 
-**Check 5: Future Kumo Thickness & Twist Immunity (الیوت + پلویل)** — خطوط ۳۶۴۳ تا ۳۶۵۳
+**Check 5: Future Kumo Thickness & Twist Immunity (الیوت + پلویل)** — خطوط ۲۹۲۶ تا ۲۹۳۶
 
 ```kotlin
         // ── Check 5: Future Kumo Thickness & Twist Immunity (الیوت + پلویل) ────
@@ -66,7 +66,7 @@
             trigSnap.futureKumoThicknessAtr,
         )
 ```
-**Check 10: Hosoda N-Wave S-Point & Kihon Suchi Time Cycle Guard** — خطوط ۴۰۴۳ تا ۴۰۵۲
+**Check 10: Hosoda N-Wave S-Point & Kihon Suchi Time Cycle Guard** — خطوط ۳۱۶۴ تا ۳۱۷۳
 
 ```kotlin
         // ── Check 10: Hosoda N-Wave S-Point & Kihon Suchi Time Cycle Guard ────

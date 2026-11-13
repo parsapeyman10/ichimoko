@@ -81,7 +81,7 @@ enum class JournalExportFormat(
     JSON_QUANT(
         id = "json",
         titleFa = "🧬 خروجی کوانت و هوش مصنوعی (Structured JSON)",
-        subtitleFa = "ساختار کامل متریک‌های آماری، لیدربورد ۲۴ استراتژی (۱۵ ترکیب + ۹ لایهٔ ساختاری)، منحنی سرمایه و آرایه معاملات",
+        subtitleFa = "ساختار کامل متریک‌های آماری، لیدربورد مدل‌های ایچیموکو، منحنی سرمایه و آرایه معاملات",
         extension = "json",
         mimeType = "application/json",
     ),

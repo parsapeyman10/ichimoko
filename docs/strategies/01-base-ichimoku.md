@@ -54,7 +54,7 @@
 
 ## کد
 ### بخش‌های موتور (`core/IchimokuStrategyEngine.kt`)
-**Check 1: 3-TF Kumo Regime Alignment (4H / 1H / 15m)** — خطوط ۳۵۸۲ تا ۳۵۹۹
+**Check 1: 3-TF Kumo Regime Alignment (4H / 1H / 15m)** — خطوط ۲۸۶۵ تا ۲۸۸۲
 
 ```kotlin
         // ── Check 1: 3-TF Kumo Regime Alignment (4H / 1H / 15m) ───────────────
@@ -75,7 +75,7 @@
             }
         }
 ```
-**Check 2: Sanyaku 5-Line Order (Price > Tenkan >= Kijun > Kumo)** — خطوط ۳۶۰۰ تا ۳۶۱۱
+**Check 2: Sanyaku 5-Line Order (Price > Tenkan >= Kijun > Kumo)** — خطوط ۲۸۸۳ تا ۲۸۹۴
 
 ```kotlin
         // ── Check 2: Sanyaku 5-Line Order (Price > Tenkan >= Kijun > Kumo) ─────
@@ -90,7 +90,7 @@
             "قیمت < تنکان (${trigSnap.tenkan}) ≤ کیجون (${trigSnap.kijun}) < کومو (${trigSnap.kumoBottom})"
         }
 ```
-**Check 3: Tenkan / Kijun Koten-Gyakuten & Dynamic Equilibrium Slope** — خطوط ۳۶۱۲ تا ۳۶۳۰
+**Check 3: Tenkan / Kijun Koten-Gyakuten & Dynamic Equilibrium Slope** — خطوط ۲۸۹۵ تا ۲۹۱۳
 
 ```kotlin
         // ── Check 3: Tenkan / Kijun Koten-Gyakuten & Dynamic Equilibrium Slope ──
@@ -112,7 +112,7 @@
             trigSnap.kijunSlopeAtrPerBar,
         )
 ```
-**Check 4: Future Kumo Direction & Non-diverging Span B (26 bars ahead)** — خطوط ۳۶۳۱ تا ۳۶۴۲
+**Check 4: Future Kumo Direction & Non-diverging Span B (26 bars ahead)** — خطوط ۲۹۱۴ تا ۲۹۲۵
 
 ```kotlin
         // ── Check 4: Future Kumo Direction & Non-diverging Span B (26 bars ahead) ──
@@ -127,7 +127,7 @@
         }
         val cond4Detail = "Future SSA=${stratSnap.futureSpanA} vs SSB=${stratSnap.futureSpanB} (${if (stratSnap.isFutureKumoBullish) "صعودی" else "نزولی"})"
 ```
-**Check 5: Future Kumo Thickness & Twist Immunity (الیوت + پلویل)** — خطوط ۳۶۴۳ تا ۳۶۵۳
+**Check 5: Future Kumo Thickness & Twist Immunity (الیوت + پلویل)** — خطوط ۲۹۲۶ تا ۲۹۳۶
 
 ```kotlin
         // ── Check 5: Future Kumo Thickness & Twist Immunity (الیوت + پلویل) ────
@@ -141,7 +141,7 @@
             trigSnap.futureKumoThicknessAtr,
         )
 ```
-**Check 6: Chikou Span 3D Open Space (26 bars back + 6-bar corridor)** — خطوط ۳۶۵۴ تا ۳۶۶۷
+**Check 6: Chikou Span 3D Open Space (26 bars back + 6-bar corridor)** — خطوط ۲۹۳۷ تا ۲۹۵۰
 
 ```kotlin
         // ── Check 6: Chikou Span 3D Open Space (26 bars back + 6-bar corridor) ──
@@ -158,7 +158,7 @@
             "چیکو درگیر کندل‌ها یا ابر ۲۶ دوره قبل است"
         }
 ```
-**Check 7: Chikou Structural Peak / Trough Clearance (مارک تاتل)** — خطوط ۳۶۶۸ تا ۳۶۷۹
+**Check 7: Chikou Structural Peak / Trough Clearance (مارک تاتل)** — خطوط ۲۹۵۱ تا ۲۹۶۲
 
 ```kotlin
         // ── Check 7: Chikou Structural Peak / Trough Clearance (مارک تاتل) ─────
@@ -173,7 +173,7 @@
             "کلوز=${trigSnap.close} در برابر کف چیکو=${trigSnap.chikouSupportTrough}"
         }
 ```
-**Check 8: Kijun Rubber-Band & Anti-C-Clamp Overextension Filter** — خطوط ۳۶۸۰ تا ۳۶۹۱
+**Check 8: Kijun Rubber-Band & Anti-C-Clamp Overextension Filter** — خطوط ۲۹۶۳ تا ۲۹۷۴
 
 ```kotlin
         // ── Check 8: Kijun Rubber-Band & Anti-C-Clamp Overextension Filter ─────
@@ -188,8 +188,8 @@
             if (stratSnap.isCClampWarning || trigSnap.isCClampWarning) " · هشدار C-Clamp" else "",
         )
 ```
-**Check 9: Flat SSB Gravity & Katana Equilibrium Filter (تاتل + پلویل)** — خطوط ۳۶۹۲ تا ۳۸۰۲
-<details><summary>کد کامل (۱۱۱ خط)</summary>
+**Check 9: Flat SSB Gravity & Katana Equilibrium Filter (تاتل + پلویل)** — خطوط ۲۹۷۵ تا ۳۰۹۴
+<details><summary>کد کامل (۱۱۹ خط)</summary>
 
 ```kotlin
         // ── Check 9: Flat SSB Gravity & Katana Equilibrium Filter (تاتل + پلویل) ──
@@ -303,12 +303,19 @@
         } else {
             trigSnap.close < trigSnap.kijun && (macroSnap == null || !macroSnap.isPriceAboveKumo)
         }
+        val triggerType = detectEntryTrigger(
+            direction = candidateDirection,
+            bars = closedTriggerBars,
+            trigSnap = trigSnap,
+            stratSnap = stratSnap,
+            config = effectiveConfig,
+            activeModel = activeModel,
+        )
 ```
 
 </details>
 
-**Compute Sniper Entry Zone & Tight Structural SL (متود یکپارچه با جامع بیس)** — خطوط ۳۹۴۶ تا ۴۰۴۲
-<details><summary>کد کامل (۹۶ خط)</summary>
+**Compute Sniper Entry Zone & Tight Structural SL (متود یکپارچه با جامع بیس)** — خطوط ۳۰۹۵ تا ۳۱۶۳
 
 ```kotlin
         // ── Compute Sniper Entry Zone & Tight Structural SL (متود یکپارچه با جامع بیس) ──
@@ -362,25 +369,7 @@
             triggerInterval = effectiveConfig.triggerInterval,
             activeModel = activeModel,
         )
-        val specialStopAnchor = when {
-            isBtc52Model && isLong -> trigSnap.prior52Low - trigSnap.atr14 * effectiveConfig.slBufferAtr
-            isBtc52Model -> trigSnap.prior52High + trigSnap.atr14 * effectiveConfig.slBufferAtr
-            // هیدن کراس: ۱R پشت خودِ نوار ابر مخفی قفل می‌شود؛ اگر به ورود چسبیده باشد،
-            // سنگر ساختاری ۵ کندلی جای آن را می‌گیرد (بدون تورم مصنوعی ۱R).
-            isHiddenCrossModel && isLong -> min(
-                trigSnap.hiddenCloudBottom - trigSnap.atr14 * effectiveConfig.slBufferAtr,
-                trigSnap.low - trigSnap.atr14 * effectiveConfig.slBufferAtr,
-            )
-            isHiddenCrossModel -> max(
-                trigSnap.hiddenCloudTop + trigSnap.atr14 * effectiveConfig.slBufferAtr,
-                trigSnap.high + trigSnap.atr14 * effectiveConfig.slBufferAtr,
-            )
-            isParsaModel && isLong && trigSnap.currentSpanB < referenceEntryForSl ->
-                trigSnap.currentSpanB - trigSnap.atr14 * effectiveConfig.slBufferAtr
-            isParsaModel && !isLong && trigSnap.currentSpanB > referenceEntryForSl ->
-                trigSnap.currentSpanB + trigSnap.atr14 * effectiveConfig.slBufferAtr
-            else -> null
-        }
+        val specialStopAnchor: Double? = null
         val rawTechnicalSl = specialStopAnchor?.let { structural ->
             if (isLong) min(baseTechnicalSl, structural) else max(baseTechnicalSl, structural)
         } ?: baseTechnicalSl
@@ -391,27 +380,14 @@
         ).coerceAtLeast(minSafeStopDist)
 
         // حد ضرر ساختاری (Kijun / Senkou B / 5-Bar Fractal + ATR Buffer) کاملاً ثابت و غیرپله‌ای است
-        // قاعدهٔ تازهٔ استراتژی ۱۶: حد ضرر بالای خط ۲۶ (برای خرید) و با فاصله از کندل؛ اگر جمع نشود، پلن مسدود می‌شود.
-        val kijunStopRule = if (KIJUN_LAYER_IN_STRATEGY_16_ENABLED && activeModel.isNeoWaveElliottStrategy) {
-            applyKijunStopRules(
-                isLong = isLong,
-                candidateStop = rawTechnicalSl,
-                triggerSnapshot = trigSnap,
-            )
-        } else {
-            null
-        }
-        val technicalSl = kijunStopRule?.stop ?: rawTechnicalSl
+        val technicalSl = rawTechnicalSl
 
         val stopDist = max(
             abs(sniperOptimal - technicalSl),
             abs(livePrice - technicalSl),
         ).coerceAtLeast(minSafeStopDist)
 ```
-
-</details>
-
-**Check 10: Hosoda N-Wave S-Point & Kihon Suchi Time Cycle Guard** — خطوط ۴۰۴۳ تا ۴۰۵۲
+**Check 10: Hosoda N-Wave S-Point & Kihon Suchi Time Cycle Guard** — خطوط ۳۱۶۴ تا ۳۱۷۳
 
 ```kotlin
         // ── Check 10: Hosoda N-Wave S-Point & Kihon Suchi Time Cycle Guard ────
@@ -424,7 +400,7 @@
             "در حال تکمیل ساختار موج هوسودا"
         }
 ```
-**Check 11: Price Action Candle Body, Close Location, Volume Momentum & Drive PDF Book Rules** — خطوط ۴۰۵۳ تا ۴۱۰۰
+**Check 11: Price Action Candle Body, Close Location, Volume Momentum & Drive PDF Book Rules** — خطوط ۳۱۷۴ تا ۳۲۲۱
 
 ```kotlin
         // ── Check 11: Price Action Candle Body, Close Location, Volume Momentum & Drive PDF Book Rules ──
@@ -475,8 +451,7 @@
             else -> TrendPhase.CORE_EXPANSION
         }
 ```
-**محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:1.50 .. 1:3.00] برای تمام ۱۶ استراتژی** — خطوط ۴۱۰۱ تا ۴۱۸۹
-<details><summary>کد کامل (۸۸ خط)</summary>
+**محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:1.50 .. 1:3.00] برای تمام ۱۶ استراتژی** — خطوط ۳۲۲۲ تا ۳۳۰۱
 
 ```kotlin
         // ── محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:1.50 .. 1:3.00] برای تمام ۱۶ استراتژی ──
@@ -533,20 +508,11 @@
         val hiddenCrossCrownInCorridor = hiddenCrossCrownPrice > 0.0 &&
             (abs(hiddenCrossCrownPrice - entryAnchorForTp) / stopDist) in requiredMinRr..maxAllowedRr
         val rawPrimaryTp = when {
-            isBtc52Model && isLong -> entryAnchorForTp + btc52TargetDistance
-            isBtc52Model -> (entryAnchorForTp - btc52TargetDistance).coerceAtLeast(0.00001)
-            isHiddenCrossModel && hiddenCrossCrownInCorridor -> hiddenCrossCrownPrice
-            isParsaModel && isLong -> entryAnchorForTp + optTpDist
-            isParsaModel -> (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
             chosenWavePair != null -> chosenWavePair.second
             isLong -> entryAnchorForTp + optTpDist
             else -> (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
         }
         val selectedWaveLabel = when {
-            isBtc52Model -> "امتداد دامنهٔ ساختار ۵۲ کندلی"
-            isHiddenCrossModel && hiddenCrossCrownInCorridor -> "تاج کراس برابری (نصف اندازهٔ کراس)"
-            isHiddenCrossModel -> "هدف بهینه پس از کراس برابری"
-            isParsaModel -> "هدف حرکتی پس از چرخش Senkou A"
             chosenWavePair != null -> chosenWavePair.first
             else -> String.format(Locale.US, "موج بهینه هوسودا (%.2fR)", computedOptimalRr)
         }
@@ -568,10 +534,7 @@
             allPlateaus.lastOrNull { it < livePrice - trigSnap.atr14 * 0.4 }
         }
 ```
-
-</details>
-
-**Check 12: Room to HTF Plateau & Optimal R:R strictly in [1:1.50 .. 1:3.00]** — خطوط ۴۱۹۰ تا ۴۲۲۸
+**Check 12: Room to HTF Plateau & Optimal R:R strictly in [1:1.50 .. 1:3.00]** — خطوط ۳۳۰۲ تا ۳۳۴۰
 
 ```kotlin
         // ── Check 12: Room to HTF Plateau & Optimal R:R strictly in [1:1.50 .. 1:3.00] ──
@@ -613,8 +576,8 @@
             round2(unclampedTp.coerceIn(min(minAllowedTp, maxAllowedTp), minAllowedTp))
         }
 ```
-**موتور واحد ایمن‌سازی پلن (Trade Plan Guard)** — خطوط ۴۲۲۹ تا ۴۳۲۲
-<details><summary>کد کامل (۹۳ خط)</summary>
+**موتور واحد ایمن‌سازی پلن (Trade Plan Guard)** — خطوط ۳۳۴۱ تا ۳۴۳۱
+<details><summary>کد کامل (۹۰ خط)</summary>
 
 ```kotlin
         // ── موتور واحد ایمن‌سازی پلن (Trade Plan Guard) ─────────────────────────
@@ -660,9 +623,6 @@
         val riskDistSniper = round2(finalStopDist)
         val slBasisTextFa = buildString {
             append("هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون۲۶ (${round2(trigSnap.kijun)}) + کیجون۳۰/EMA34 + لبه کومو")
-            if (activeModel == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
-                append(" + هندسهٔ الیوت–نئوویو (نسخهٔ پیمان، هم‌تراز جامع بیس)")
-            }
             append(String.format(Locale.US, " + سپر ضد شدو (%.2f ATR) در دالان [0.80..2.10 ATR]", slBuffer))
             append(" + قفل سقف درصدی نوسان " + effectiveConfig.triggerInterval.label)
         }
@@ -714,7 +674,7 @@
 
 </details>
 
-**Check 13: Directional Efficiency Ratio (Kaufman ER) & Anti-Chop Filter** — خطوط ۴۳۲۳ تا ۴۳۳۱
+**Check 13: Directional Efficiency Ratio (Kaufman ER) & Anti-Chop Filter** — خطوط ۳۴۳۲ تا ۳۴۴۰
 
 ```kotlin
         // ── Check 13: Directional Efficiency Ratio (Kaufman ER) & Anti-Chop Filter ──
@@ -726,7 +686,7 @@
             if (htfKijunCounterTrap) " · تله خلاف کیجون 1H" else if (dualFlatChop) " · رِنج افقی" else " · روند خالص",
         )
 ```
-**Check 14: Anti-Fakeout Wick Guard & Liquidity Sweep Filter** — خطوط ۴۳۳۲ تا ۴۳۴۴
+**Check 14: Anti-Fakeout Wick Guard & Liquidity Sweep Filter** — خطوط ۳۴۴۱ تا ۳۴۵۳
 
 ```kotlin
         // ── Check 14: Anti-Fakeout Wick Guard & Liquidity Sweep Filter ────────
@@ -742,14 +702,14 @@
             favorableTail * 100.0,
         )
 ```
-**Check 15: Core-Trend Phase Classification (Genesis / Core vs Exhaustion)** — خطوط ۴۳۴۵ تا ۴۳۴۸
+**Check 15: Core-Trend Phase Classification (Genesis / Core vs Exhaustion)** — خطوط ۳۴۵۴ تا ۳۴۵۷
 
 ```kotlin
         // ── Check 15: Core-Trend Phase Classification (Genesis / Core vs Exhaustion) ──
         val cond15Passed = trendPhase == TrendPhase.GENESIS || trendPhase == TrendPhase.CORE_EXPANSION
         val cond15Detail = "${trendPhase.badgeFa} · کندل $waveBars موج · فاصله کیجون: ${String.format(Locale.US, "%.2f", extAtr)} ATR"
 ```
-**Check 16: Sniper Entry Precision & Anti-Chase Pocket** — خطوط ۴۳۴۹ تا ۴۳۵۳
+**Check 16: Sniper Entry Precision & Anti-Chase Pocket** — خطوط ۳۴۵۸ تا ۳۴۶۲
 
 ```kotlin
         // ── Check 16: Sniper Entry Precision & Anti-Chase Pocket ──────────────
@@ -757,7 +717,7 @@
         val maxSniperDist = effectiveConfig.maxSniperDistanceAtr.coerceIn(0.20, 0.55)
         val cond16Passed = distToSniperAtr <= maxSniperDist && distFromTenkanAtr <= (maxSniperDist + 0.50)
 ```
-**Check 17 — اقتصاد معامله: نسبت هزینهٔ اجرا به ۱R** — خطوط ۴۳۵۴ تا ۴۳۷۸
+**Check 17 — اقتصاد معامله: نسبت هزینهٔ اجرا به ۱R** — خطوط ۳۴۶۳ تا ۳۴۸۷
 
 ```kotlin
         // ── Check 17 — اقتصاد معامله: نسبت هزینهٔ اجرا به ۱R ─────────────────
@@ -798,12 +758,12 @@
 |  · دیوار تاج هیدن کراس=%.2f (%.2f ATR) %s |
 | در حال تکمیل ساختار موج هوسودا |
 | بدنه کندل: %.0f%% · CLV: %.0f%% · حجم به میانگین ۲۰: %.2fx%s |
-| امتداد دامنهٔ ساختار ۵۲ کندلی |
-| تاج کراس برابری (نصف اندازهٔ کراس) |
-| هدف بهینه پس از کراس برابری |
-| هدف حرکتی پس از چرخش Senkou A |
 | موج بهینه هوسودا (%.2fR) |
-|  + هندسهٔ الیوت–نئوویو (نسخهٔ پیمان، هم‌تراز جامع بیس) |
+|  + سپر ضد شدو (%.2f ATR) در دالان [0.80..2.10 ATR] |
+|  + قفل سقف درصدی نوسان  |
+|  · قبل از دیوار فلت تایم بالاتر ($nearestObstacle) |
+| فرمول: پاداش (|TP−Entry| = %s) ÷ ریسک ۱R (|Entry−SL| = %s) = 1:%.2f (در بازه مجاز ۱.۵ تا ۳.۰) |
+| عدد مناسب R:R = 1:%.2f |
 
 ## چطور خودت بررسی کنی
 

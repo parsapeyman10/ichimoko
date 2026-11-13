@@ -37,7 +37,6 @@ data class BacktestSession(
     val maxBars: Int = 0,
     val includeHiddenCrossLayer: Boolean = true,
     val compressionExpansion: Boolean = false,
-    val peymanCryptoPaper: Boolean = false,
     /** هزینهٔ محافظه‌کارانه (کارمزد و اسپرد ×۳). */
     val conservativeCosts: Boolean = false,
     /** خلاصهٔ خط‌به‌خط آخرین اجرا: خلاصهٔ کلی + گزارش ماه‌به‌ماه. */

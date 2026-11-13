@@ -52,7 +52,7 @@
 ### بخش‌های موتور (`core/IchimokuStrategyEngine.kt`)
 کد شرط‌های مشترک (۱، ۲، ۴، ۶ و ۱۱ تا ۱۷) این‌جا تکرار نشده؛ در سند [00-shared-pipeline.md](00-shared-pipeline.md) است. پایین فقط کد شرط‌های مکتبیِ همین روش آمده.
 
-**Check 3: Tenkan / Kijun Koten-Gyakuten & Dynamic Equilibrium Slope** — خطوط ۳۶۱۲ تا ۳۶۳۰
+**Check 3: Tenkan / Kijun Koten-Gyakuten & Dynamic Equilibrium Slope** — خطوط ۲۸۹۵ تا ۲۹۱۳
 
 ```kotlin
         // ── Check 3: Tenkan / Kijun Koten-Gyakuten & Dynamic Equilibrium Slope ──
@@ -74,7 +74,7 @@
             trigSnap.kijunSlopeAtrPerBar,
         )
 ```
-**Check 8: Kijun Rubber-Band & Anti-C-Clamp Overextension Filter** — خطوط ۳۶۸۰ تا ۳۶۹۱
+**Check 8: Kijun Rubber-Band & Anti-C-Clamp Overextension Filter** — خطوط ۲۹۶۳ تا ۲۹۷۴
 
 ```kotlin
         // ── Check 8: Kijun Rubber-Band & Anti-C-Clamp Overextension Filter ─────
