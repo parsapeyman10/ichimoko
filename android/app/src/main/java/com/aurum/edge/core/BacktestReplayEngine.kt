@@ -57,7 +57,13 @@ object BacktestReplayEngine {
         /** خروج هوشمند/مدیریت معامله هم اجرا شود (همان کد زندهٔ برنامه). */
         val useSmartExit: Boolean = true,
         val usePreserveMode: Boolean = true,
-        val useTimeStop: Boolean = true,
+        /**
+         * توقف زمانی — **خاموش به‌پیش‌فرض**.
+         *
+         * بستن معاملهٔ روندی به‌خاطر رسیدن به شمارهٔ کندل (۲۰ کندل) تز را باطل نمی‌کند؛ خروج
+         * باید ساختاری باشد (حد ضرر/هدف/ابطال روند). برای مقایسهٔ A/B می‌توان روشن کرد.
+         */
+        val useTimeStop: Boolean = false,
         /** حداکثر تعداد کندل نگه‌داری هر معامله؛ `null` = پیش‌فرض موتور زنده. */
         val maxHoldBars: Int? = null,
         /** توقف زمانی خروجی (نشانگر پیشرفت). */

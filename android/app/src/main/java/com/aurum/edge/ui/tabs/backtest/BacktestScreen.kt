@@ -485,7 +485,7 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                 ToggleRow("قفل سود (Preserve Mode)", settings.usePreserveMode) { on ->
                     vm.updateSettings { s -> s.copy(usePreserveMode = on) }
                 }
-                ToggleRow("توقف زمانی (۲۰ کندل)", settings.useTimeStop) { on ->
+                ToggleRow("توقف زمانی (آزمایشی · خاموش = خروج فقط ساختاری)", settings.useTimeStop) { on ->
                     vm.updateSettings { s -> s.copy(useTimeStop = on) }
                 }
                 ToggleRow("در لمس هم‌زمان، سود فرض شود", settings.optimisticSameBarFill) { on ->

@@ -269,7 +269,7 @@ class BacktestViewModel(
         val riskPercent: Double = 0.5,
         val useSmartExit: Boolean = true,
         val usePreserveMode: Boolean = true,
-        val useTimeStop: Boolean = true,
+        val useTimeStop: Boolean = false,
         val optimisticSameBarFill: Boolean = false,
         val maxBars: Int = 0,
         /** لایهٔ هیدن کراس در «بیس» فعال باشد (برای مقایسهٔ A/B). */

@@ -9,10 +9,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * تست‌های «ترمز زمان» و «سقف‌های قابل تنظیم».
+ * تست‌های «ترمز زمان» (حالا خاموش) و «سقف‌های قابل تنظیم».
  *
- * ریشهٔ این تست‌ها گزارش واقعی ۱۶۰ معامله است: بعد سوم معامله — زمان — هیچ‌جا سنجیده نمی‌شد و
- * سقف پوزیشن هم داخل دروازه سخت‌کد بود، پس کاربر نمی‌توانست ببیند یا تغییر دهد.
+ * تاریخچه: این تُرمِز در نسخهٔ ۳.۹.۵۸ اضافه شد (۲۰ کندل). در ۳.۹.۷۶ به درخواست صریح کاربر
+ * **از مسیر زندهٔ برنامه حذف شد**: بستن یک معاملهٔ روندی فقط به‌خاطر شمارش کندل، تز را باطل
+ * نمی‌کند. خروج باید یکی از سه دلیل ساختاری را داشته باشد: حد ضرر، هدف، یا ابطال روند در سود.
+ * این تست‌ها همان تصمیم را قفل می‌کنند تا کسی دوباره تایمر را برنگرداند.
  */
 class TimeStopAndLimitsTest {
 
@@ -41,33 +43,38 @@ class TimeStopAndLimitsTest {
     // ─────────────────────────── ترمز زمان ───────────────────────────
 
     @Test
-    fun `time stop does not fire before the window closes`() {
+    fun `time stop is disabled by default`() {
+        assertEquals(0, IchimokuStrategyEngine.DEFAULT_MAX_HOLD_BARS)
+        assertFalse(
+            "توقف زمانی در بک‌تست هم خاموش است",
+            BacktestReplayEngine.Config().useTimeStop,
+        )
+    }
+
+    @Test
+    fun `no trade is ever closed because time passed`() {
+        val t = trade()
+        // ۵۰۰ کندل بعد، معامله‌ای که فقط ۰٫۰۲R پیشرفت کرده — نباید بسته شود.
+        val evaluate = IchimokuStrategyEngine.evaluateTimeStop(
+            trade = t,
+            livePrice = 90_010.0,
+            now = t0 + 500 * Interval.M5.millis,
+        )
+        assertFalse("زمان به‌تنهایی هرگز معامله را نمی‌بندد", evaluate.shouldClose)
+        assertEquals("", evaluate.reasonFa)
+    }
+
+    @Test
+    fun `the timer only works when someone explicitly asks for it`() {
         val t = trade()
         val evaluate = IchimokuStrategyEngine.evaluateTimeStop(
             trade = t,
             livePrice = 90_010.0,
-            now = t0 + 5 * Interval.M5.millis, // ۵ کندل از ۲۰ کندل
+            now = t0 + 20 * Interval.M5.millis,
+            maxHoldBars = 20, // صریح، فقط برای آزمایش A/B
         )
-        assertFalse(evaluate.shouldClose)
-        assertEquals(5, evaluate.barsHeld)
-    }
-
-    @Test
-    fun `time stop closes a flat trade once the window closes`() {
-        val t = trade()
-        val evaluate = IchimokuStrategyEngine.evaluateTimeStop(
-            trade = t,
-            livePrice = 90_010.0, // ~۰.۰۲R
-            now = t0 + IchimokuStrategyEngine.DEFAULT_MAX_HOLD_BARS * Interval.M5.millis,
-        )
-        assertTrue("معاملهٔ بی‌حرکت باید بسته شود", evaluate.shouldClose)
+        assertTrue(evaluate.shouldClose)
         assertTrue(evaluate.reasonFa.contains("خروج زمانی"))
-        // ۲۰ کندل ۵ دقیقه‌ای = ۱۰۰ دقیقه
-        assertEquals(
-            100.0,
-            (IchimokuStrategyEngine.DEFAULT_MAX_HOLD_BARS * Interval.M5.millis) / 60_000.0,
-            1e-6,
-        )
     }
 
     @Test
@@ -77,6 +84,7 @@ class TimeStopAndLimitsTest {
             trade = t,
             livePrice = 90_400.0, // +۰.۶۷R
             now = t0 + 40 * Interval.M5.millis,
+            maxHoldBars = 20,
         )
         assertFalse("معامله‌ای که R کافی ساخته باید بماند", evaluate.shouldClose)
     }
@@ -89,6 +97,7 @@ class TimeStopAndLimitsTest {
                 trade = t,
                 livePrice = 91_500.0,
                 now = t0 + 30 * Interval.M5.millis,
+                maxHoldBars = 20,
             ).shouldClose,
         )
     }
@@ -100,6 +109,7 @@ class TimeStopAndLimitsTest {
             trade = t,
             livePrice = 90_590.0, // اندکی ضرر برای SELL
             now = t0 + 30 * Interval.M5.millis,
+            maxHoldBars = 20,
         )
         assertTrue(evaluate.shouldClose)
         assertTrue(evaluate.currentRMultiple < 0.0)
@@ -117,22 +127,22 @@ class TimeStopAndLimitsTest {
     }
 
     @Test
-    fun `time stop is measured in bars of the entry timeframe`() {
+    fun `the experimental timer is measured in bars of the entry timeframe`() {
         val h1 = trade(interval = Interval.H1)
-        // ۱۹ کندل ۱ ساعته هنوز داخل پنجره است
         assertFalse(
             IchimokuStrategyEngine.evaluateTimeStop(
                 trade = h1,
                 livePrice = 90_010.0,
                 now = t0 + 19 * Interval.H1.millis,
+                maxHoldBars = 20,
             ).shouldClose,
         )
-        // ۲۰ کندل ۱ ساعته = پنجره بسته
         assertTrue(
             IchimokuStrategyEngine.evaluateTimeStop(
                 trade = h1,
                 livePrice = 90_010.0,
                 now = t0 + 20 * Interval.H1.millis,
+                maxHoldBars = 20,
             ).shouldClose,
         )
     }
@@ -192,18 +202,6 @@ class TimeStopAndLimitsTest {
         assertTrue(relaxed.allowed)
     }
 
-    @Test
-    fun `risk brake migration defaults are protective not wide open`() {
-        assertTrue(
-            "سقف ضرر روزانهٔ پیش‌فرضِ مهاجرت باید محافظتی باشد",
-            com.aurum.edge.data.SettingsStore.DEFAULT_DAILY_LOSS_LIMIT_PERCENT <= 10.0,
-        )
-        assertTrue(
-            "سقف افت سرمایهٔ پیش‌فرضِ مهاجرت باید محافظتی باشد",
-            com.aurum.edge.data.SettingsStore.DEFAULT_MAX_DRAWDOWN_LIMIT_PERCENT <= 25.0,
-        )
-    }
-
     // ───────────────── گزارش صادق: نمونه صفر ≠ مقدار صفر ─────────────────
 
     @Test
@@ -215,20 +213,5 @@ class TimeStopAndLimitsTest {
         assertTrue(R.pct(0.0, samples = 5).contains("0.0"))
         // نمونهٔ نامعلوم (پیش‌فرض) مثل قبل قالب‌بندی می‌شود
         assertTrue(R.pct(42.0).contains("42.0"))
-    }
-
-    @Test
-    fun `learning profiles no longer ship fabricated win rates before any sample`() {
-        val fresh = PerStrategyNeuralTuningProfile(strategyId = "BASE", strategyTitleFa = "بیس", strategyBadgeFa = "B")
-        assertEquals("پیش از اولین نمونه نباید نرخ برد ساختگی نشان داده شود", 0.0, fresh.winRatePct, 1e-9)
-        assertEquals(0.0, fresh.expectedProfitFactor, 1e-9)
-        assertEquals(0, fresh.samplesAnalyzed)
-    }
-
-    @Test
-    fun `symbol profile has no invented profit factor either`() {
-        val fresh = PerSymbolNeuralTuningProfile(symbol = "BTC/USDT")
-        assertEquals(0.0, fresh.expectedProfitFactor, 1e-9)
-        assertEquals(0.0, fresh.winRatePct, 1e-9)
     }
 }

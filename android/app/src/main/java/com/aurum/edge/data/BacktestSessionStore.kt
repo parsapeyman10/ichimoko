@@ -32,7 +32,8 @@ data class BacktestSession(
     val riskPercent: Double = 0.5,
     val useSmartExit: Boolean = true,
     val usePreserveMode: Boolean = true,
-    val useTimeStop: Boolean = true,
+    /** توقف زمانی — خاموش به‌پیش‌فرض (خروج باید ساختاری باشد، نه شمارش کندل). */
+    val useTimeStop: Boolean = false,
     val optimisticSameBarFill: Boolean = false,
     val maxBars: Int = 0,
     val includeHiddenCrossLayer: Boolean = true,

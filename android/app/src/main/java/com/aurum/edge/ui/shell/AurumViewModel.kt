@@ -2118,28 +2118,10 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                     it.isOpen && V1Universe.normalize(it.symbol) == symbol
                 }
                 for (openTrade in openSymbolTrades) {
-                    // ⏱️ ترمز زمان: ماشه‌ای که در پنجرهٔ زمانی خودش به هدف نرسید، بسته می‌شود.
-                    // پیش از این، هیچ بُعد زمانی در مدیریت معامله وجود نداشت.
-                    val liveForTimeStop = dual.reportFor(openTrade.interval, openTrade.strategyId).livePrice
-                        .takeIf { it.isFinite() && it > 0.0 }
-                        ?: latestTicks[symbol]?.price
-                    val timeStop = IchimokuStrategyEngine.evaluateTimeStop(
-                        trade = openTrade,
-                        livePrice = liveForTimeStop,
-                        now = now,
-                    )
-                    if (timeStop.shouldClose && liveForTimeStop != null) {
-                        val timeClosed = container.journalStore.closeTradeAtPrice(
-                            tradeId = openTrade.id,
-                            exitPrice = liveForTimeStop,
-                            reason = timeStop.reasonFa,
-                            now = now,
-                        )
-                        if (timeClosed != null) {
-                            _toast.value = timeStop.reasonFa
-                        }
-                        continue
-                    }
+                    // ⛔ خروج زمانی حذف شد (۳.۹.۷۶): بستن معاملهٔ روندی به‌خاطر «۲۰ کندل گذشت»
+                    // تز را باطل نمی‌کند. خروج فقط با یکی از سه دلیل ساختاری انجام می‌شود:
+                    // ۱) برخورد حد ضرر ثابت، ۲) رسیدن به هدف، ۳) برگشت قطعی روند **در سود**
+                    // (Preserve Mode / trend-health در ادامهٔ همین حلقه).
                     val matchingReport = dual.reportFor(openTrade.interval, openTrade.strategyId)
                     val preserveUpdate = IchimokuStrategyEngine.evaluateOpenTradeManagement(
                         trade = openTrade,
