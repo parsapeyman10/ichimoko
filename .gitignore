@@ -31,3 +31,9 @@ google_drive/
 # Local measurement rig output (tools/strategy_lab) — jars/JDK/work dirs must never be committed.
 tools/strategy_lab/*.jar
 tools/strategy_lab/node_modules/
+
+# Local PyInstaller build environment and Windows executable output.
+tools/windows_backtest_app/.build-venv/
+tools/windows_backtest_app/build-local/
+tools/windows_backtest_app/dist-local/
+tools/windows_backtest_app/spec-local/
