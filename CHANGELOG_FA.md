@@ -42,6 +42,33 @@
 (۲۶ ستاپ مستقل ≈ یکی در هر ۶۹ کندل). آستانه‌های دروازه عمداً دست نخوردند؛ برای بستنش A/B لازم است.
 سند کامل: `docs/strategies/07-conformance-audit.md`.
 
+### ۲ب) چرا اپ «نسخهٔ جدیدتر از ۳.۹.۷۳» نمی‌دید — و چه چیزی درست شد
+
+از ۳.۹.۷۴ به بعد **هیچ نسخه‌ای منتشر نشده بود**، چون از همان کامیت CI در مرحلهٔ کامپایل UI
+می‌شکست و انتشار APK هیچ‌وقت اجرا نمی‌شد. سه خطای کامپایل (همه از حذف ۱۴ مدل و لایهٔ عادت‌ها):
+
+| خطا | علت |
+|---|---|
+| `Unresolved reference 'isDrivePdfStrategy'` | پرچم از عضو مدل به اکستنشن سطح‌بالا منتقل شده بود و `import` نداشت |
+| `report.kijunGateFa` / `kijunStopRuleFa` | فیلدهای حذف‌شدهٔ استراتژی ۱۶ هنوز در کارت UI خوانده می‌شدند |
+| `Unresolved reference 'TradingHabitsPolicy'` و `Modifier.height` | `import` جاافتاده در `AurumViewModel` و صفحهٔ تنظیمات |
+
+نتیجه: `v3.9.77` با tag و ۵ فایل (APK، `aurum-edge.json`، sidecar، `checksums.sha256`،
+`upgrade-compatibility.json`) منتشر شد و `releases/latest` روی همین نسخه است؛
+`tools/diagnose_in_app_update.py --installed-code 782` حالا `UPDATE_AVAILABLE` می‌دهد.
+
+### ۲پ) یک باگ واقعی در یادگیری شبکه که با «شل‌کردن آزمون» پوشانده شده بود
+
+آزمون `start equity does not change what the network learns` یک‌بار به‌جای رفع علت، تلورانسش
+۰٫۱۱ شده بود (کامنت خودش هم می‌گفت «یک پلهٔ گردکردن»). علت واقعی: `BacktestNeuralTrainer` به
+شبکه `pnlUsd = netPnlUsd` (دلار) و `fixedRiskUsd = فاصلهٔ قیمتی` می‌داد، پس Rِ داده‌شده
+«دلار ÷ فاصله» می‌شد؛ دلار خودش با سرمایه و ریسک درصدی مقیاس می‌خورد و بعد از کلیپ
+`[-1.5..4.5]` برچسب‌ها عوض می‌شد. حالا آموزش روی **`rMultiple` خودِ موتور** است
+(`pnlUsd = rMultiple`، `fixedRiskUsd = 1.0`) و تلورانس آزمون به **۰٫۰۰۱** سخت شد.
+
+همچنین `JournalExportEngineTest` انتظار «۱۵ ردیف استراتژی» داشت که از دوران ۱۹ مدل مانده بود؛
+به `BitcoinStrategyModel.entries.size` گره خورد.
+
 ### ۳) تست‌های جدا‌شده (بدون حذف)
 
 `TimeStopAndLimitsTest` در لابراتوار JVM کامپایل نمی‌شد چون به `SettingsStore` و پروفایل عصبی
