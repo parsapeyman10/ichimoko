@@ -55,6 +55,7 @@ FILES=(
   core/PaperOrderRules.kt core/TradePlanGuard.kt core/HiddenCrossEngine.kt core/CompressionExpansionEngine.kt
   core/RiskAndCalendarEngine.kt core/SessionExitPlanner.kt
   core/TradingPerformanceAnalytics.kt core/NeuralGatePolicy.kt core/EntrySafetyGate.kt
+  core/TradingHabitsPolicy.kt
   core/IchimokuStrategyEngine.kt core/BacktestSeries.kt core/BacktestReplayEngine.kt
   core/BacktestCsvReader.kt core/BacktestCsvLimits.kt core/BacktestTradeArchive.kt
 )
@@ -93,4 +94,6 @@ if [[ "${3:-}" == "diag" ]]; then MAIN="BtcDiagLabKt"; EXTRA=("${@:4}"); fi
 if [[ "${3:-}" == "mon" ]]; then MAIN="MonthlyLabKt"; EXTRA=("${@:4}"); fi
 # حالت «rng»: دسته‌بندی معامله‌ها بر اساس رِنج/روند بودن بازار در لحظهٔ ورود.
 if [[ "${3:-}" == "rng" ]]; then MAIN="RangeLabKt"; EXTRA=("${@:4}"); fi
-"$JAVA_HOME/bin/java" -Dfile.encoding=UTF-8 -cp "$WORK/out:$STDLIB" "$MAIN" "$BARS" "$SEED" "${EXTRA[@]}"
+# حالت «habits»: آزمون «ضرر نکن» — لایهٔ عادت‌های معاملاتی روی ۵ رژیم ساختگی + مونت‌کارلو.
+if [[ "${3:-}" == "habits" ]]; then MAIN="HabitsKt"; EXTRA=("${@:4}"); fi
+"$JAVA_HOME/bin/java" -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dstdout.encoding=UTF-8 -cp "$WORK/out:$STDLIB" "$MAIN" "$BARS" "$SEED" "${EXTRA[@]}"

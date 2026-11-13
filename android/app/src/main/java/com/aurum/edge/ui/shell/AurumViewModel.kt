@@ -765,11 +765,24 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                 continue
                             }
                             lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
-                            val tfLabel = armedReport.triggerInterval.label
-                            val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] · [${armedReport.strategyTitleFa}] · (R:R 1:${calc.riskReward} · ${armedReport.trendPhase.badgeFa})" +
-                                traderBudgetNote(armedReport.strategyId, calc)
-                            openAutoTrackedTrade(
+                            // 🎩 لایهٔ رفتاری «عادت‌های معاملاتی» (۳۹ قاعدهٔ کتاب): ریسک ۱٪، حرارت ۳٪،
+                            // R:R ≥ ۲، حد ضرر بیرون از نویز، ممنوعیت میانگین‌گیری روی ضرر و کوچک‌کردن
+                            // سایز در سری باخت/افت از قله. اگر رد شود، معامله باز نمی‌شود.
+                            val habits = applyTradingHabitsGuard(
                                 calc = calc,
+                                cfg = cfg,
+                                atr = armedReport.triggerSnapshot?.atr14 ?: 0.0,
+                                setupScorePct = armedReport.bookGateScorePct,
+                                now = tick.at,
+                                livePrice = tick.price,
+                            )
+                            if (habits == null) continue
+                            val gatedCalc = habits.calc
+                            val tfLabel = armedReport.triggerInterval.label
+                            val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] · [${armedReport.strategyTitleFa}] · (R:R 1:${gatedCalc.riskReward} · ${armedReport.trendPhase.badgeFa})" +
+                                traderBudgetNote(armedReport.strategyId, gatedCalc) + habits.noteFa
+                            openAutoTrackedTrade(
+                                calc = gatedCalc,
                                 note = sniperNote,
                                 strategyContext = armedReport.toAiStrategyContext(),
                                 entryInterval = armedReport.triggerInterval,
@@ -1286,6 +1299,169 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
      * تا پیش از این، سقف ۳ پوزیشن و ۱ پوزیشن هر نماد داخل `EntrySafetyGate` سخت‌کد بود؛
      * کاربر می‌توانست فقط در صفحهٔ ژورنال «۱۵۰ پوزیشن باز» ببیند بدون اینکه چیزی قابل تنظیم باشد.
      */
+    /**
+     * سقف‌های لایهٔ رفتاری «عادت‌های معاملاتی» از تنظیمات کاربر.
+     *
+     * منبع اعداد: کتاب *Trading Habits* (Steve Burns / Holly Burns) — قواعد ۱ تا ۳۹.
+     * پیش‌فرض‌ها همان اعداد کتاب‌اند (۱٪ ریسک هر معامله، ۳٪ ریسک باز، R:R ≥ ۲، حد ضرر ≥ ۱×ATR).
+     */
+    private fun habitsLimits(cfg: AppSettings): TradingHabitsPolicy.Limits = TradingHabitsPolicy.Limits(
+        maxRiskPerTradePct = cfg.habitsMaxRiskPerTradePct.coerceIn(0.05, 5.0),
+        maxOpenRiskPct = cfg.habitsMaxOpenRiskPct.coerceIn(0.25, 20.0),
+        minRiskReward = cfg.habitsMinRiskReward.coerceIn(1.0, 5.0),
+        minStopAtrMultiple = cfg.habitsStopAtrMultiple.coerceIn(0.0, 5.0),
+        hardStopDrawdownPct = cfg.habitsHaltDrawdownPct.coerceIn(2.0, 60.0),
+        enabled = cfg.habitsGuardEnabled,
+    )
+
+    /**
+     * خروجی داوری لایهٔ رفتاری: معاملهٔ مجاز (شاید با ریسک کوچک‌شده) + یادداشتی که روی
+     * ژورنال معامله نوشته می‌شود.
+     */
+    private data class HabitsOutcome(
+        val calc: RiskCalculationResult,
+        val noteFa: String,
+        val decision: TradingHabitsPolicy.Decision,
+    )
+
+    /** آخرین داوری لایهٔ رفتاری — برای نمایش در UI بدون محاسبهٔ دوباره. */
+    private val _lastHabitsDecision = kotlinx.coroutines.flow.MutableStateFlow<TradingHabitsPolicy.Decision?>(null)
+    val lastHabitsDecision: kotlinx.coroutines.flow.StateFlow<TradingHabitsPolicy.Decision?> = _lastHabitsDecision
+
+    /**
+     * # داوری ورود خودکار با ۳۹ قاعدهٔ کتاب «Trading Habits»
+     *
+     * این تابع بین `EntrySafetyGate` (سقف‌های سخت: سشن، کهنگی ماشه، هزینه، سقف ریسک روزانه) و
+     * باز کردن واقعی معامله می‌نشیند و لایهٔ **رفتاری** را اضافه می‌کند:
+     *
+     * | قاعده | اثر در این تابع |
+     * |---|---|
+     * | R02/R22 | ورود بدون سیگنال کمّی رد می‌شود |
+     * | R03 | R:R کمتر از ۲ رد می‌شود |
+     * | R39 | حد ضرر نزدیک‌تر از ۱×ATR رد می‌شود |
+     * | R32 | ریسک هر معامله به ۱٪ حساب محدود می‌شود |
+     * | R34 | مجموع ریسک باز از ۳٪ نمی‌گذرد |
+     * | R36 | افزودن به پوزیشن در ضرر رد می‌شود |
+     * | R23 | افت از **قله** سایز را نصف/ربع می‌کند و از حد تحمل می‌گذرد → قفل |
+     * | R35 | پس از ۳ باخت پیاپی سایز نصف، پس از ۵ باخت ربع |
+     * | R31 | کیفیت ستاپ (A/B/C) سایز را پله‌ای می‌کند |
+     * | R38 | جهش ۵۰٪ نوسان با کوچک‌کردن ریسک مؤثر پوشش داده می‌شود |
+     *
+     * @return `null` = رد شد (پیام در توست می‌آید). مقدار غیر null = همان پلن، شاید کوچک‌تر.
+     */
+    private fun applyTradingHabitsGuard(
+        calc: RiskCalculationResult,
+        cfg: AppSettings,
+        atr: Double,
+        setupScorePct: Double,
+        now: Long,
+        livePrice: Double,
+    ): HabitsOutcome? {
+        if (!cfg.habitsGuardEnabled) {
+            val off = dummyHabitsDecision(calc)
+            _lastHabitsDecision.value = off
+            return HabitsOutcome(calc, "", off)
+        }
+
+        val allTrades = trades.value
+        val equity = calc.accountBalance.takeIf { it.isFinite() && it > 0.0 } ?: cfg.accountBalance
+        val peakSeed = cfg.initialCapital.coerceAtLeast(equity)
+        val peak = maxOf(equity, TradingHabitsPolicy.peakEquityUsd(allTrades, peakSeed))
+        val streak = TradingHabitsPolicy.lossStreak(allTrades)
+        val requestedRiskPct = if (equity > 0.0) calc.riskBudgetUsd / equity * 100.0 else cfg.riskPercent
+
+        val request = TradingHabitsPolicy.EntryRequest(
+            symbol = calc.symbol,
+            action = calc.action,
+            entry = calc.entry,
+            stopLoss = calc.stopLoss,
+            takeProfit = calc.takeProfit,
+            atr = atr,
+            equityUsd = equity,
+            peakEquityUsd = peak,
+            requestedRiskPct = requestedRiskPct,
+            openRiskPct = TradingHabitsPolicy.openRiskPct(allTrades, equity),
+            lossStreak = streak,
+            setupScorePct = setupScorePct,
+            livePrice = livePrice,
+            openTrades = allTrades,
+            hasQuantifiedSignal = true,
+            limits = habitsLimits(cfg),
+        )
+        val decision = TradingHabitsPolicy.evaluate(request)
+        _lastHabitsDecision.value = decision
+
+        if (!decision.allowed) {
+            _toast.value = decision.summaryFa
+            return null
+        }
+
+        val scaledRiskUsd = calc.riskBudgetUsd * decision.sizeMultiplier
+        val resized = if (scaledRiskUsd > 0.0 && scaledRiskUsd < calc.riskBudgetUsd - 0.005) {
+            RiskAndCalendarEngine.calculatePosition(
+                symbolInput = calc.symbol,
+                accountBalance = equity,
+                riskPercent = cfg.riskPercent,
+                entry = calc.entry,
+                stopLoss = calc.stopLoss,
+                takeProfit = calc.takeProfit,
+                preferredAction = calc.action,
+                fixedRiskUsdOverride = scaledRiskUsd,
+            ) ?: calc
+        } else {
+            calc
+        }
+        val note = buildString {
+            append("\n")
+            append(decision.summaryFa)
+            decision.notesFa.forEach { append("\n· ").append(it) }
+        }
+        return HabitsOutcome(resized, note, decision)
+    }
+
+    /** روشن/خاموش‌کردن لایهٔ رفتاری «عادت‌های معاملاتی». */
+    fun setHabitsGuardEnabled(enabled: Boolean) {
+        container.settingsStore.update { it.copy(habitsGuardEnabled = enabled) }
+        _toast.value = if (enabled) {
+            "🎩 لایهٔ عادت‌های معاملاتی روشن شد: ریسک ۱٪ · حرارت ۳٪ · R:R ≥ ۲ · حد ضرر بیرون از نویز"
+        } else {
+            "🎩 لایهٔ عادت‌های معاملاتی خاموش شد (ورود خودکار بدون داوری رفتاری)"
+        }
+    }
+
+    /** بازگرداندن اعداد لایه به همان اعداد صریح کتاب (۱٪ · ۳٪ · ۲R · ۱×ATR · ۱۵٪). */
+    fun resetHabitsToBookDefaults() {
+        container.settingsStore.update {
+            it.copy(
+                habitsGuardEnabled = true,
+                habitsMaxRiskPerTradePct = TradingHabitsPolicy.MAX_RISK_PER_TRADE_PCT,
+                habitsMaxOpenRiskPct = TradingHabitsPolicy.MAX_OPEN_RISK_PCT,
+                habitsMinRiskReward = TradingHabitsPolicy.MIN_RISK_REWARD,
+                habitsStopAtrMultiple = TradingHabitsPolicy.MIN_STOP_ATR_MULTIPLE,
+                habitsHaltDrawdownPct = TradingHabitsPolicy.DEFAULT_HARD_STOP_DRAWDOWN_PCT,
+            )
+        }
+        _toast.value = "🎩 اعداد لایهٔ عادت‌های معاملاتی روی مقادیر کتاب بازنشانی شد"
+    }
+
+    /** یک داوری خالی برای وقتی لایه خاموش است و هیچ داوری قبلی هم نیست. */
+    private fun dummyHabitsDecision(calc: RiskCalculationResult): TradingHabitsPolicy.Decision =
+        TradingHabitsPolicy.Decision(
+            allowed = true,
+            reasonsFa = emptyList(),
+            sizeMultiplier = 1.0,
+            effectiveRiskPct = calc.riskPercent,
+            riskUsd = calc.riskBudgetUsd,
+            grade = TradingHabitsPolicy.SetupGrade.B,
+            riskReward = calc.riskReward,
+            neededWinRatePct = TradingHabitsPolicy.neededWinRatePct(calc.riskReward),
+            drawdownFromPeakPct = 0.0,
+            heatPct = 0.0,
+            stopAtrRatio = 0.0,
+            atrPctOfPrice = 0.0,
+            summaryFa = "🎩 عادت‌های معاملاتی: خاموش",
+        )
+
     private fun safetyLimits(cfg: AppSettings): EntrySafetyGate.Limits = EntrySafetyGate.Limits(
         // ۰ = بدون سقف. سقف پوزیشن یک «دلیل اضافهٔ رد معامله» بود و برداشته شد.
         maxConcurrentPositions = cfg.maxOpenTrades.coerceIn(0, 12),
@@ -2070,11 +2246,22 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                     continue
                                 }
                                 lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
+                                // 🎩 لایهٔ رفتاری «عادت‌های معاملاتی» (کتاب Trading Habits · قواعد ۱ تا ۳۹)
+                                val habits = applyTradingHabitsGuard(
+                                    calc = calc,
+                                    cfg = cfg,
+                                    atr = report.triggerSnapshot?.atr14 ?: 0.0,
+                                    setupScorePct = report.bookGateScorePct,
+                                    now = now,
+                                    livePrice = executionEntry,
+                                )
+                                if (habits == null) continue
+                                val gatedCalc = habits.calc
                                 val tfLabel = report.triggerInterval.label
                                 val winProbPct = (neuralEval.predictedWinProb * 100.0).toInt()
-                                val autoNote = "⚡ خودکار [تایم $tfLabel] · [${report.strategyTitleFa}] · (R:R 1:${calc.riskReward} · ${report.trendPhase.badgeFa}) · [NN:${neuralEval.conditionKey} · Win:${winProbPct}%]"
+                                val autoNote = "⚡ خودکار [تایم $tfLabel] · [${report.strategyTitleFa}] · (R:R 1:${gatedCalc.riskReward} · ${report.trendPhase.badgeFa}) · [NN:${neuralEval.conditionKey} · Win:${winProbPct}%]" + habits.noteFa
                                 openAutoTrackedTrade(
-                                    calc = calc,
+                                    calc = gatedCalc,
                                     note = autoNote,
                                     strategyContext = report.toAiStrategyContext(),
                                     entryInterval = report.triggerInterval,

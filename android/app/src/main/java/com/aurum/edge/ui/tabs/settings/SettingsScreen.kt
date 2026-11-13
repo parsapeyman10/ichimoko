@@ -489,6 +489,14 @@ fun SettingsScreen(
                     },
                 )
 
+                // 🎩 لایهٔ رفتاری «عادت‌های معاملاتی» (کتاب Trading Habits — قواعد ۱ تا ۳۹)
+                TradingHabitsCard(
+                    settings = settings,
+                    trades = trades,
+                    onToggleEnabled = { viewModel.setHabitsGuardEnabled(it) },
+                    onResetToBookDefaults = { viewModel.resetHabitsToBookDefaults() },
+                )
+
                 // داوری خودکار پلن حد ضرر / حد سود / اهرم برای همهٔ نمادها
                 SectionCard(
                     title = "🛡️ داوری پلن حد ضرر · حد سود · اهرم (SL/TP/Leverage)",

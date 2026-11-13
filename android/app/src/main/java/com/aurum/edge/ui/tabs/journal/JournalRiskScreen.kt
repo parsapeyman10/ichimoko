@@ -997,6 +997,196 @@ internal fun CapitalAndRiskLimitsCard(
     }
 }
 
+/**
+ * # کارت «عادت‌های معاملاتی» (کتاب Steve Burns / Holly Burns — قواعد ۱ تا ۳۹)
+ *
+ * این کارت فقط نمایش و یک کلید روشن/خاموش است؛ داوری واقعی در
+ * `TradingHabitsPolicy` و مسیر ورود خودکار (`AurumViewModel.applyTradingHabitsGuard`) است.
+ *
+ * چرا نمایشش لازم بود؟ چون قانونی که دیده نشود، اجرا هم نمی‌شود: ریسک باز، حرارت پورتفو،
+ * افت **از قله**، سری باخت و «بازده لازم برای جبران» همان اعدادی هستند که آدم را از یک
+ * معاملهٔ اضافی نگه می‌دارند.
+ */
+@Composable
+internal fun TradingHabitsCard(
+    settings: com.aurum.edge.core.AppSettings,
+    trades: List<com.aurum.edge.core.PaperTrade>,
+    onToggleEnabled: (Boolean) -> Unit,
+    onResetToBookDefaults: () -> Unit,
+) {
+    val openTrades = remember(trades) { trades.filter { it.isOpen } }
+    val equity = settings.accountBalance
+    val peak = remember(trades, equity, settings.initialCapital) {
+        maxOf(equity, com.aurum.edge.core.TradingHabitsPolicy.peakEquityUsd(
+            trades, settings.initialCapital.coerceAtLeast(equity),
+        ))
+    }
+    val ddPct = com.aurum.edge.core.TradingHabitsPolicy.drawdownFromPeakPct(equity, peak)
+    val openRiskPct = com.aurum.edge.core.TradingHabitsPolicy.openRiskPct(openTrades, equity)
+    val heatPct = com.aurum.edge.core.TradingHabitsPolicy.portfolioHeatPct(
+        openTrades.map { if (equity > 0.0) it.riskUsd / equity * 100.0 else 0.0 },
+    )
+    val streak = com.aurum.edge.core.TradingHabitsPolicy.lossStreak(trades)
+    val audit = remember(trades) { com.aurum.edge.core.TradingHabitsPolicy.auditClosed(trades) }
+    val openColor = when {
+        openRiskPct >= settings.habitsMaxOpenRiskPct -> AurumColors.Red
+        heatPct >= settings.habitsMaxOpenRiskPct -> AurumColors.Orange
+        else -> AurumColors.Green
+    }
+    val ddColor = when {
+        ddPct >= settings.habitsHaltDrawdownPct -> AurumColors.Red
+        ddPct >= com.aurum.edge.core.TradingHabitsPolicy.DRAWDOWN_HALVE_AT_PCT -> AurumColors.Orange
+        else -> AurumColors.Green
+    }
+    val f2 = { v: Double -> String.format(Locale.US, "%.2f", v) }
+    val f1 = { v: Double -> String.format(Locale.US, "%.1f", v) }
+
+    SectionCard(
+        title = "🎩 عادت‌های معاملاتی — ۳۹ قاعدهٔ کتاب",
+        subtitle = "ریسک ۱٪ هر معامله · حرارت باز ۳٪ · R:R ≥ ۲ · حد ضرر بیرون از نویز ATR · " +
+            "ممنوعیت میانگین‌گیری روی ضرر · کوچک‌کردن سایز در سری باخت و افت از قله",
+        initiallyExpanded = false,
+        trailing = {
+            Pill(
+                text = if (settings.habitsGuardEnabled) "فعال ✓" else "خاموش",
+                color = if (settings.habitsGuardEnabled) AurumColors.Green else AurumColors.TextMuted,
+            )
+        },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(
+                    text = if (settings.habitsGuardEnabled) {
+                        "فعال: هر ورود خودکار پیش از ثبت، از این ۳۹ قاعده عبور می‌کند"
+                    } else {
+                        "خاموش: ورود خودکار بدون داوری رفتاری انجام می‌شود"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (settings.habitsGuardEnabled) AurumColors.Green else AurumColors.TextSecondary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "سقف ریسک هر معامله ${f2(settings.habitsMaxRiskPerTradePct)}٪ · حرارت باز " +
+                        "${f2(settings.habitsMaxOpenRiskPct)}٪ · کف R:R ۱:${f2(settings.habitsMinRiskReward)} · " +
+                        "حد ضرر ≥ ${f2(settings.habitsStopAtrMultiple)}×ATR · قفل افت ${f1(settings.habitsHaltDrawdownPct)}٪",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Switch(
+                checked = settings.habitsGuardEnabled,
+                onCheckedChange = onToggleEnabled,
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            StatTile(
+                label = "ریسک باز / سقف",
+                value = "${f2(openRiskPct)}٪ / ${f2(settings.habitsMaxOpenRiskPct)}٪",
+                valueColor = openColor,
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                label = "حرارت پورتفو (ρ=۰٫۸)",
+                value = "${f2(heatPct)}٪",
+                valueColor = openColor,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            StatTile(
+                label = "افت از قله",
+                value = "${f1(ddPct)}٪ · جبران ${f1(com.aurum.edge.core.TradingHabitsPolicy.recoveryReturnPct(ddPct))}٪",
+                valueColor = ddColor,
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                label = "سری باخت فعلی",
+                value = if (streak == 0) "۰ (پاک)" else "$streak باخت پیاپی",
+                valueColor = if (streak >= com.aurum.edge.core.TradingHabitsPolicy.LOSS_STREAK_TRIGGER) AurumColors.Orange else AurumColors.TextPrimary,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        if (audit.trades > 0) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.SurfaceAlt.copy(alpha = 0.6f))
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "📊 ممیزی ${audit.trades} معاملهٔ بسته‌شده با قواعد کتاب",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "برد ${f1(audit.winRatePct)}٪ · حد لازم برای همین R:R ${f1(audit.avgNeededWinRatePct)}٪ · " +
+                        "میانگین ${f2(audit.avgR)}R · مجموع ${f2(audit.totalR)}R",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (audit.winRatePct >= audit.avgNeededWinRatePct) AurumColors.Green else AurumColors.Red,
+                )
+                Text(
+                    text = "بزرگ‌ترین ضرر ${f2(audit.maxLossR)}R · بزرگ‌ترین برد ${f2(audit.maxWinR)}R · " +
+                        "بلندترین سری باخت ${audit.maxLossStreak}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+                audit.violationsFa.forEach { v ->
+                    Text(
+                        text = "⚠️ $v",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Orange,
+                    )
+                }
+                if (audit.violationsFa.isEmpty()) {
+                    Text(
+                        text = "✅ هیچ تخلف رفتاری در ژورنال نیست",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Green,
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Pill(
+                text = "↺ بازنشانی روی اعداد کتاب",
+                color = AurumColors.Cyan,
+                modifier = Modifier.clickable { onResetToBookDefaults() },
+            )
+            Text(
+                text = "کتاب: «سیستم را بر اساس دردی که تحمل می‌کنی بساز» (R23) — اعداد پیش‌فرض همان اعداد صریح کتاب‌اند.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
 @Composable
 internal fun AvalAiPreTradeGateCard(
     settings: com.aurum.edge.core.AppSettings,

@@ -363,6 +363,19 @@ data class AppSettings(
     val maxOpenTrades: Int = EntrySafetyGate.DEFAULT_MAX_CONCURRENT_POSITIONS,
     /** سقف پوزیشن باز روی یک نماد. **۰ = بدون سقف** (پیش‌فرض تازه). */
     val maxOpenTradesPerSymbol: Int = EntrySafetyGate.DEFAULT_MAX_POSITIONS_PER_SYMBOL,
+    // ── لایهٔ رفتاری «عادت‌های معاملاتی» (کتاب Trading Habits — Steve/Holly Burns) ──
+    /** کل لایه روشن باشد. خاموش = رفتار مو‌به‌مو مثل قبل (هیچ معامله‌ای به‌خاطر این لایه رد نمی‌شود). */
+    val habitsGuardEnabled: Boolean = true,
+    /** R32 — سقف ریسک هر معامله (درصد حساب). پیش‌فرض کتاب: ۱٪. */
+    val habitsMaxRiskPerTradePct: Double = TradingHabitsPolicy.MAX_RISK_PER_TRADE_PCT,
+    /** R34 — سقف مجموع ریسک پوزیشن‌های باز (درصد حساب). پیش‌فرض کتاب: ۳٪. */
+    val habitsMaxOpenRiskPct: Double = TradingHabitsPolicy.MAX_OPEN_RISK_PCT,
+    /** R03 — کف پاداش به ریسک. پیش‌فرض کتاب: ۲ (پاداش دو تا سه برابر ریسک). */
+    val habitsMinRiskReward: Double = TradingHabitsPolicy.MIN_RISK_REWARD,
+    /** R39 — حد ضرر باید دست‌کم این‌قدر ATR دورتر از ورود باشد. تست کتاب: زیر ۱×ATR رد. */
+    val habitsStopAtrMultiple: Double = TradingHabitsPolicy.MIN_STOP_ATR_MULTIPLE,
+    /** R23 — افت سرمایه از قله که پس از آن ورود خودکار قفل می‌شود. */
+    val habitsHaltDrawdownPct: Double = TradingHabitsPolicy.DEFAULT_HARD_STOP_DRAWDOWN_PCT,
     val minConfidence: Double = 85.0,
     val spreadPrice: Double = 0.12,
     val commissionPerOz: Double = 0.035,
