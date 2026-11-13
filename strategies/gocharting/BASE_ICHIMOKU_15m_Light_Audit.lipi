@@ -168,10 +168,6 @@ if strategy.position_size < 0 and tradeLockState != 0 {
 
 // The chart shows only the exact real SL (red) and TP (green). There is no
 // entry line, formula label or numeric annotation on the chart.
-bool actualLongEntry = justOpened and strategy.position_size > 0
-bool actualShortEntry = justOpened and strategy.position_size < 0
-bool actualLongFillAndExit = filledAndClosedThisBar and pendingSide == 1
-bool actualShortFillAndExit = filledAndClosedThisBar and pendingSide == -1
 if justOpened {
     tradeLockState := 2
     activeStopPrice := pendingStopPrice
@@ -230,11 +226,8 @@ if strategy.position_size < 0 and strategy.opentrades > 0 and bar_index - strate
     strategy.close("Lite Short", comment="time stop")
 }
 
-// No indicator plot() call is used; only the real red SL and green TP lines are drawn.
-plotshape(actualLongEntry, title="Accepted Lite long entry", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.normal, text="LITE L")
-plotshape(actualShortEntry, title="Accepted Lite short entry", location=location.abovebar, shape=shape.triangledown, color=color.red, size=size.normal, text="LITE S")
-plotshape(actualLongFillAndExit, title="Accepted Lite long fill and exit", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.normal, text="LITE L")
-plotshape(actualShortFillAndExit, title="Accepted Lite short fill and exit", location=location.abovebar, shape=shape.triangledown, color=color.red, size=size.normal, text="LITE S")
+// The strategy engine supplies its own single order marker. The script draws
+// no duplicate entry marker, indicator plot or numeric annotation.
 plotshape(showRawTriggers and rawTrigger and isLong, title="Raw long trigger", location=location.belowbar, shape=shape.diamond, color=color.aqua, size=size.tiny, text="RAW")
 plotshape(showRawTriggers and rawTrigger and not isLong, title="Raw short trigger", location=location.abovebar, shape=shape.diamond, color=color.aqua, size=size.tiny, text="RAW")
 plotshape(showRawTriggers and blockedByOpenTrade, title="Signal ignored while trade locked", location=location.top, shape=shape.xcross, color=color.yellow, size=size.tiny, text="LOCK")

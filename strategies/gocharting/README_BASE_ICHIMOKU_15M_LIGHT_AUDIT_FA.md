@@ -35,7 +35,7 @@
 3. lock در تمام مدت position باقی می‌ماند.
 4. تنها پس از بسته‌شدن کامل position آزاد می‌شود؛ بنابراین pyramiding، ورود تکراری و reversal هم‌زمان انجام نمی‌شود.
 
-مثلث `LITE L` یا `LITE S` فقط روی **fill واقعی و پذیرفته‌شده** رسم می‌شود، نه روی signal submit‌شده یا signal تکراری زمان lock.
+اسکریپت marker ورود جداگانه رسم نمی‌کند تا با marker داخلی GoCharting دوباره‌کاری نشود. `Long` یا `Short` و `Exit` که GoCharting نشان می‌دهد، به‌ترتیب ورود و خروج همان یک معامله‌اند؛ دو معاملهٔ هم‌زمان نیستند.
 
 ## فقط خطوط واقعی SL و TP
 
@@ -56,7 +56,7 @@
 
 ## چارت خلوت و dashboard
 
-روی نمودار فقط کندل‌ها، marker fill واقعی (`LITE L/S`) و خطوط SL/TP دیده می‌شوند. هیچ خط indicator، خط Entry، label قیمت یا متن محاسبات نمایش داده نمی‌شود. خط 30m، خط 1H، جدول شمارش HTF و محاسبهٔ HTF نیز وجود ندارد. نشانگرهای diagnostic خام (`RAW` و `LOCK`) پیش‌فرض خاموش هستند؛ فقط برای عیب‌یابی گزینهٔ `DEBUG: show raw triggers rejected by gate` را فعال کنید.
+روی نمودار فقط کندل‌ها، marker داخلی ورود/خروج GoCharting و خطوط SL/TP دیده می‌شوند. هیچ marker تکراریِ اسکریپت، خط indicator، خط Entry، label قیمت یا متن محاسبات نمایش داده نمی‌شود. خط 30m، خط 1H، جدول شمارش HTF و محاسبهٔ HTF نیز وجود ندارد. نشانگرهای diagnostic خام (`RAW` و `LOCK`) پیش‌فرض خاموش هستند؛ فقط برای عیب‌یابی گزینهٔ `DEBUG: show raw triggers rejected by gate` را فعال کنید.
 
 | ردیف dashboard | معنا |
 |---|---|
