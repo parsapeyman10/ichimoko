@@ -15,8 +15,8 @@
 
 ## بازبینی تصویری در GoCharting
 
-برای دیدن markerهای سیگنال/ردشدن setup روی GoCharting با Lipi v2، فایل
+راهنمای اجرای Lipi v2 در GoCharting در
 [`strategies/gocharting/README_BASE_ICHIMOKU_4TF_15M_AUDIT_FA.md`](strategies/gocharting/README_BASE_ICHIMOKU_4TF_15M_AUDIT_FA.md)
-را ببینید. برای اجرای سبک با یک فایل روی هر دو چارت 5m و 15m، فایل
-[`BASE_ICHIMOKU_5m_15m_Adaptive_Light_Audit.lipi`](strategies/gocharting/BASE_ICHIMOKU_5m_15m_Adaptive_Light_Audit.lipi)
-به‌ترتیب زنجیرهٔ بستهٔ 5m/15m/30m/1H یا 15m/30m/1H را می‌سازد. این strategyها فقط بک‌تست/شبیه‌سازی‌اند و سفارش واقعی ارسال نمی‌کنند.
+آمده است. فایل عملیاتی سبک فقط برای چارت **15m**،
+[`BASE_ICHIMOKU_15m_30m_1h_Light_Audit.lipi`](strategies/gocharting/BASE_ICHIMOKU_15m_30m_1h_Light_Audit.lipi)،
+زنجیرهٔ بستهٔ 15m/30m/1H را می‌سازد و برای هر معاملهٔ شبیه‌سازی‌شده Entry، SL و TP واقعیِ bracket را روی چارت نگه می‌دارد. این strategy فقط بک‌تست/شبیه‌سازی است و سفارش واقعی ارسال نمی‌کند.
