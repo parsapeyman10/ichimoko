@@ -1,0 +1,136 @@
+//@lipi=2
+// Aurum Ichimoku Trend Runner v1
+// Strategy only: orders are simulated by GoCharting, not sent to an exchange.
+// The cloud is intentionally not shifted forward. All decisions use closed bars only.
+strategy("Aurum Ichimoku Trend Runner v1", overlay=true, initial_capital=10000, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission_percent, commission_value=0.05, pyramiding=1, process_orders_on_close=false)
+
+int tenkanLen = input.int(8, "Tenkan length", minval=2)
+int kijunLen = input.int(24, "Kijun length", minval=2)
+int spanBLen = input.int(72, "Span B length", minval=2)
+int atrLen = input.int(14, "ATR length", minval=2)
+int stopLookback = input.int(8, "Stop lookback", minval=2)
+float stopAtrBuffer = input.float(0.10, "Stop ATR buffer", minval=0.0, step=0.01)
+float baseTargetR = input.float(3.0, "Initial target in R", minval=1.0, step=0.1)
+float orderQty = input.float(1.0, "Order quantity", minval=0.000001, step=0.1)
+bool allowLong = input.bool(true, "Enable long")
+bool allowShort = input.bool(true, "Enable short")
+bool useTrendRunner = input.bool(true, "Enable Trend Runner")
+float runnerActivationR = input.float(2.85, "Runner activation R", minval=1.0, step=0.05)
+float runnerAtrMultiplier = input.float(1.20, "Runner ATR multiplier", minval=0.1, step=0.05)
+
+float tenkan = (talib.highest(high, tenkanLen) + talib.lowest(low, tenkanLen)) / 2.0
+float kijun = (talib.highest(high, kijunLen) + talib.lowest(low, kijunLen)) / 2.0
+float spanA = (tenkan + kijun) / 2.0
+float spanB = (talib.highest(high, spanBLen) + talib.lowest(low, spanBLen)) / 2.0
+float cloudHigh = math.max(spanA, spanB)
+float cloudLow = math.min(spanA, spanB)
+float atr = talib.atr(atrLen)
+float swingLow = talib.lowest(low, stopLookback)
+float swingHigh = talib.highest(high, stopLookback)
+bool crossedUp = talib.crossover(tenkan, kijun)
+bool crossedDown = talib.crossunder(tenkan, kijun)
+bool enoughBars = bar_index >= spanBLen - 1
+bool longSignal = enoughBars and crossedUp and close > cloudHigh
+bool shortSignal = enoughBars and crossedDown and close < cloudLow
+
+static float longStop = na
+static float shortStop = na
+static bool runnerActive = false
+static int pendingSide = 0
+
+// A strategy market order fills at the next bar open. Keep a pending marker so
+// a second signal cannot replace the entry before that fill happens.
+if strategy.position_size != 0 {
+    pendingSide := 0
+}
+
+if strategy.position_size > 0 {
+    float entry = strategy.position_avg_price
+    float initialRisk = entry - longStop
+    if initialRisk <= 0 {
+        // A gap opened through the pre-planned stop. Do not let a negative-R
+        // bracket make the historical result look better than it was.
+        strategy.close("Long", comment="Invalid gap risk")
+    } else {
+        float target = entry + baseTargetR * initialRisk
+        float currentR = (close - entry) / initialRisk
+        bool healthyLong = close > cloudHigh and close > kijun and tenkan >= kijun and tenkan >= tenkan[1]
+
+        // Once active, the fixed target is removed and only a closed-bar trailing
+        // stop manages the trade. The stop can only move upward.
+        if useTrendRunner and currentR >= runnerActivationR and healthyLong {
+            runnerActive := true
+            float volatilityStop = close - runnerAtrMultiplier * atr
+            float structureStop = kijun - 0.20 * atr
+            float candidateStop = math.max(volatilityStop, structureStop)
+            if candidateStop < close {
+                longStop := math.max(longStop, candidateStop)
+            }
+        }
+
+        strategy.exit("Long Exit", from_entry="Long", stop=longStop, limit=runnerActive ? na : target, comment=runnerActive ? "Trend Runner" : "SL or 3R")
+    }
+}
+
+if strategy.position_size < 0 {
+    float entry = strategy.position_avg_price
+    float initialRisk = shortStop - entry
+    if initialRisk <= 0 {
+        // Same guard for a short entry that gaps through its planned stop.
+        strategy.close("Short", comment="Invalid gap risk")
+    } else {
+        float target = entry - baseTargetR * initialRisk
+        float currentR = (entry - close) / initialRisk
+        bool healthyShort = close < cloudLow and close < kijun and tenkan <= kijun and tenkan <= tenkan[1]
+
+        // For shorts the trailing stop can only move downward.
+        if useTrendRunner and currentR >= runnerActivationR and healthyShort {
+            runnerActive := true
+            float volatilityStop = close + runnerAtrMultiplier * atr
+            float structureStop = kijun + 0.20 * atr
+            float candidateStop = math.min(volatilityStop, structureStop)
+            if candidateStop > close {
+                shortStop := math.min(shortStop, candidateStop)
+            }
+        }
+
+        strategy.exit("Short Exit", from_entry="Short", stop=shortStop, limit=runnerActive ? na : target, comment=runnerActive ? "Trend Runner" : "SL or 3R")
+    }
+}
+
+bool justClosed = strategy.closedtrades > strategy.closedtrades[1]
+bool flatAndReady = strategy.position_size == 0 and pendingSide == 0 and not justClosed
+
+// Confirmed-bar entries prevent a forming candle from creating a changing signal.
+if barstate.isconfirmed and flatAndReady {
+    if allowLong and longSignal {
+        longStop := swingLow - stopAtrBuffer * atr
+        shortStop := na
+        runnerActive := false
+        pendingSide := 1
+        strategy.entry("Long", strategy.long, qty=orderQty, comment="TK cloud long")
+    } else if allowShort and shortSignal {
+        shortStop := swingHigh + stopAtrBuffer * atr
+        longStop := na
+        runnerActive := false
+        pendingSide := -1
+        strategy.entry("Short", strategy.short, qty=orderQty, comment="TK cloud short")
+    }
+}
+
+float visibleStop = strategy.position_size > 0 ? longStop : strategy.position_size < 0 ? shortStop : na
+float visibleTarget = na
+if strategy.position_size > 0 {
+    visibleTarget := runnerActive ? na : strategy.position_avg_price + baseTargetR * (strategy.position_avg_price - longStop)
+} else if strategy.position_size < 0 {
+    visibleTarget := runnerActive ? na : strategy.position_avg_price - baseTargetR * (shortStop - strategy.position_avg_price)
+}
+
+plot(tenkan, title="Tenkan", color=color.blue, linewidth=2)
+plot(kijun, title="Kijun", color=color.orange, linewidth=2)
+plot(spanA, title="Span A (unshifted)", color=color.green)
+plot(spanB, title="Span B (unshifted)", color=color.red)
+plot(visibleStop, title="Active stop", color=color.red, linewidth=2, style=plotStyle.linebr)
+plot(visibleTarget, title="Initial 3R target", color=color.green, linewidth=2, style=plotStyle.linebr)
+plotshape(barstate.isconfirmed and flatAndReady and allowLong and longSignal, title="Long setup", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.small)
+plotshape(barstate.isconfirmed and flatAndReady and allowShort and shortSignal, title="Short setup", location=location.abovebar, shape=shape.triangledown, color=color.red, size=size.small)
