@@ -390,10 +390,9 @@ class BacktestNeuralTrainer(
         initialStopLoss = stopLoss,
         strategyId = strategyId,
         strategyTitleFa = strategyTitleFa,
+        // `fixedRiskUsd = 1.0` باعث می‌شود `PaperTrade.riskUsd` هم ۱ باشد و در نتیجه
+        // `rMultiple` محاسبه‌شده همان `pnlUsd` (= R خالص موتور) شود، بدون وابستگی به سرمایه.
         fixedRiskUsd = 1.0,
-        // `rMultiple` هم‌اکنون همان R خالص است؛ نگه‌داشتنش باعث می‌شود مسیر عادی
-        // (`trade.rMultiple ?: pnl / fixedRiskUsd`) در موتور یادگیری دقیقاً همین عدد را ببیند.
-        rMultiple = rMultiple,
         optimalRiskReward = plannedRiskReward.coerceIn(1.5, 3.0),
     )
 }
