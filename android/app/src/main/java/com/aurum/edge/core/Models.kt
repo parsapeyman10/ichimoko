@@ -11,8 +11,6 @@ data class PriceTick(
     val ask: Double? = null,
     val isTradeTick: Boolean = true,
     val provider: String? = null,
-    val sourceNote: String? = null,
-    val sourceConfirmations: Int = 0,
 ) {
     val spread: Double? get() = if (bid != null && ask != null && ask >= bid) ask - bid else null
 }
@@ -91,33 +89,6 @@ data class SignalProfile(
     companion object {
         val BASE = SignalProfile()
     }
-}
-
-enum class ConfluenceStatus { CONFIRMED, PARTIAL, CONFLICT, UNKNOWN }
-
-data class ConfluenceItem(
-    val name: String,
-    val ok: Boolean,
-    val detail: String,
-    val status: ConfluenceStatus = if (ok) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
-    val scorePercent: Int? = null,
-)
-
-data class Signal(
-    val action: SignalAction,
-    val confidence: Double,
-    val entry: Double? = null,
-    val stopLoss: Double? = null,
-    val takeProfit: Double? = null,
-    val riskReward: Double? = null,
-    val reasons: List<String> = emptyList(),
-    val blockers: List<String> = emptyList(),
-    val confluence: List<ConfluenceItem> = emptyList(),
-    val interval: Interval = Interval.M5,
-    val barTime: Long = 0L,
-    val evaluatedAt: Long = System.currentTimeMillis(),
-) {
-    val isActionable: Boolean get() = action != SignalAction.NO_TRADE
 }
 
 @Serializable
@@ -236,7 +207,6 @@ data class PaperTrade(
     val commissionUsd: Double = 0.0,
     val spreadCostUsd: Double = 0.0,
     val initialStopLoss: Double? = null,
-    val trailExtreme: Double? = null,
     val cryptoVenue: String = "NOBITEX",
     val strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
     val strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
@@ -267,7 +237,6 @@ data class PaperTrade(
     val assetClass: AssetClass get() = AssetClass.of(symbol)
 
     val riskPerOz: Double get() = kotlin.math.abs(entry - (initialStopLoss ?: stopLoss))
-    val rewardPerOz: Double get() = kotlin.math.abs(takeProfit - entry)
     val effectiveOptimalRr: Double
         get() = if (optimalRiskReward >= 1.5) optimalRiskReward.coerceIn(1.5, 3.0) else riskReward.coerceIn(1.5, 3.0)
 
@@ -366,6 +335,15 @@ data class AppSettings(
     val fixedRiskUsd: Double = 5.0,
     val dailyLossLimitPercent: Double = 100.0,
     val maxDrawdownLimitPercent: Double = 100.0,
+    /**
+     * سقف پوزیشن بازِ هم‌زمان روی کل حساب (دروازهٔ ایمنی ورود).
+     *
+     * پیش از این سقف ۳ در `EntrySafetyGate` سخت‌کد شده بود و کاربر نمی‌توانست آن را ببیند یا
+     * تغییر دهد. حالا هم در تنظیمات دیده می‌شود و هم همان عدد واقعاً در دروازه اعمال می‌شود.
+     */
+    val maxOpenTrades: Int = EntrySafetyGate.DEFAULT_MAX_CONCURRENT_POSITIONS,
+    /** سقف پوزیشن باز روی یک نماد (جلوگیری از انباشت روی BNB/BTC که در گزارش ۷۰+۴۵ معامله داشتند). */
+    val maxOpenTradesPerSymbol: Int = EntrySafetyGate.DEFAULT_MAX_POSITIONS_PER_SYMBOL,
     val minConfidence: Double = 85.0,
     val spreadPrice: Double = 0.12,
     val commissionPerOz: Double = 0.035,

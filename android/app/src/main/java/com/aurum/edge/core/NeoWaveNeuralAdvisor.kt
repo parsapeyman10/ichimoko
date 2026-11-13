@@ -2,7 +2,6 @@ package com.aurum.edge.core
 
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.sqrt
 import kotlin.math.tanh
 
@@ -244,10 +243,6 @@ object NeoWaveNeuralAdvisor {
 
     private fun round2(value: Double): Double = kotlin.math.round(value * 100.0) / 100.0
 
-    /** فقط برای تست/نمایش: بهترین سبد بر اساس امید ریاضی. */
-    fun bestCandidate(candidates: List<Candidate>): Candidate? =
-        candidates.maxWithOrNull(compareBy<Candidate>({ it.expectancyR }, { it.winRatePct }, { it.samples }))
-
     /** درصد برد نمونه‌ها. */
     fun winRatePct(samples: List<Sample>): Double =
         if (samples.isEmpty()) 0.0 else samples.count { it.won } * 100.0 / samples.size
@@ -256,32 +251,4 @@ object NeoWaveNeuralAdvisor {
     fun expectancyR(samples: List<Sample>): Double =
         if (samples.isEmpty()) 0.0 else samples.sumOf { it.achievedR } / samples.size
 
-    /** کوچک‌ترین آستانه‌ای که هنوز حداقل نمونه را دارد (برای نمایش «تا کجا می‌توان نرم‌تر شد»). */
-    fun tightestUsableConfidence(samples: List<Sample>, rules: Int, minSamples: Int = MIN_BUCKET_SAMPLES): Double? {
-        var best: Double? = null
-        for (conf in CONFIDENCE_CANDIDATES step CONFIDENCE_STEP) {
-            val n = samples.count { it.rulesPassed >= rules && it.confidencePct >= conf - 0.0001 }
-            if (n >= minSamples) best = conf.toDouble()
-        }
-        return best
-    }
-
-    /** کوچک‌ترین آستانهٔ قواعد با نمونهٔ کافی. */
-    fun tightestUsableRules(samples: List<Sample>, minSamples: Int = MIN_BUCKET_SAMPLES): Int? {
-        var best: Int? = null
-        for (rules in RULE_CANDIDATES) {
-            val n = samples.count { it.rulesPassed >= rules }
-            if (n >= minSamples) best = rules
-        }
-        return best
-    }
-
-    /** تعداد نمونه‌های قابل استفاده از یک فهرست معامله. */
-    fun usableCount(samples: List<Sample>): Int =
-        samples.count { it.rulesTotal > 0 && it.rulesPassed in 0..it.rulesTotal }
-
-    /** سقف و کف مجاز آستانه‌ها برای اعمال روی پیکربندی. */
-    fun sanitizeRules(value: Int): Int = min(12, max(1, value))
-
-    fun sanitizeConfidence(value: Double): Double = value.coerceIn(35.0, 95.0)
 }

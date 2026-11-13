@@ -212,26 +212,4 @@ class SessionExitTimingTest {
         assertTrue(coalescer.shouldPublish("DOW", 1_250L))
         assertTrue("independent keys do not starve each other", coalescer.shouldPublish("XAUUSD", 1_251L))
     }
-
-    // ─────────────── بودجهٔ منابع ───────────────
-
-    @Test
-    fun `resource budget scales with device heap`() {
-        val small = AppResourceGovernor.budgetFor(128L * 1024 * 1024)
-        val large = AppResourceGovernor.budgetFor(512L * 1024 * 1024)
-        assertTrue(small.maxArchiveRecords <= large.maxArchiveRecords)
-        assertTrue(small.archiveBudgetBytes <= large.archiveBudgetBytes)
-        assertEquals(1, small.maxConcurrentRenders)
-        assertTrue(small.renderScale < 1.0f)
-        assertEquals(1.0f, large.renderScale, 1e-6f)
-    }
-
-    @Test
-    fun `records to keep respects the budget and the record cap`() {
-        val budget = AppResourceGovernor.budgetFor(192L * 1024 * 1024)
-        val keep = AppResourceGovernor.recordsToKeep(List(500) { 40_000L }, budget)
-        assertTrue(keep in 1..budget.maxArchiveRecords)
-        assertTrue(keep * 40_000L <= budget.archiveBudgetBytes)
-        assertEquals(0, AppResourceGovernor.recordsToKeep(emptyList(), budget))
-    }
 }

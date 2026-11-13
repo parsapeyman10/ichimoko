@@ -30,15 +30,35 @@ object NeuralReportText {
             .filter { it.isNotBlank() }
             .joinToString(" | ")
 
-    fun number(value: Double, digits: Int = 2): String =
-        if (!value.isFinite()) "—" else String.format(java.util.Locale.US, "%,.${digits}f", value)
+    /** آیا این مقدار یعنی «سنجیده نشده» (صفر نمونه یا نامعتبر)؟ */
+    fun isUnmeasured(value: String): Boolean =
+        value.isBlank() || value == "—" || value == NOT_MEASURED
 
-    fun pct(value: Double, digits: Int = 1): String =
-        if (!value.isFinite()) "—" else String.format(java.util.Locale.US, "%,.${digits}f%%", value)
+    /**
+     * «اندازه‌گیری‌نشده» یعنی صفر نمونه داشته‌ایم، نه اینکه مقدار صفر بوده است.
+     *
+     * پیش از این، پروفایلی که هیچ معامله‌ای نداشت «نرخ برد ۰.۰٪» نشان می‌داد و این با
+     * «نرخ برد واقعاً صفر» اشتباه می‌شد (شاهد: گزارش ۱۶۰ معامله‌ای).
+     */
+    const val NOT_MEASURED: String = "اندازه‌گیری‌نشده"
 
-    fun rMultiple(value: Double): String =
-        if (!value.isFinite()) "—"
-        else String.format(java.util.Locale.US, "%+.2fR", value)
+    fun number(value: Double, digits: Int = 2, samples: Int = -1): String = when {
+        !value.isFinite() -> "—"
+        samples == 0 -> NOT_MEASURED
+        else -> String.format(java.util.Locale.US, "%,.${digits}f", value)
+    }
+
+    fun pct(value: Double, digits: Int = 1, samples: Int = -1): String = when {
+        !value.isFinite() -> "—"
+        samples == 0 -> NOT_MEASURED
+        else -> String.format(java.util.Locale.US, "%,.${digits}f%%", value)
+    }
+
+    fun rMultiple(value: Double, samples: Int = -1): String = when {
+        !value.isFinite() -> "—"
+        samples == 0 -> NOT_MEASURED
+        else -> String.format(java.util.Locale.US, "%+.2fR", value)
+    }
 
     /**
      * متن نهایی: سرصفحه، تاریخ تولید، بخش‌ها و پانویس.

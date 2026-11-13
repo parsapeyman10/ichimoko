@@ -1,0 +1,60 @@
+name: Windows Native
+
+on:
+  push:
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows-native.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows-native.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        run: cmake -S windows -B windows/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURUM_BUILD_TESTS=ON
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build windows/build --config Release 2>&1 | Tee-Object -FilePath windows/build/build.log
+          $buildExitCode = $LASTEXITCODE
+          if ($buildExitCode -ne 0) {
+            Select-String -Path windows/build/build.log -Pattern 'FAILED:|error [A-Z]+[0-9]+:|fatal error' |
+              Select-Object -First 20 |
+              ForEach-Object { Write-Host "::error::$($_.Line)" }
+            exit $buildExitCode
+          }
+      - name: Core tests
+        run: ctest --test-dir windows/build -C Release --output-on-failure
+      - name: Smoke QML application
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          try {
+            $env:QT_QPA_PLATFORM = 'offscreen'
+            $env:QT_FORCE_STDERR_LOGGING = '1'
+            $process = Start-Process -FilePath 'windows/build/aurum_edge.exe' -ArgumentList '--smoke-test' -Wait -PassThru `
+              -RedirectStandardOutput 'windows/build/smoke.out.log' -RedirectStandardError 'windows/build/smoke.err.log'
+            if ($process.ExitCode -ne 0) { throw "QML smoke test failed with code $($process.ExitCode)" }
+          } catch {
+            foreach ($log in @('windows/build/smoke.err.log', 'windows/build/smoke.out.log')) {
+              if (Test-Path $log) {
+                $diagnostics = (Get-Content $log -Raw) -replace "`r?`n", ' | '
+                if ($diagnostics) { Write-Host "::error::$diagnostics" }
+              }
+            }
+            Write-Host "::error::$($_.Exception.Message)"
+            exit 1
+          }

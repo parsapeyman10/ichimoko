@@ -24,10 +24,6 @@ object CryptoCatalog {
         CryptoSymbol("XRP/USDT", "XRPUSDT", "ریپل / تتر", 4),
     )
 
-    /** All 5 top crypto pairs are in the default watchlist and scanner. */
-    val watchlistSeed: List<CryptoSymbol> = symbols
-    val ids: List<String> = symbols.map { it.id }
-
     private val byId = symbols.associateBy { it.id }
 
     fun find(symbol: String): CryptoSymbol? = byId[symbol.trim().uppercase(Locale.ROOT)]

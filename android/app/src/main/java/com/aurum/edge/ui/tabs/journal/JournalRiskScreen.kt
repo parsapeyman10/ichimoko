@@ -16,15 +16,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -65,10 +64,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.CandleBackfillSummary
 import com.aurum.edge.core.DayPnlSummary
-import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
@@ -101,6 +98,15 @@ import kotlin.math.max
 private val WEEKDAY_HEADERS_FA = listOf("شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه")
 private val RISK_PRESETS = listOf(0.5, 1.0, 1.5, 2.0, 3.0, 5.0)
 private val RR_PRESETS = listOf(1.5, 2.0, 3.0)
+
+/**
+ * کف ارتفاع هر خانهٔ تقویم.
+ *
+ * قبلاً خانه‌ها فقط `aspectRatio(1f)` داشتند و ارتفاع ردیف از محتوای همان ردیف می‌آمد؛ نتیجه
+ * این بود که ردیف بدون معامله کوتاه‌تر می‌شد و شبکه «دندانه‌دار» می‌شد. با کف ثابت، همهٔ
+ * ردیف‌ها هم‌ارتفاع‌اند حتی وقتی هیچ خانه‌ای معامله ندارد.
+ */
+private val CALENDAR_CELL_MIN_HEIGHT = 34.dp
 
 @Composable
 fun JournalRiskScreen(
@@ -283,13 +289,13 @@ fun JournalRiskScreen(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // ترتیب تب‌ها = ترتیب منطقی کار: تقویم ← معاملات باز ← ماشین‌حساب ← خروجی ← آرشیو
+            // ترتیب تب‌ها = ترتیب منطقی کار: تقویم ← معاملات باز ← ماشین‌حساب ← خروجی
+            // ژورنال: معاملات، تقویم و گزارش‌ها. هیچ تب تصویری در این صفحه نیست.
             listOf(
                 0 to "📅 تقویم ژورنال (${filteredClosedTrades.size})",
                 1 to "📜 معاملات باز (${filteredOpenTrades.size})",
                 2 to "🧮 ماشین‌حساب حجم",
                 3 to "📊 خروجی و بکاپ",
-                4 to "📸 آرشیو تصویری",
             ).forEach { (idx, label) ->
                 Pill(
                     text = label,
@@ -317,7 +323,7 @@ fun JournalRiskScreen(
             report = performanceReport,
             scopeLabelFa = filterScopeLabelFa,
             onOpenExport = { subPage = 3 },
-            onOpenArchive = { subPage = 4 },
+            onOpenArchive = {},
         )
 
         // ── ۲. جعبه‌ابزار ژورنال: همهٔ خروجی‌ها/بکاپ/تنظیمات در یک کارت تاشو ──────────
@@ -377,11 +383,6 @@ fun JournalRiskScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Pill(
-                        text = "📸📄 PDF آرشیو اسکرین‌شات‌ها",
-                        color = AurumColors.Gold,
-                        modifier = Modifier.clickable { viewModel.exportArchiveScreenshotsPdfNow(shareAfterExport = true) },
-                    )
                     Pill(
                         text = "🧠📄 PDF هوش مصنوعی + رگرسیون",
                         color = AurumColors.Cyan,
@@ -487,13 +488,6 @@ fun JournalRiskScreen(
             trades = filteredTrades,
         )
 
-            }
-
-            4 -> {
-                com.aurum.edge.ui.components.TradeSnapshotArchiveGallerySection(
-                    viewModel = viewModel,
-                    initiallyExpanded = false,
-                )
             }
 
             3 -> {
@@ -689,9 +683,19 @@ private fun StrategyJournalCategorizationCard(
 internal fun CapitalAndRiskLimitsCard(
     settings: com.aurum.edge.core.AppSettings,
     riskLimits: com.aurum.edge.core.RiskLimitStatus,
-    onSaveSettings: (Double, Double, Double, Double, Double) -> Unit,
+    /**
+     * پارامترها: موجودی، سرمایهٔ اولیه، درصد ریسک، سقف ضرر روزانه، سقف افت سرمایه،
+     * سقف پوزیشن هم‌زمان و سقف پوزیشن هر نماد.
+     */
+    onSaveSettings: (Double, Double, Double, Double, Double, Int, Int) -> Unit,
 ) {
     var editing by rememberSaveable { mutableStateOf(false) }
+    var maxOpenTradesText by rememberSaveable(settings.maxOpenTrades) {
+        mutableStateOf(settings.maxOpenTrades.toString())
+    }
+    var maxPerSymbolText by rememberSaveable(settings.maxOpenTradesPerSymbol) {
+        mutableStateOf(settings.maxOpenTradesPerSymbol.toString())
+    }
     var balanceText by rememberSaveable(settings.accountBalance) {
         mutableStateOf(String.format(Locale.US, "%.2f", settings.accountBalance))
     }
@@ -863,6 +867,8 @@ internal fun CapitalAndRiskLimitsCard(
                                 pct,
                                 settings.dailyLossLimitPercent,
                                 settings.maxDrawdownLimitPercent,
+                                settings.maxOpenTrades,
+                                settings.maxOpenTradesPerSymbol,
                             )
                         }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -946,6 +952,26 @@ internal fun CapitalAndRiskLimitsCard(
                         modifier = Modifier.weight(1f),
                     )
                 }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = maxOpenTradesText,
+                        onValueChange = { maxOpenTradesText = it.filter(Char::isDigit).take(2) },
+                        label = { Text("سقف پوزیشن باز هم‌زمان") },
+                        supportingText = { Text("۱ تا ۱۲ — فقط روی ورود خودکار اثر دارد") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = maxPerSymbolText,
+                        onValueChange = { maxPerSymbolText = it.filter(Char::isDigit).take(1) },
+                        label = { Text("سقف پوزیشن هر نماد") },
+                        supportingText = { Text("جلوگیری از انباشت روی یک نماد") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 Button(
                     onClick = {
                         val bal = balanceText.trim().toDoubleOrNull() ?: settings.accountBalance
@@ -953,7 +979,9 @@ internal fun CapitalAndRiskLimitsCard(
                         val risk = riskPctText.trim().toDoubleOrNull() ?: settings.riskPercent
                         val daily = dailyLimitText.trim().toDoubleOrNull() ?: settings.dailyLossLimitPercent
                         val maxDd = maxDdText.trim().toDoubleOrNull() ?: settings.maxDrawdownLimitPercent
-                        onSaveSettings(bal, initCap, risk, daily, maxDd)
+                        val maxOpen = maxOpenTradesText.trim().toIntOrNull() ?: settings.maxOpenTrades
+                        val maxPerSymbol = maxPerSymbolText.trim().toIntOrNull() ?: settings.maxOpenTradesPerSymbol
+                        onSaveSettings(bal, initCap, risk, daily, maxDd, maxOpen, maxPerSymbol)
                         editing = false
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -1943,7 +1971,20 @@ private fun MonthlyPnlCalendarSection(
     // ۰ = کل ماه، ۱..۳۱ = معاملات همان روز
     var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(0) }
 
-    val calendar = remember(selectedYear, selectedMonth, trades.size, closedTrades.size, closedTrades.firstOrNull()?.id) {
+    // کلیدهای remember باید «نسخهٔ داده» را نشان دهند، نه چیزهایی که هر ۲۰ ثانیه عوض می‌شوند.
+    // قبلاً `closedTrades.size` و شناسهٔ اولین معامله به‌عنوان کلید بودند: با هر تیک ساعت
+    // recomposition رخ می‌داد و اگر یکی از این‌ها تغییر می‌کرد، کل تقویم ماه دوباره ساخته می‌شد.
+    val journalRevision = remember(trades) {
+        var hash = trades.size
+        trades.forEach { trade ->
+            hash = 31 * hash + trade.id.hashCode()
+            hash = 31 * hash + (trade.closedAt ?: trade.openedAt).hashCode()
+            hash = 31 * hash + (trade.pnlUsd?.hashCode() ?: 0)
+            hash = 31 * hash + if (trade.isOpen) 1 else 0
+        }
+        hash
+    }
+    val calendar = remember(selectedYear, selectedMonth, journalRevision) {
         RiskAndCalendarEngine.buildMonthlyCalendar(
             year = selectedYear,
             month = selectedMonth,
@@ -2145,8 +2186,15 @@ private fun MonthlyPnlCalendarSection(
                             calendar.days[dayNumber - 1]
                         } else null
                         if (daySummary == null) {
-                            // خانهٔ خالی هم‌ارتفاع ردیف می‌ماند تا شبکه دندانه‌دار نشود.
-                            Box(modifier = Modifier.weight(1f).aspectRatio(1f))
+                            // خانهٔ خالی فقط با aspectRatio(1f) هم‌ارتفاع بقیه نمی‌شود: ارتفاع
+                            // ردیف از محتوای واقعی می‌آید. با کف ارتفاع، ردیف اول ماه‌هایی که
+                            // روز خالی دارند کوتاه‌تر از ردیف‌های دیگر نمی‌شود.
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .heightIn(min = CALENDAR_CELL_MIN_HEIGHT),
+                            )
                         } else {
                             val intensity = if (maxAbsDayPnl <= 0.0) {
                                 0.0
@@ -2158,7 +2206,10 @@ private fun MonthlyPnlCalendarSection(
                                 isSelected = selectedDayOfMonth == daySummary.dayOfMonth,
                                 isToday = isCurrentMonth && todayZoned.dayOfMonth == daySummary.dayOfMonth,
                                 intensity = intensity,
-                                modifier = Modifier.weight(1f).aspectRatio(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .heightIn(min = CALENDAR_CELL_MIN_HEIGHT),
                                 onClick = {
                                     selectedDayOfMonth = if (selectedDayOfMonth == daySummary.dayOfMonth) {
                                         0

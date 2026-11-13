@@ -1,0 +1,89 @@
+#pragma once
+
+#include "app/JournalStore.h"
+#include "core/BacktestEngine.h"
+#include "core/CsvReader.h"
+
+#include <QFutureWatcher>
+#include <QObject>
+#include <QVariantList>
+#include <memory>
+
+namespace aurum {
+
+class AppController final : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
+    Q_PROPERTY(bool hasData READ hasData NOTIFY stateChanged)
+    Q_PROPERTY(QString status READ status NOTIFY stateChanged)
+    Q_PROPERTY(QString fileName READ fileName NOTIFY stateChanged)
+    Q_PROPERTY(QString resultSummary READ resultSummary NOTIFY stateChanged)
+    Q_PROPERTY(QString modelName READ modelName NOTIFY stateChanged)
+    Q_PROPERTY(QString neuralSummary READ neuralSummary NOTIFY resultChanged)
+    Q_PROPERTY(QString neoWaveSummary READ neoWaveSummary NOTIFY dataChanged)
+    Q_PROPERTY(QVariantList neoWavePivots READ neoWavePivots NOTIFY dataChanged)
+    Q_PROPERTY(int candleCount READ candleCount NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList chartCandles READ chartCandles NOTIFY dataChanged)
+    Q_PROPERTY(QVariantList backtestTrades READ backtestTrades NOTIFY resultChanged)
+    Q_PROPERTY(QVariantList journalTrades READ journalTrades NOTIFY journalChanged)
+public:
+    explicit AppController(QObject* parent = nullptr);
+    [[nodiscard]] bool busy() const noexcept { return busy_; }
+    [[nodiscard]] bool hasData() const noexcept { return static_cast<bool>(data_); }
+    [[nodiscard]] QString status() const { return status_; }
+    [[nodiscard]] QString fileName() const { return fileName_; }
+    [[nodiscard]] QString resultSummary() const { return resultSummary_; }
+    [[nodiscard]] QString modelName() const;
+    [[nodiscard]] QString neuralSummary() const { return neuralSummary_; }
+    [[nodiscard]] QString neoWaveSummary() const { return neoWaveSummary_; }
+    [[nodiscard]] QVariantList neoWavePivots() const { return neoWavePivots_; }
+    [[nodiscard]] int candleCount() const noexcept;
+    [[nodiscard]] QVariantList chartCandles() const;
+    [[nodiscard]] QVariantList backtestTrades() const;
+    [[nodiscard]] QVariantList journalTrades() const;
+
+    Q_INVOKABLE void loadCsv(const QString& path);
+    Q_INVOKABLE void runBacktest();
+    Q_INVOKABLE QVariantMap calculateRisk(const QString& symbol, double accountBalance,
+        double riskPercent, double entry, double stopLoss, double takeProfit) const;
+    Q_INVOKABLE QVariantMap guardRiskPlan(const QString& symbol, const QString& side,
+        double entry, double stopLoss, double takeProfit, double referenceAtr, int intervalMinutes) const;
+    Q_INVOKABLE bool exportJournal(const QString& path);
+    Q_INVOKABLE QVariantMap monthlyCalendar(int year, int month) const;
+    Q_INVOKABLE bool exportCandles(const QString& path);
+    Q_INVOKABLE bool addJournalTrade(const QString& symbol, const QString& side, double entry,
+        double stop, double target, double exitPrice, double netPnl);
+signals:
+    void stateChanged();
+    void dataChanged();
+    void resultChanged();
+    void journalChanged();
+private:
+    struct LoadOutcome {
+        std::shared_ptr<ParseResult> data;
+        QString fileName;
+        QString error;
+        QString neoWaveSummary;
+        QVariantList neoWavePivots;
+    };
+    struct BacktestOutcome {
+        std::shared_ptr<BacktestResult> result;
+        QString error;
+        QString neuralSummary;
+    };
+    void setStatus(QString text);
+    bool busy_{};
+    QString status_{QStringLiteral("آماده")};
+    QString fileName_;
+    QString resultSummary_;
+    QString neuralSummary_;
+    QString neoWaveSummary_;
+    QVariantList neoWavePivots_;
+    std::shared_ptr<ParseResult> data_;
+    std::shared_ptr<BacktestResult> result_;
+    QFutureWatcher<LoadOutcome> loadWatcher_;
+    QFutureWatcher<BacktestOutcome> backtestWatcher_;
+    std::unique_ptr<JournalStore> journal_;
+};
+
+} // namespace aurum

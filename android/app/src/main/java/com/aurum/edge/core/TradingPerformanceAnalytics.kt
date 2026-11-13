@@ -5,7 +5,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.round
-import kotlin.math.sqrt
 
 /**
  * موتور خالص «کارنامهٔ عملکرد» ژورنال (بدون هیچ وابستگی اندرویدی، کاملاً قابل تست).
@@ -383,12 +382,4 @@ object TradingPerformanceAnalytics {
             " · مجموع ${String.format(Locale.US, "%+.2fR", totalR)}" +
             " · نرخ برد ${String.format(Locale.US, "%.1f%%", winRate)}"
 
-    /** ضریب شارپ ساده‌شده بر مبنای R معاملات (بدون نرخ بدون‌ریسک) برای نمایش در کارنامه. */
-    fun sharpeOfR(rs: List<Double>): Double {
-        if (rs.size < 2) return 0.0
-        val mean = rs.average()
-        val variance = rs.sumOf { (it - mean) * (it - mean) } / (rs.size - 1)
-        val sd = sqrt(max(variance, 0.0))
-        return if (sd < 1e-9) 0.0 else r2(mean / sd * sqrt(rs.size.toDouble()))
-    }
 }

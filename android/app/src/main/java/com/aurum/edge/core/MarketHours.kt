@@ -89,10 +89,6 @@ object MarketHours {
         }
     }
 
-    /** آیا بازار در آستانهٔ بسته شدن است (پیش‌فرض ۳۰ دقیقه)؟ */
-    fun isNearClose(symbol: String, now: Long = System.currentTimeMillis(), warnMinutes: Long = 30L): Boolean =
-        minutesToClose(symbol, now)?.let { it <= warnMinutes } ?: false
-
     fun forexWeekendClosed(now: Long = System.currentTimeMillis()): Boolean =
         scheduledWeekendClosed(now, openTime) // Legacy gold/commodity-conservative window.
 

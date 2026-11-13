@@ -1,0 +1,33 @@
+#include "app/AppController.h"
+#include "app/CandleChart.h"
+#include "app/LiveQuoteService.h"
+#include "app/UpdateService.h"
+
+#include <QGuiApplication>
+#include <QIcon>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QQuickStyle>
+#include <QTimer>
+
+int main(int argc, char* argv[]) {
+    QGuiApplication app(argc, argv);
+    QGuiApplication::setOrganizationName(QStringLiteral("Aurum"));
+    QGuiApplication::setApplicationName(QStringLiteral("Aurum Edge"));
+    QQuickStyle::setStyle(QStringLiteral("Material"));
+    qmlRegisterType<aurum::CandleChart>("AurumEdge", 1, 0, "CandleChart");
+    aurum::AppController controller;
+    aurum::LiveQuoteService liveQuotes;
+    aurum::UpdateService updates;
+    QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("App"), &controller);
+    engine.rootContext()->setContextProperty(QStringLiteral("Live"), &liveQuotes);
+    engine.rootContext()->setContextProperty(QStringLiteral("Updates"), &updates);
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
+        &app, [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
+    engine.loadFromModule("AurumEdge", "Main");
+    if (app.arguments().contains(QStringLiteral("--smoke-test"))) {
+        QTimer::singleShot(8000, &app, &QCoreApplication::quit);
+    }
+    return app.exec();
+}

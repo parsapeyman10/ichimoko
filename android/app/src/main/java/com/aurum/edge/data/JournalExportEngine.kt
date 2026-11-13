@@ -1000,11 +1000,6 @@ function filterRows() {
         outputFile: File,
         context: Context? = null,
     ) {
-        if (context != null && report.trades.isNotEmpty()) {
-            runCatching {
-                TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(context, report.trades)
-            }
-        }
         val doc = PdfDocument()
         try {
             val pageW = 842 // A4 Landscape width in points
@@ -1181,83 +1176,7 @@ function filterRows() {
                 doc.finishPage(page)
             }
 
-            // ── Visual Archive Screenshot Pages: Ichimoku Chart Snapshot for Every Trade ──
-            val sortedTradesForSnapshots = report.trades.sortedBy { it.displayTradeNumber }
-            val tradeBasedSnapshots = sortedTradesForSnapshots.flatMap { t ->
-                val existing = TradeSnapshotArchiveManager.recordsForTrade(t.id)
-                if (existing.isNotEmpty()) {
-                    existing
-                } else {
-                    buildList {
-                        add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = false))
-                        if (!t.isOpen) {
-                            add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = true))
-                        }
-                    }
-                }
-            }
-            val snapshotRecords = if (tradeBasedSnapshots.isNotEmpty()) {
-                tradeBasedSnapshots
-            } else {
-                TradeSnapshotArchiveManager.records.value.sortedBy { it.displayTradeNumber }
-            }
-            val snapChunks = snapshotRecords.chunked(2)
-            snapChunks.forEachIndexed { idx, pair ->
-                val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, currentPageNumber++).create()
-                val page = doc.startPage(pInfo)
-                val c = page.canvas
-                val bitmapsToRecycle = mutableListOf<android.graphics.Bitmap>()
-                c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
-                c.drawText(
-                    "Visual Ichimoku Archive Screenshots — Sheet ${idx + 1} of ${snapChunks.size} (${snapshotRecords.size} Total Snapshots)",
-                    24f,
-                    28f,
-                    titlePaint,
-                )
-                pair.forEachIndexed { slotIdx, rec ->
-                    val slotLeft = if (slotIdx == 0) 20f else 426f
-                    val slotRight = if (slotIdx == 0) 416f else 822f
-                    val cardRect = RectF(slotLeft, 40f, slotRight, pageH - 18f)
-                    c.drawRoundRect(cardRect, 10f, 10f, cardPaint)
-                    c.drawRoundRect(cardRect, 10f, 10f, borderPaint)
-
-                    val phaseTag = if (rec.isCloseSnapshot) "CLOSE" else "OPEN"
-                    val pnlTag = if (rec.isCloseSnapshot && rec.realizedPnlUsd != null) {
-                        String.format(Locale.US, " | PnL: %+.2f$ (%+.2fR)", rec.realizedPnlUsd, rec.realizedRMultiple ?: 0.0)
-                    } else {
-                        String.format(Locale.US, " | Risk: -$%.2f -> Target: +$%.2f", rec.fixedRiskUsd, rec.expectedProfitUsd)
-                    }
-                    c.drawText(
-                        "Trade #${rec.displayTradeNumber} [$phaseTag] · ${rec.symbol} (${rec.timeframeLabel}) · ${rec.action}",
-                        slotLeft + 10f,
-                        58f,
-                        headerCellPaint,
-                    )
-                    c.drawText(
-                        "Entry: ${rec.entryPrice} | Fixed SL: ${rec.stopLossPrice} | TP: ${rec.takeProfitPrice} | R:R 1:${String.format(Locale.US, "%.2f", rec.riskReward.coerceIn(1.5, 3.0))}$pnlTag",
-                        slotLeft + 10f,
-                        73f,
-                        cellPaint,
-                    )
-                    c.drawText(
-                        "Strategy: ${rec.strategyTitleFa} (${rec.strategyId})",
-                        slotLeft + 10f,
-                        87f,
-                        subPaint,
-                    )
-
-                    val bmp = runCatching {
-                        TradeSnapshotArchiveManager.loadOrRenderSnapshotBitmap(rec)
-                    }.getOrNull()
-                    if (bmp != null && !bmp.isRecycled) {
-                        val dstRect = RectF(slotLeft + 8f, 96f, slotRight - 8f, pageH - 26f)
-                        c.drawBitmap(bmp, null, dstRect, null)
-                        bitmapsToRecycle += bmp
-                    }
-                }
-                doc.finishPage(page)
-                bitmapsToRecycle.forEach { b -> runCatching { b.recycle() } }
-            }
+            // فقط داده و جدول عددی؛ هیچ صفحهٔ تصویری در PDF نیست.
 
             outputFile.parentFile?.mkdirs()
             FileOutputStream(outputFile).use { out ->
@@ -1291,15 +1210,11 @@ function filterRows() {
             report.sqnScore,
         )
         lines += "----------------------------------------------------------------------------------------"
-        val tradeIds = report.trades.map { it.id }.toSet()
-        val snapshots = TradeSnapshotArchiveManager.records.value.filter { it.tradeId in tradeIds }
         report.trades.forEachIndexed { idx, t ->
             val fixedSl = t.initialStopLoss ?: t.stopLoss
-            val openSnap = snapshots.firstOrNull { it.tradeId == t.id && !it.isCloseSnapshot }
-            val closeSnap = snapshots.firstOrNull { it.tradeId == t.id && it.isCloseSnapshot }
             lines += String.format(
                 Locale.US,
-                "#%d | %s (%s) | %s | Entry: %.2f | Fixed SL: %.2f | TP: %.2f | Init R:R: 1:%.2f | PnL: %s | Archive: OPEN=%s CLOSE=%s",
+                "#%d | %s (%s) | %s | Entry: %.2f | Fixed SL: %.2f | TP: %.2f | Init R:R: 1:%.2f | PnL: %s",
                 t.tradeNumber.takeIf { it > 0 } ?: (idx + 1),
                 t.symbol,
                 t.interval.label,
@@ -1309,8 +1224,6 @@ function filterRows() {
                 t.takeProfit,
                 t.riskReward,
                 t.pnlUsd?.let { String.format(Locale.US, "%s$%.2f", if (it >= 0) "+" else "-", abs(it)) } ?: "OPEN",
-                openSnap?.localImagePath?.substringAfterLast('/') ?: "GENERATED",
-                closeSnap?.localImagePath?.substringAfterLast('/') ?: if (t.isOpen) "PENDING" else "GENERATED",
             )
         }
         val streamContent = buildString {
@@ -1461,162 +1374,6 @@ function filterRows() {
         saveBytesToPhoneStorage(context, localFile.name, format.mimeType, bytes)
     }
 
-    /**
-     * تولید و ذخیره مستقیم فایل PDF اختصاصی «آرشیو اسکرین‌شات تمام معاملات (باز و بسته)» با کیفیت بالا و حجم بهینه.
-     */
-    fun exportArchiveScreenshotsPdf(
-        context: Context,
-        trades: List<PaperTrade>,
-        nowMs: Long = System.currentTimeMillis(),
-    ): Result<Pair<File, String>> = runCatching {
-        if (trades.isNotEmpty()) {
-            runCatching {
-                TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
-                    context = context,
-                    trades = trades,
-                    maxTrades = 120,
-                    saveToPhoneGallery = false,
-                )
-            }
-        }
-        val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
-        val stamp = fileStampFmt.format(Instant.ofEpochMilli(nowMs))
-        val outFile = File(exportDir, "AurumEdge_Archive_Screenshots_$stamp.pdf")
-
-        val allArchiveRecs = TradeSnapshotArchiveManager.records.value.sortedBy { it.displayTradeNumber }
-        val tradeFallbackRecs = trades.sortedBy { it.displayTradeNumber }.flatMap { t ->
-            val existing = allArchiveRecs.filter { it.tradeId == t.id }
-            if (existing.isNotEmpty()) {
-                existing
-            } else {
-                buildList {
-                    add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = false))
-                    if (!t.isOpen) {
-                        add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = true))
-                    }
-                }
-            }
-        }
-        val mergedSnapshots = (tradeFallbackRecs + allArchiveRecs)
-            .distinctBy { "${it.tradeId}_${it.snapshotPhase}" }
-            .sortedWith(compareBy<ArchivedTradeSnapshotRecord> { it.displayTradeNumber }.thenBy { it.isCloseSnapshot })
-
-        val doc = PdfDocument()
-        try {
-            val pageW = 842
-            val pageH = 595
-            val bgPaint = Paint().apply { color = Color.rgb(11, 15, 23) }
-            val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(18, 25, 38) }
-            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(243, 198, 95)
-                style = Paint.Style.STROKE
-                strokeWidth = 1.2f
-            }
-            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(243, 198, 95)
-                textSize = 15f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            }
-            val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(56, 189, 248)
-                textSize = 10.5f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            }
-            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(235, 240, 248)
-                textSize = 9.5f
-            }
-            val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(160, 174, 192)
-                textSize = 8.8f
-            }
-
-            if (mergedSnapshots.isEmpty()) {
-                val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, 1).create()
-                val page = doc.startPage(pInfo)
-                val c = page.canvas
-                c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
-                c.drawRoundRect(RectF(28f, 28f, pageW - 28f, 120f), 12f, 12f, cardPaint)
-                c.drawText("AURUM EDGE — TRADE SNAPSHOT ARCHIVE PDF REPORT", 44f, 60f, titlePaint)
-                c.drawText("Generated: ${formatTimestamp(nowMs)} | No archived trade snapshots yet — open a trade to capture its Ichimoku snapshot.", 44f, 88f, textPaint)
-                doc.finishPage(page)
-            } else {
-                val chunks = mergedSnapshots.chunked(2)
-                chunks.forEachIndexed { pageIdx, pair ->
-                    val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, pageIdx + 1).create()
-                    val page = doc.startPage(pInfo)
-                    val c = page.canvas
-                    val bitmapsOnPage = mutableListOf<android.graphics.Bitmap>()
-                    c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
-                    c.drawText(
-                        "AURUM EDGE — ARCHIVE SCREENSHOTS PDF (${mergedSnapshots.size} Snapshots) · Page ${pageIdx + 1} of ${chunks.size} · Generated: ${formatTimestamp(nowMs)}",
-                        24f,
-                        26f,
-                        titlePaint,
-                    )
-                    pair.forEachIndexed { slotIdx, rec ->
-                        val slotLeft = if (slotIdx == 0) 20f else 426f
-                        val slotRight = if (slotIdx == 0) 416f else 822f
-                        val cardRect = RectF(slotLeft, 36f, slotRight, pageH - 16f)
-                        c.drawRoundRect(cardRect, 10f, 10f, cardPaint)
-                        c.drawRoundRect(cardRect, 10f, 10f, borderPaint)
-
-                        val phaseTag = if (rec.isCloseSnapshot) "CLOSED" else "OPENED"
-                        val clampedRr = rec.riskReward.coerceIn(1.50, 3.00)
-                        val pnlStr = if (rec.isCloseSnapshot && rec.realizedPnlUsd != null) {
-                            String.format(Locale.US, " | Net PnL: %+.2f$ (%+.2fR)", rec.realizedPnlUsd, (rec.realizedRMultiple ?: 0.0).coerceIn(-1.5, 3.0))
-                        } else {
-                            String.format(Locale.US, " | Fixed Risk: -$%.2f | Target: +$%.2f", rec.fixedRiskUsd, rec.expectedProfitUsd)
-                        }
-                        c.drawText(
-                            "Trade #${rec.displayTradeNumber} [$phaseTag] · ${rec.symbol} (${rec.timeframeLabel}) · ${rec.action}",
-                            slotLeft + 10f,
-                            54f,
-                            headerPaint,
-                        )
-                        c.drawText(
-                            "Entry: ${rec.entryPrice} | Structural SL: ${rec.stopLossPrice} | TP: ${rec.takeProfitPrice} | R:R 1:${String.format(Locale.US, "%.2f", clampedRr)}$pnlStr",
-                            slotLeft + 10f,
-                            69f,
-                            textPaint,
-                        )
-                        c.drawText(
-                            "Strategy: ${rec.strategyTitleFa} (${rec.strategyId}) | Badge: ${rec.strategyBadgeFa}",
-                            slotLeft + 10f,
-                            83f,
-                            subPaint,
-                        )
-
-                        val bmp = runCatching {
-                            TradeSnapshotArchiveManager.loadOrRenderSnapshotBitmap(rec)
-                        }.getOrNull()
-                        if (bmp != null && !bmp.isRecycled) {
-                            val dstRect = RectF(slotLeft + 8f, 92f, slotRight - 8f, pageH - 24f)
-                            c.drawBitmap(bmp, null, dstRect, null)
-                            bitmapsOnPage += bmp
-                        }
-                    }
-                    doc.finishPage(page)
-                    bitmapsOnPage.forEach { b -> runCatching { b.recycle() } }
-                }
-            }
-
-            FileOutputStream(outFile).use { out -> doc.writeTo(out) }
-        } catch (_: Throwable) {
-            val dummyReport = buildInstitutionalTearSheet(trades)
-            writePortablePdfFallback(dummyReport, outFile)
-        } finally {
-            runCatching { doc.close() }
-        }
-
-        val savedPath = saveBytesToPhoneStorage(
-            context = context,
-            fileName = outFile.name,
-            mimeType = JournalExportFormat.PDF_REPORT.mimeType,
-            bytes = outFile.readBytes(),
-        )
-        outFile to savedPath
-    }
 
     /**
      * تولید فایل PDF جامع «تمام دیتاهای هوش مصنوعی، شبکه عصبی خودآموز و رگرسیون ماتریسی پارامترها»

@@ -62,6 +62,11 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
+        // 2.0.9 (code 768): heavy CSV hardening. The backtest window per bar is capped at
+        // BacktestSeries.ENGINE_WINDOW_BARS (the engine reads 260) so a 100k-bar file went from
+        // >600 s to ~57 s with a bit-identical result; the runtime is announced before the run;
+        // oversized files are refused before they enter memory and get an actionable message.
+        // See docs/HEAVY_CSV_GUARDS_FA.md.
         // Keep the published update channel upgradeable: 2.0.5 is code 677 after 2.0.4 (676).
         // 2.0.5 ships the per-symbol Twelve Data keys, the symbol→source map
         // (docs/SYMBOL_SOURCES_FA.md) and an updater that reports which published version it saw
@@ -202,8 +207,20 @@ android {
         // 3.9.49 adds explicit SAF export for the private trade-snapshot archive: the user chooses
         // Google Drive or another document provider, original images remain app-private, and no
         // Drive token, storage permission, or automatic Gallery copy is introduced.
-        versionCode = 758
-        versionName = "3.9.49"
+        // 3.9.55: «آزمایشگاه بک‌تست» — خواندن CSV داکاس‌کپی (dukascopy-node)، چارت کندلی با
+        // پیمایش قدم‌به‌قدم، اجرای هر استراتژی روی همان بازه و آموزش شبکهٔ عصبی در اتاق تمرین
+        // جدا (ژورنال، حساب کاغذی و پارامترهای معاملات واقعی دست نمی‌خورند).
+        // 3.9.57: بازطراحی «دروازهٔ مکتبی» بیس. اندازه‌گیری روی ۵٬۵۲۱ ارزیابی نشان داد
+        // حاصل‌ضرب ۱۶ شرط عملاً صفر می‌شود (نرخ پاس هر شرط ۵۵٪..۸۲٪) و در ۸۸ روز یک معامله
+        // می‌داد. سه لایهٔ کتابی (رژیم ⇒ وتوی سخت، تعادل/ماشه ⇒ امتیاز) جای AND سراسری را
+        // گرفت، شرط ۱۷ «اقتصاد اجرا» اضافه شد، حد ضرر کفِ آگاه از هزینه گرفت، محاسبهٔ
+        // snapshot از O(n²) خطی شد و چارت ایچیموکو/معامله‌ها بازنویسی شد.
+        // انتشار ۳.۹.۵۸ (۷۶۷): آرشیو معاملاتی، اعمال یک‌بارهٔ سود، بک‌تست ۵.۳× سریع‌تر.
+        // ۳.۹.۵۸: آرشیو معاملاتی در پایان هر بک‌تست + دکمهٔ «اعمال یک‌بارهٔ سود» با قفل
+        // شناسهٔ محتوایی، نمایش هزینهٔ اجرا در برابر ۱R، حافظهٔ اسنپ‌شات (۵.۳× سریع‌تر در
+        // حالت «همهٔ استراتژی‌ها»)، زمان تقریبی باقی‌مانده و سقف کندل.
+        versionCode = 768
+        versionName = "3.9.59"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
