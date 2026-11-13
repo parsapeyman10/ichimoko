@@ -22,6 +22,8 @@ float qty = input.float(1.0, "Backtest quantity", minval=0.000001, step=0.01)
 bool allowLong = input.bool(true, "Enable long")
 bool allowShort = input.bool(true, "Enable short")
 bool showNearMiss = input.bool(true, "Show trigger / gate rejects")
+bool showRawTriggers = input.bool(true, "DEBUG: show raw trigger candidates")
+bool debugVirtualTriggerTrades = input.bool(false, "DEBUG ONLY: simulate raw trigger candidates")
 float maxKijunExtensionAtr = input.float(1.80, "Max Kijun extension (ATR)", minval=0.50, step=0.05)
 float slBufferAtr = input.float(0.25, "Structural SL buffer (ATR)", minval=0.15, step=0.01)
 float minVolumeRatio = input.float(0.60, "Min volume / 20", minval=0.10, step=0.05)
@@ -834,6 +836,10 @@ bool hardVetoPassed = c1 and c3 and c4 and c6 and c17
 bool bookFires = hardVetoPassed and qualityPct >= 60.0 and triggerPct >= 60.0 and bookPct >= 70.0
 bool all17 = c1 and c2 and c3 and c4 and c5 and c6 and c7 and c8 and c9 and c10 and c11 and c12 and c13 and c14 and c15 and c16 and c17
 bool baseSignal = dataReady and triggerFired and c12 and (all17 or bookFires)
+// A raw trigger is deliberately separate from a BASE entry. It makes a silent
+// strict gate visible on the chart without changing the default strategy.
+bool rawTriggerCandidate = dataReady and triggerFired
+bool auditOnlySignal = debugVirtualTriggerTrades and rawTriggerCandidate and not baseSignal
 int passedCount = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0) + (c6 ? 1 : 0) + (c7 ? 1 : 0) + (c8 ? 1 : 0) + (c9 ? 1 : 0) + (c10 ? 1 : 0) + (c11 ? 1 : 0) + (c12 ? 1 : 0) + (c13 ? 1 : 0) + (c14 ? 1 : 0) + (c15 ? 1 : 0) + (c16 ? 1 : 0) + (c17 ? 1 : 0)
 float confidence = math.min(100.0, (passedCount / 17.0) * 84.0 + (triggerFired ? 16.0 : 0.0))
 
@@ -857,14 +863,15 @@ if strategy.position_size != 0 {
 }
 
 bool flatAndReady = strategy.position_size == 0 and pendingSide == 0
-bool enterLong = dataReady and flatAndReady and allowLong and baseSignal and isLong
-bool enterShort = dataReady and flatAndReady and allowShort and baseSignal and not isLong
+bool entryDecision = baseSignal or auditOnlySignal
+bool enterLong = dataReady and flatAndReady and allowLong and entryDecision and isLong
+bool enterShort = dataReady and flatAndReady and allowShort and entryDecision and not isLong
 if enterLong {
     pendingSide := 1
     pendingSignalBar := bar_index
     pendingStopDistance := stopDistance
     pendingTargetDistance := targetDistance
-    strategy.entry("BASE Long", strategy.long, qty=qty, comment="BASE 4TF long")
+    strategy.entry("BASE Long", strategy.long, qty=qty, comment=auditOnlySignal ? "DEBUG raw trigger long" : "BASE 4TF long")
     // Bracket is submitted with the next-open order. The distance-based update
     // below then performs the source model's same-offset rebase after it fills.
     strategy.exit("BASE Long exit", from_entry="BASE Long", stop=stopPrice, limit=targetPrice)
@@ -873,7 +880,7 @@ if enterLong {
     pendingSignalBar := bar_index
     pendingStopDistance := stopDistance
     pendingTargetDistance := targetDistance
-    strategy.entry("BASE Short", strategy.short, qty=qty, comment="BASE 4TF short")
+    strategy.entry("BASE Short", strategy.short, qty=qty, comment=auditOnlySignal ? "DEBUG raw trigger short" : "BASE 4TF short")
     strategy.exit("BASE Short exit", from_entry="BASE Short", stop=stopPrice, limit=targetPrice)
 }
 
@@ -904,21 +911,28 @@ plot(h1.kijun, title="Built 1H Kijun", color=color.new(color.orange, 0.50), line
 plot(h4.kijun, title="Built 4H Kijun", color=color.new(color.purple, 0.40), linewidth=1, style=plotStyle.linebr)
 plot(activeStop, title="Active structural SL", color=color.red, linewidth=2, style=plotStyle.linebr)
 plot(activeTarget, title="Active guarded TP", color=color.green, linewidth=2, style=plotStyle.linebr)
-plotshape(enterLong, title="BASE long", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.normal, text="BASE L")
-plotshape(enterShort, title="BASE short", location=location.abovebar, shape=shape.triangledown, color=color.red, size=size.normal, text="BASE S")
+plotshape(enterLong and baseSignal, title="Strict BASE long", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.normal, text="BASE L")
+plotshape(enterShort and baseSignal, title="Strict BASE short", location=location.abovebar, shape=shape.triangledown, color=color.red, size=size.normal, text="BASE S")
+plotshape(enterLong and auditOnlySignal, title="DEBUG raw-trigger long", location=location.belowbar, shape=shape.triangleup, color=color.aqua, size=size.normal, text="DBG L")
+plotshape(enterShort and auditOnlySignal, title="DEBUG raw-trigger short", location=location.abovebar, shape=shape.triangledown, color=color.aqua, size=size.normal, text="DBG S")
+// These candidates never imply a valid BASE entry. They reveal the exact bars
+// at which a trigger occurred but the 17-condition / book gate refused it.
+plotshape(showRawTriggers and rawTriggerCandidate and not baseSignal and isLong, title="Raw long trigger rejected", location=location.belowbar, shape=shape.diamond, color=color.aqua, size=size.tiny, text="RAW")
+plotshape(showRawTriggers and rawTriggerCandidate and not baseSignal and not isLong, title="Raw short trigger rejected", location=location.abovebar, shape=shape.diamond, color=color.aqua, size=size.tiny, text="RAW")
+plotshape(showRawTriggers and dataReady and c1 and c3 and c4 and c6 and not triggerFired, title="Hard regime waiting for trigger", location=location.bottom, shape=shape.circle, color=color.yellow, size=size.tiny, text="WAIT")
 plotshape(showNearMiss and dataReady and triggerFired and c1 and c3 and c4 and c6 and not c17, title="Cost veto", location=location.abovebar, shape=shape.xcross, color=color.orange, size=size.tiny, text="C17")
 plotshape(showNearMiss and dataReady and triggerFired and not hardVetoPassed, title="Hard veto", location=location.abovebar, shape=shape.circle, color=color.purple, size=size.tiny, text="V")
-barcolor(enterLong ? color.new(color.lime, 0.15) : enterShort ? color.new(color.red, 0.15) : na)
+barcolor(enterLong ? (auditOnlySignal ? color.new(color.aqua, 0.15) : color.new(color.lime, 0.15)) : enterShort ? (auditOnlySignal ? color.new(color.aqua, 0.15) : color.new(color.red, 0.15)) : na)
 
 // The small audit labels retain the decision state at the bar. They are for
 // debugging only and do not alter orders. Old labels are pruned locally before
 // the platform's drawing limit is reached.
 static array<label> auditLabels = array.new<label>(0)
 if enterLong or enterShort {
-    string sideText = enterLong ? "BASE LONG" : "BASE SHORT"
+    string sideText = auditOnlySignal ? (enterLong ? "DEBUG RAW LONG" : "DEBUG RAW SHORT") : (enterLong ? "BASE LONG" : "BASE SHORT")
     string triggerText = triggerKatana ? "KATANA" : triggerPullback ? "PULLBACK" : triggerValidatedBreakout ? "BREAKOUT" : "SANYAKU"
     string auditText = sideText + "\n" + triggerText + " | " + str.tostring(passedCount) + "/17" + "\nGate " + str.tostring(bookPct, "#.0") + "%" + " | RR " + str.tostring(rr, "#.00") + "\nSL " + str.tostring(stopPrice) + " TP " + str.tostring(targetPrice)
-    label marker = label.new(bar_index, enterLong ? low : high, auditText, yloc=enterLong ? yloc.belowbar : yloc.abovebar, style=enterLong ? label.style_label_up : label.style_label_down, color=enterLong ? color.lime : color.red, textcolor=color.white, size=size.small)
+    label marker = label.new(bar_index, enterLong ? low : high, auditText, yloc=enterLong ? yloc.belowbar : yloc.abovebar, style=enterLong ? label.style_label_up : label.style_label_down, color=auditOnlySignal ? color.aqua : (enterLong ? color.lime : color.red), textcolor=color.white, size=size.small)
     array.push(auditLabels, marker)
     if array.length(auditLabels) > 250 {
         label.delete(array.shift(auditLabels))
@@ -1005,5 +1019,5 @@ if barstate.islast {
     table.cell(dashboard, 0, 7, "Plan")
     table.cell(dashboard, 1, 7, "RR " + str.tostring(rr, "#.00") + " | cost " + str.tostring(costToRisk, "#.00"))
     table.cell(dashboard, 0, 8, "Status")
-    table.cell(dashboard, 1, 8, baseSignal ? "SIGNAL: NEXT OPEN" : hardVetoPassed ? "NO TRIGGER/GATE" : "HARD VETO", textcolor=baseSignal ? color.lime : hardVetoPassed ? color.orange : color.red)
+    table.cell(dashboard, 1, 8, baseSignal ? "BASE: NEXT OPEN" : auditOnlySignal ? "DEBUG: NEXT OPEN" : rawTriggerCandidate ? "RAW: BLOCKED" : hardVetoPassed ? "WAITING TRIGGER" : "HARD VETO", textcolor=baseSignal ? color.lime : auditOnlySignal ? color.aqua : rawTriggerCandidate ? color.orange : hardVetoPassed ? color.yellow : color.red)
 }
