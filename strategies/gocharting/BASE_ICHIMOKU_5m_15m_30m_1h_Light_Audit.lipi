@@ -362,13 +362,41 @@ bool strictSignal = dataReady and triggerFired and bookFires
 bool rawTrigger = dataReady and triggerFired and not strictSignal
 bool debugSignal = debugVirtualTriggerTrades and rawTrigger
 bool entryDecision = strictSignal or debugSignal
-bool enterLong = entryDecision and isLong and allowLong and strategy.position_size == 0
-bool enterShort = entryDecision and not isLong and allowShort and strategy.position_size == 0
+
+// A strategy order is submitted on a closed bar and fills on the next open.
+// `pyramiding=0` alone does not expose that pending state to this script, so
+// retain an explicit lock from signal through the whole open position.
+// State 0 = free; 1 = next-open order pending; 2 = position observed open.
+static int tradeLockState = 0
+static int lockedSignalBar = na
+if tradeLockState == 1 and bar_index > lockedSignalBar {
+    if strategy.position_size != 0 {
+        tradeLockState := 2
+    } else {
+        // The pending order did not remain open (for example, a bracket ended
+        // it on its fill bar), so its lifecycle is complete.
+        tradeLockState := 0
+        lockedSignalBar := na
+    }
+}
+if tradeLockState == 2 and strategy.position_size == 0 {
+    tradeLockState := 0
+    lockedSignalBar := na
+}
+
+bool canOpenSingleTrade = tradeLockState == 0 and strategy.position_size == 0
+bool blockedByOpenTrade = entryDecision and not canOpenSingleTrade
+bool enterLong = entryDecision and canOpenSingleTrade and isLong and allowLong
+bool enterShort = entryDecision and canOpenSingleTrade and not isLong and allowShort
 if enterLong {
+    tradeLockState := 1
+    lockedSignalBar := bar_index
     strategy.entry("Lite 5m Long", strategy.long, qty=qty, comment=debugSignal ? "DEBUG raw trigger long" : "BASE Lite 5m long")
     strategy.exit("Lite 5m Long exit", from_entry="Lite 5m Long", stop=stopPrice, limit=targetPrice)
 }
 if enterShort {
+    tradeLockState := 1
+    lockedSignalBar := bar_index
     strategy.entry("Lite 5m Short", strategy.short, qty=qty, comment=debugSignal ? "DEBUG raw trigger short" : "BASE Lite 5m short")
     strategy.exit("Lite 5m Short exit", from_entry="Lite 5m Short", stop=stopPrice, limit=targetPrice)
 }
@@ -383,10 +411,15 @@ if strategy.position_size < 0 and strategy.opentrades > 0 and bar_index - strate
 plot(kijun5, title="5m Kijun", color=color.orange, linewidth=2)
 plot(snap15.kijun, title="Built 15m Kijun", color=color.teal, linewidth=2, style=plotStyle.stepLine)
 plot(snap1h.kijun, title="Built 1H Kijun", color=color.purple, linewidth=2, style=plotStyle.stepLine)
-plotshape(strictSignal and isLong, title="Strict Lite long", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.normal, text="LITE L")
-plotshape(strictSignal and not isLong, title="Strict Lite short", location=location.abovebar, shape=shape.triangledown, color=color.red, size=size.normal, text="LITE S")
+// LITE markers now mean an actual submitted order, not merely a repeated
+// signal that occurred while another trade was pending or open.
+plotshape(enterLong and not debugSignal, title="Strict Lite long entry", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.normal, text="LITE L")
+plotshape(enterShort and not debugSignal, title="Strict Lite short entry", location=location.abovebar, shape=shape.triangledown, color=color.red, size=size.normal, text="LITE S")
+plotshape(enterLong and debugSignal, title="Debug Lite long entry", location=location.belowbar, shape=shape.triangleup, color=color.aqua, size=size.normal, text="DBG L")
+plotshape(enterShort and debugSignal, title="Debug Lite short entry", location=location.abovebar, shape=shape.triangledown, color=color.aqua, size=size.normal, text="DBG S")
 plotshape(showDiagnosticMarkers and rawTrigger and isLong, title="Raw long trigger", location=location.belowbar, shape=shape.diamond, color=color.aqua, size=size.tiny, text="RAW")
 plotshape(showDiagnosticMarkers and rawTrigger and not isLong, title="Raw short trigger", location=location.abovebar, shape=shape.diamond, color=color.aqua, size=size.tiny, text="RAW")
+plotshape(showDiagnosticMarkers and blockedByOpenTrade, title="Signal ignored while locked", location=location.top, shape=shape.xcross, color=color.yellow, size=size.tiny, text="LOCK")
 plotshape(showDiagnosticMarkers and dataReady and triggerFired and not hardVetoPassed, title="Hard veto", location=location.abovebar, shape=shape.xcross, color=color.orange, size=size.tiny, text="V")
 
 static table dashboard = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 0.25), border_width=1)
@@ -408,5 +441,5 @@ if barstate.islast {
     table.cell(dashboard, 0, 7, "Book gate")
     table.cell(dashboard, 1, 7, str.tostring(bookPct, "#.0") + "%", textcolor=bookFires ? color.lime : color.orange)
     table.cell(dashboard, 0, 8, "Status")
-    table.cell(dashboard, 1, 8, strictSignal ? "STRICT SIGNAL" : debugSignal ? "DEBUG ENTRY" : rawTrigger ? "RAW BLOCKED" : hardVetoPassed ? "WAITING" : "HARD VETO", textcolor=strictSignal ? color.lime : debugSignal ? color.aqua : rawTrigger ? color.orange : hardVetoPassed ? color.yellow : color.red)
+    table.cell(dashboard, 1, 8, tradeLockState != 0 ? "LOCKED: ONE TRADE" : strictSignal ? "STRICT SIGNAL" : debugSignal ? "DEBUG ENTRY" : rawTrigger ? "RAW BLOCKED" : hardVetoPassed ? "WAITING" : "HARD VETO", textcolor=tradeLockState != 0 ? color.yellow : strictSignal ? color.lime : debugSignal ? color.aqua : rawTrigger ? color.orange : hardVetoPassed ? color.yellow : color.red)
 }
