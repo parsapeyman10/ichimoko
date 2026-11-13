@@ -72,6 +72,6 @@
 
 نسخهٔ native-15m از Ichimoku `9/26/52/26`، ATR14، کیفیت candle/volume، Chikou، Kumo، hard-vetoهای `1/3/4/6/17` و triggerهای `Katana`، `Pullback` و `Breakout` استفاده می‌کند. R:R توسط کاربر، پیش از تعیین quantity، در بازهٔ `1.5R` تا `3R` انتخاب می‌شود؛ پیش‌فرض `2.25R` است.
 
-`Round-trip cost fraction` به‌طور پیش‌فرض `0.0021` است و `commission_value=0.105` صرفاً تقریب هزینه در گزارش بک‌تست است. quantity، هزینه، ATR-extension، SL buffer و time stop از تنظیمات Lipi قابل تغییرند. تغییر آن‌ها مقایسه با baseline مرجع را تغییر می‌دهد.
+`Round-trip cost fraction` به‌طور پیش‌فرض `0.0021` است و `commission_value=0.105` صرفاً تقریب هزینه در گزارش بک‌تست است. quantity، هزینه، ATR-extension و SL buffer از تنظیمات Lipi قابل تغییرند. هیچ time-stop یا خروج اجباری بعد از 20 کندل در این نسخه وجود ندارد؛ position فقط با SL یا TP شبیه‌سازی‌شده بسته می‌شود. تغییر تنظیمات، مقایسه با baseline مرجع را تغییر می‌دهد.
 
 > هشدار: این ابزار توصیهٔ سرمایه‌گذاری نیست. بک‌تست، markerها و خطوط SL/TP صرفاً برای visual audit هستند، نه اتصال یا مجوز اجرای معاملهٔ واقعی.

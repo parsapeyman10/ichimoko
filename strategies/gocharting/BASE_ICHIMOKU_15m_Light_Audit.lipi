@@ -20,7 +20,6 @@ bool debugVirtualTriggerTrades = input.bool(false, "DEBUG ONLY: simulate raw tri
 float maxKijunExtensionAtr = input.float(1.80, "Max Kijun extension (ATR)", minval=0.50, step=0.05)
 float slBufferAtr = input.float(0.25, "Structural SL buffer (ATR)", minval=0.15, step=0.01)
 float roundTripCostPct = input.float(0.0021, "Round-trip cost fraction", minval=0.0, step=0.0001)
-int maxHoldBars = input.int(20, "Time stop: 15m bars", minval=1)
 
 // This script intentionally has no HTF arrays, buckets or resampling. The
 // native 15m Ichimoku values below are evaluated only when the chart candle is
@@ -217,13 +216,6 @@ if tradeClosedThisBar {
 // second direction while the lifecycle is unresolved.
 if strategy.closedtrades > observedClosedTrades {
     observedClosedTrades := strategy.closedtrades
-}
-
-if strategy.position_size > 0 and strategy.opentrades > 0 and bar_index - strategy.opentrades_entry_bar_index(0) >= maxHoldBars {
-    strategy.close("Lite Long", comment="time stop")
-}
-if strategy.position_size < 0 and strategy.opentrades > 0 and bar_index - strategy.opentrades_entry_bar_index(0) >= maxHoldBars {
-    strategy.close("Lite Short", comment="time stop")
 }
 
 // The strategy engine supplies its own single order marker. The script draws
