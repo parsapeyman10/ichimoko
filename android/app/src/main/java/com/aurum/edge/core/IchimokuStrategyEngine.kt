@@ -210,7 +210,7 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
 }
 
 /**
- * اوررایدهای اختصاصی تیونینگ شبکه عصبی برای هر یک از ۱۶ استراتژی به صورت مجزا.
+ * اوررایدهای اختصاصی تیونینگ شبکه عصبی برای هر یک از مدل‌های فعال به صورت مجزا.
  */
 @Serializable
 data class PerStrategyConfigOverride(
@@ -3219,7 +3219,7 @@ object IchimokuStrategyEngine {
             else -> TrendPhase.CORE_EXPANSION
         }
 
-        // ── محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:1.50 .. 1:3.00] برای تمام ۱۶ استراتژی ──
+        // ── محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:1.50 .. 1:3.00] برای هر مدل ──
         val modelBaseOptimalRr = activeModel.baseOptimalRr.coerceIn(1.50, 3.00)
         val phaseRrBonus = when (trendPhase) {
             TrendPhase.GENESIS -> 0.25
