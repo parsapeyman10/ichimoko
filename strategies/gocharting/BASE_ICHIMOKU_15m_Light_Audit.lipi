@@ -13,6 +13,8 @@ int SPAN_B = input.int(52, "Senkou B", minval=2)
 int DISPLACEMENT = input.int(26, "Displacement", minval=2)
 float targetRr = input.float(2.25, "Target R:R (set before backtest quantity)", minval=1.50, maxval=3.00, step=0.05)
 float qty = input.float(1.0, "Backtest quantity (set after R:R)", minval=0.000001, step=0.01)
+bool enableSmartExit = input.bool(true, "Enable smart trend exit")
+int smartExitConfirmations = input.int(2, "Smart exit: required confirmations", minval=2, maxval=3)
 bool allowLong = input.bool(true, "Enable long")
 bool allowShort = input.bool(true, "Enable short")
 bool showRawTriggers = input.bool(false, "DEBUG: show raw triggers rejected by gate")
@@ -112,6 +114,19 @@ bool rawTrigger = dataReady and triggerFired and not strictSignal
 bool debugSignal = debugVirtualTriggerTrades and rawTrigger
 bool entryDecision = strictSignal or debugSignal
 
+// Smart exit is confirmed only on a closed 15m candle. A long must turn
+// adverse in at least two of: Kijun, TK state, cloud state. Shorts mirror it.
+bool smartLongKijun = close < kijun15
+bool smartLongTk = tenkan15 < kijun15
+bool smartLongCloud = close < top15
+int smartLongCount = (smartLongKijun ? 1 : 0) + (smartLongTk ? 1 : 0) + (smartLongCloud ? 1 : 0)
+bool smartShortKijun = close > kijun15
+bool smartShortTk = tenkan15 > kijun15
+bool smartShortCloud = close > bottom15
+int smartShortCount = (smartShortKijun ? 1 : 0) + (smartShortTk ? 1 : 0) + (smartShortCloud ? 1 : 0)
+bool smartExitLong = enableSmartExit and closed15m and strategy.position_size > 0 and smartLongCount >= smartExitConfirmations
+bool smartExitShort = enableSmartExit and closed15m and strategy.position_size < 0 and smartShortCount >= smartExitConfirmations
+
 // One lifecycle lock covers both the next-open pending order and the open
 // position. It blocks repeated Long/Short orders until that trade has ended.
 int MAX_RETAINED_BRACKETS = 200
@@ -163,6 +178,15 @@ if strategy.position_size > 0 and tradeLockState != 0 {
 }
 if strategy.position_size < 0 and tradeLockState != 0 {
     strategy.exit("Lite Short exit", from_entry="Lite Short", stop=pendingStopPrice, limit=pendingTargetPrice)
+}
+
+// This market close is submitted only after the configured number of native
+// 15m trend-end confirmations. The lifecycle lock remains active until fill.
+if smartExitLong {
+    strategy.close("Lite Long", comment="smart trend exit")
+}
+if smartExitShort {
+    strategy.close("Lite Short", comment="smart trend exit")
 }
 
 // The chart shows only the exact real SL (red) and TP (green). There is no
@@ -241,5 +265,5 @@ if barstate.islast {
     table.cell(dashboard, 0, 6, "Model")
     table.cell(dashboard, 1, 6, "NATIVE 15m ONLY", textcolor=color.aqua)
     table.cell(dashboard, 0, 7, "Status")
-    table.cell(dashboard, 1, 7, tradeLockState != 0 ? "LOCKED: ONE TRADE" : strictSignal ? "STRICT SIGNAL" : debugSignal ? "DEBUG ENTRY" : rawTrigger ? "RAW BLOCKED" : hardVetoPassed ? "WAITING" : "HARD VETO", textcolor=tradeLockState != 0 ? color.yellow : strictSignal ? color.lime : debugSignal ? color.aqua : rawTrigger ? color.orange : hardVetoPassed ? color.yellow : color.red)
+    table.cell(dashboard, 1, 7, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : strictSignal ? "STRICT SIGNAL" : debugSignal ? "DEBUG ENTRY" : rawTrigger ? "RAW BLOCKED" : hardVetoPassed ? "WAITING" : "HARD VETO", textcolor=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 ? color.yellow : strictSignal ? color.lime : debugSignal ? color.aqua : rawTrigger ? color.orange : hardVetoPassed ? color.yellow : color.red)
 }

@@ -54,6 +54,12 @@
 
 ورودی `Target R:R (set before backtest quantity)` پیش از ورودی quantity قرار دارد. ابتدا R:R دلخواه را در بازهٔ `1.50` تا `3.00` انتخاب کنید و سپس `Backtest quantity (set after R:R)` را برای اندازهٔ معامله وارد کنید. مقدار پیش‌فرض `2.25` است و همان مقدار TP bracket را تعیین می‌کند.
 
+## خروج هوشمند روند
+
+`Enable smart trend exit` به‌صورت پیش‌فرض فعال است و فقط پس از بسته‌شدن کندل 15m بررسی می‌شود. برای position long، خروج وقتی submit می‌شود که حداقل تعداد تنظیم‌شده‌ای از این سه تأیید خلاف‌روند رخ دهد: بسته‌شدن زیر Kijun، نزولی‌شدن وضعیت Tenkan/Kijun، و ورود/شکست Kumo به سمت پایین. برای position short همین معیارها به‌شکل معکوس اعمال می‌شوند.
+
+ورودی `Smart exit: required confirmations` پیش‌فرض `2` از `3` است؛ بنابراین یک wick یا یک نشانهٔ منفرد position را نمی‌بندد. خروج هوشمند یک market-close شبیه‌سازی‌شده برای open بعدی است، هیچ reversal فوری ایجاد نمی‌کند و lock تک‌معامله‌ای تا fill خروج فعال می‌ماند.
+
 ## چارت خلوت و dashboard
 
 روی نمودار فقط کندل‌ها، marker داخلی ورود/خروج GoCharting و خطوط SL/TP دیده می‌شوند. هیچ marker تکراریِ اسکریپت، خط indicator، خط Entry، label قیمت یا متن محاسبات نمایش داده نمی‌شود. خط 30m، خط 1H، جدول شمارش HTF و محاسبهٔ HTF نیز وجود ندارد. نشانگرهای diagnostic خام (`RAW` و `LOCK`) پیش‌فرض خاموش هستند؛ فقط برای عیب‌یابی گزینهٔ `DEBUG: show raw triggers rejected by gate` را فعال کنید.
@@ -66,12 +72,13 @@
 | `Trigger` | Katana، Pullback یا Breakout |
 | `Conditions` و `Book gate` | گذر 17 شرط Lite و امتیاز gate |
 | `Model` | تأیید `NATIVE 15m ONLY` |
+| `SMART EXIT LONG/SHORT` | خروج هوشمند تأیید شده و market-close submit شده است |
 | `LOCKED: ONE TRADE` | سفارش pending یا position باز است |
 
 ## منطق و تنظیمات Lite
 
 نسخهٔ native-15m از Ichimoku `9/26/52/26`، ATR14، کیفیت candle/volume، Chikou، Kumo، hard-vetoهای `1/3/4/6/17` و triggerهای `Katana`، `Pullback` و `Breakout` استفاده می‌کند. R:R توسط کاربر، پیش از تعیین quantity، در بازهٔ `1.5R` تا `3R` انتخاب می‌شود؛ پیش‌فرض `2.25R` است.
 
-`Round-trip cost fraction` به‌طور پیش‌فرض `0.0021` است و `commission_value=0.105` صرفاً تقریب هزینه در گزارش بک‌تست است. quantity، هزینه، ATR-extension و SL buffer از تنظیمات Lipi قابل تغییرند. هیچ time-stop یا خروج اجباری بعد از 20 کندل در این نسخه وجود ندارد؛ position فقط با SL یا TP شبیه‌سازی‌شده بسته می‌شود. تغییر تنظیمات، مقایسه با baseline مرجع را تغییر می‌دهد.
+`Round-trip cost fraction` به‌طور پیش‌فرض `0.0021` است و `commission_value=0.105` صرفاً تقریب هزینه در گزارش بک‌تست است. quantity، هزینه، ATR-extension، SL buffer و تنظیمات Smart Exit از تنظیمات Lipi قابل تغییرند. هیچ time-stop یا خروج اجباری بعد از 20 کندل در این نسخه وجود ندارد؛ position با SL، TP یا خروج هوشمند تأییدشده بسته می‌شود. تغییر تنظیمات، مقایسه با baseline مرجع را تغییر می‌دهد.
 
 > هشدار: این ابزار توصیهٔ سرمایه‌گذاری نیست. بک‌تست، markerها و خطوط SL/TP صرفاً برای visual audit هستند، نه اتصال یا مجوز اجرای معاملهٔ واقعی.
