@@ -128,7 +128,8 @@ bool smartExitLong = enableSmartExit and closed15m and strategy.position_size > 
 bool smartExitShort = enableSmartExit and closed15m and strategy.position_size < 0 and smartShortCount >= smartExitConfirmations
 
 // One lifecycle lock covers both the next-open pending order and the open
-// position. It blocks repeated Long/Short orders until that trade has ended.
+// position. A same-direction re-entry lock remains after an exit, so one
+// Ichimoku trend leg cannot be traded twice just because its bracket closed.
 int MAX_RETAINED_BRACKETS = 200
 static int tradeLockState = 0 // 0=idle, 1=submitted/pending, 2=open
 static int lockedSignalBar = na
@@ -141,7 +142,21 @@ static line activeTargetLine = na
 static float activeStopPrice = na
 static float activeTargetPrice = na
 static bool bracketIsLive = false
+static bool longTrendEntryArmed = true
+static bool shortTrendEntryArmed = true
 static array<line> bracketHistory = array.new<line>(0)
+
+// A direction becomes eligible again only after the native 15m Ichimoku
+// structure has reset: TK reverses or price reaches the opposite Kumo edge.
+// This uses the same closed 15m lines used by bias and Smart Trend Exit.
+bool longTrendReset = dataReady and closed15m and (tenkan15 < kijun15 or close <= bottom15)
+bool shortTrendReset = dataReady and closed15m and (tenkan15 > kijun15 or close >= top15)
+if longTrendReset {
+    longTrendEntryArmed := true
+}
+if shortTrendReset {
+    shortTrendEntryArmed := true
+}
 
 // A closed-trade count also catches a fill and exit within one historical bar.
 bool tradeClosedThisBar = strategy.closedtrades > observedClosedTrades
@@ -149,12 +164,16 @@ bool justOpened = strategy.position_size != 0 and strategy.position_size[1] == 0
 bool filledAndClosedThisBar = tradeLockState == 1 and strategy.position_size == 0 and tradeClosedThisBar
 bool canOpenSingleTrade = tradeLockState == 0 and strategy.position_size == 0
 bool blockedByOpenTrade = entryDecision and not canOpenSingleTrade
-bool enterLong = entryDecision and canOpenSingleTrade and isLong and allowLong
-bool enterShort = entryDecision and canOpenSingleTrade and not isLong and allowShort
+bool blockedBySameTrend = entryDecision and canOpenSingleTrade and (isLong ? not longTrendEntryArmed : not shortTrendEntryArmed)
+bool enterLong = entryDecision and canOpenSingleTrade and longTrendEntryArmed and isLong and allowLong
+bool enterShort = entryDecision and canOpenSingleTrade and shortTrendEntryArmed and not isLong and allowShort
 
 // Submit a next-open market entry and freeze the exact bracket prices. The
 // prices are sent to strategy.exit only after GoCharting reports an open fill.
 if enterLong {
+    // Consume this direction for the current native-15m Ichimoku trend leg.
+    // A later Long needs a real TK/Kumo reset before it can be submitted.
+    longTrendEntryArmed := false
     tradeLockState := 1
     lockedSignalBar := bar_index
     pendingSide := 1
@@ -163,6 +182,9 @@ if enterLong {
     strategy.entry("Lite Long", strategy.long, qty=qty, comment=debugSignal ? "DEBUG raw trigger long" : "BASE Lite long")
 }
 if enterShort {
+    // Consume this direction for the current native-15m Ichimoku trend leg.
+    // A later Short needs a real TK/Kumo reset before it can be submitted.
+    shortTrendEntryArmed := false
     tradeLockState := 1
     lockedSignalBar := bar_index
     pendingSide := -1
@@ -265,5 +287,5 @@ if barstate.islast {
     table.cell(dashboard, 0, 6, "Model")
     table.cell(dashboard, 1, 6, "NATIVE 15m ONLY", textcolor=color.aqua)
     table.cell(dashboard, 0, 7, "Status")
-    table.cell(dashboard, 1, 7, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : strictSignal ? "STRICT SIGNAL" : debugSignal ? "DEBUG ENTRY" : rawTrigger ? "RAW BLOCKED" : hardVetoPassed ? "WAITING" : "HARD VETO", textcolor=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 ? color.yellow : strictSignal ? color.lime : debugSignal ? color.aqua : rawTrigger ? color.orange : hardVetoPassed ? color.yellow : color.red)
+    table.cell(dashboard, 1, 7, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : blockedBySameTrend ? (isLong ? "WAIT: LONG REARM" : "WAIT: SHORT REARM") : strictSignal ? "STRICT SIGNAL" : debugSignal ? "DEBUG ENTRY" : rawTrigger ? "RAW BLOCKED" : hardVetoPassed ? "WAITING" : "HARD VETO", textcolor=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 ? color.yellow : blockedBySameTrend ? color.yellow : strictSignal ? color.lime : debugSignal ? color.aqua : rawTrigger ? color.orange : hardVetoPassed ? color.yellow : color.red)
 }
