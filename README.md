@@ -16,7 +16,7 @@
 ## بازبینی تصویری در GoCharting
 
 راهنمای اجرای Lipi v2 در GoCharting در
-[`strategies/gocharting/README_BASE_ICHIMOKU_4TF_15M_AUDIT_FA.md`](strategies/gocharting/README_BASE_ICHIMOKU_4TF_15M_AUDIT_FA.md)
+[`strategies/gocharting/README_BASE_ICHIMOKU_15M_LIGHT_AUDIT_FA.md`](strategies/gocharting/README_BASE_ICHIMOKU_15M_LIGHT_AUDIT_FA.md)
 آمده است. فایل عملیاتی سبک فقط برای چارت **15m**،
-[`BASE_ICHIMOKU_15m_30m_1h_Light_Audit.lipi`](strategies/gocharting/BASE_ICHIMOKU_15m_30m_1h_Light_Audit.lipi)،
-زنجیرهٔ بستهٔ 15m/30m/1H را می‌سازد و برای هر معاملهٔ شبیه‌سازی‌شده Entry، SL و TP واقعیِ bracket را روی چارت نگه می‌دارد. این strategy فقط بک‌تست/شبیه‌سازی است و سفارش واقعی ارسال نمی‌کند.
+[`BASE_ICHIMOKU_15m_Light_Audit.lipi`](strategies/gocharting/BASE_ICHIMOKU_15m_Light_Audit.lipi)،
+تمام محاسبات را فقط از کندل‌های native 15m انجام می‌دهد و هیچ داده یا محاسبهٔ 30m/1H ندارد. برای هر معاملهٔ شبیه‌سازی‌شده، Entry، SL و TP واقعیِ bracket روی چارت باقی می‌ماند. این strategy فقط بک‌تست/شبیه‌سازی است و سفارش واقعی ارسال نمی‌کند.

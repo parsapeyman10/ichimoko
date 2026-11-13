@@ -1,11 +1,11 @@
 //@lipi=2
 // BASE_ICHIMOKU Lite audit for a standard 15-minute GoCharting chart only.
 //
-// Timeframes are deliberately limited to native 15m -> closed 30m -> closed 1H.
+// This native-only Lite version deliberately calculates no 30m, 1H or other
+// higher-timeframe candles. Every decision comes from a confirmed 15m candle.
 // Each real strategy entry draws a persisted entry, SL and TP bracket on chart.
-// This is a low-cost diagnostic adaptation, NOT the original 4H/1H/15m model.
 // Orders are simulated by GoCharting only; nothing is routed to an exchange.
-strategy("BASE Ichimoku Lite bracket audit (15m / 30m / 1H)", overlay=true, initial_capital=1000, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission_percent, commission_value=0.105, pyramiding=0, process_orders_on_close=false, max_lines_count=500, max_labels_count=500)
+strategy("BASE Ichimoku native 15m bracket audit", overlay=true, initial_capital=1000, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission_percent, commission_value=0.105, pyramiding=0, process_orders_on_close=false, max_lines_count=500, max_labels_count=500)
 
 int TENKAN = input.int(9, "Tenkan", minval=2)
 int KIJUN = input.int(26, "Kijun", minval=2)
@@ -21,226 +21,12 @@ float slBufferAtr = input.float(0.25, "Structural SL buffer (ATR)", minval=0.15,
 float roundTripCostPct = input.float(0.0021, "Round-trip cost fraction", minval=0.0, step=0.0001)
 int maxHoldBars = input.int(20, "Time stop: 15m bars", minval=1)
 
-type LiteSnap {
-    bool ready
-    float o
-    float h
-    float l
-    float c
-    float tenkan
-    float kijun
-    float prevTenkan
-    float prevKijun
-    float currentA
-    float currentB
-    float futureA
-    float futureB
-    float prevFutureA
-    float prevFutureB
-    float atr
-    bool chikouBull
-    bool chikouBear
-    float chikouPeak
-    float chikouTrough
-    bool ssbFlat
-    bool kijunFlat
-    float body
-    float clv
-    float volumeRatio
-    float er
-    float upperWick
-    float lowerWick
-}
-
-func arrMax(array<float> values, int first, int last) {
-    float best = array.get(values, first)
-    if last > first {
-        for i = first + 1 to last {
-            best := math.max(best, array.get(values, i))
-        }
-    }
-    return best
-}
-
-func arrMin(array<float> values, int first, int last) {
-    float best = array.get(values, first)
-    if last > first {
-        for i = first + 1 to last {
-            best := math.min(best, array.get(values, i))
-        }
-    }
-    return best
-}
-
-func midpoint(array<float> highs, array<float> lows, int at, int length) {
-    int first = math.max(0, at - length + 1)
-    return (arrMax(highs, first, at) + arrMin(lows, first, at)) / 2.0
-}
-
-func addClosedBar(array<float> opens, array<float> highs, array<float> lows, array<float> closes, array<float> volumes, float o, float h, float l, float c, float v) {
-    array.push(opens, o)
-    array.push(highs, h)
-    array.push(lows, l)
-    array.push(closes, c)
-    array.push(volumes, v)
-    if array.length(closes) > 80 {
-        array.shift(opens)
-        array.shift(highs)
-        array.shift(lows)
-        array.shift(closes)
-        array.shift(volumes)
-    }
-}
-
-// Called only when an aggregated 30m/1H bar has completed, never per 15m bar.
-func makeSnapshot(array<float> opens, array<float> highs, array<float> lows, array<float> closes, array<float> volumes) {
-    int n = array.length(closes)
-    if n < SPAN_B + 5 {
-        return LiteSnap.new(ready=false)
-    }
-    int last = n - 1
-    int previous = last - 1
-    int displaced = math.max(0, last - (DISPLACEMENT - 1))
-    float t = midpoint(highs, lows, last, TENKAN)
-    float k = midpoint(highs, lows, last, KIJUN)
-    float previousT = midpoint(highs, lows, previous, TENKAN)
-    float previousK = midpoint(highs, lows, previous, KIJUN)
-    float currentA = (midpoint(highs, lows, displaced, TENKAN) + midpoint(highs, lows, displaced, KIJUN)) / 2.0
-    float currentB = midpoint(highs, lows, displaced, SPAN_B)
-    float futureA = (t + k) / 2.0
-    float futureB = midpoint(highs, lows, last, SPAN_B)
-    float previousFutureA = (previousT + previousK) / 2.0
-    float previousFutureB = midpoint(highs, lows, previous, SPAN_B)
-
-    int atrFirst = math.max(1, last - 13)
-    float trSum = math.max(array.get(highs, atrFirst) - array.get(lows, atrFirst), math.max(math.abs(array.get(highs, atrFirst) - array.get(closes, atrFirst - 1)), math.abs(array.get(lows, atrFirst) - array.get(closes, atrFirst - 1))))
-    if last > atrFirst {
-        for i = atrFirst + 1 to last {
-            float tr = math.max(array.get(highs, i) - array.get(lows, i), math.max(math.abs(array.get(highs, i) - array.get(closes, i - 1)), math.abs(array.get(lows, i) - array.get(closes, i - 1))))
-            trSum += tr
-        }
-    }
-    float c = array.get(closes, last)
-    float atr = math.max(trSum / (last - atrFirst + 1), c * 0.0005)
-    float topAtChikou = math.max(midpoint(highs, lows, displaced, TENKAN), midpoint(highs, lows, displaced, KIJUN))
-    float bottomAtChikou = math.min(midpoint(highs, lows, displaced, TENKAN), midpoint(highs, lows, displaced, KIJUN))
-    bool chikouBull = c > math.max(array.get(highs, displaced), topAtChikou)
-    bool chikouBear = c < math.min(array.get(lows, displaced), bottomAtChikou)
-
-    int peakFirst = math.max(0, last - KIJUN)
-    float peak = array.get(closes, peakFirst)
-    float trough = array.get(closes, peakFirst)
-    if last - 1 > peakFirst {
-        for i = peakFirst + 1 to last - 1 {
-            peak := math.max(peak, array.get(closes, i))
-            trough := math.min(trough, array.get(closes, i))
-        }
-    }
-
-    float tolerance = math.max(c * 0.0003, atr * 0.04)
-    float currentB1 = midpoint(highs, lows, math.max(0, displaced - 1), SPAN_B)
-    float currentB2 = midpoint(highs, lows, math.max(0, displaced - 2), SPAN_B)
-    bool ssbFlat = math.abs(currentB - currentB1) <= tolerance and math.abs(currentB - currentB2) <= tolerance
-    bool kijunFlat = math.abs(k - previousK) <= tolerance
-    float candleRange = math.max(array.get(highs, last) - array.get(lows, last), 0.00000001)
-    float body = math.abs(c - array.get(opens, last)) / candleRange
-    float clv = math.min(1.0, math.max(0.0, (c - array.get(lows, last)) / candleRange))
-
-    int volumeFirst = math.max(0, last - 19)
-    float volumeSum = array.get(volumes, volumeFirst)
-    if last > volumeFirst {
-        for i = volumeFirst + 1 to last {
-            volumeSum += array.get(volumes, i)
-        }
-    }
-    float averageVolume = volumeSum / (last - volumeFirst + 1)
-    float volumeRatio = averageVolume > 0.0 and array.get(volumes, last) > 0.0 ? array.get(volumes, last) / averageVolume : 1.0
-
-    int erFirst = math.max(0, last - 14)
-    float erPath = 0.0
-    if last > erFirst {
-        for i = erFirst + 1 to last {
-            erPath += math.abs(array.get(closes, i) - array.get(closes, i - 1))
-        }
-    }
-    float er = erPath > 0.00000001 ? math.min(1.0, math.abs(c - array.get(closes, erFirst)) / erPath) : 0.5
-    float upperWick = math.max(0.0, (array.get(highs, last) - math.max(array.get(opens, last), c)) / candleRange)
-    float lowerWick = math.max(0.0, (math.min(array.get(opens, last), c) - array.get(lows, last)) / candleRange)
-
-    return LiteSnap.new(ready=true, o=array.get(opens, last), h=array.get(highs, last), l=array.get(lows, last), c=c, tenkan=t, kijun=k, prevTenkan=previousT, prevKijun=previousK, currentA=currentA, currentB=currentB, futureA=futureA, futureB=futureB, prevFutureA=previousFutureA, prevFutureB=previousFutureB, atr=atr, chikouBull=chikouBull, chikouBear=chikouBear, chikouPeak=peak, chikouTrough=trough, ssbFlat=ssbFlat, kijunFlat=kijunFlat, body=body, clv=clv, volumeRatio=volumeRatio, er=er, upperWick=upperWick, lowerWick=lowerWick)
-}
-
-static array<float> o30 = array.new<float>(0)
-static array<float> h30 = array.new<float>(0)
-static array<float> l30 = array.new<float>(0)
-static array<float> c30 = array.new<float>(0)
-static array<float> v30 = array.new<float>(0)
-static array<float> o1h = array.new<float>(0)
-static array<float> h1h = array.new<float>(0)
-static array<float> l1h = array.new<float>(0)
-static array<float> c1h = array.new<float>(0)
-static array<float> v1h = array.new<float>(0)
-static LiteSnap snap30 = LiteSnap.new(ready=false)
-static LiteSnap snap1h = LiteSnap.new(ready=false)
-static int count30 = 0
-static float bucket30Open = na
-static float bucket30High = na
-static float bucket30Low = na
-static float bucket30Volume = 0.0
-static int count1h = 0
-static float bucket1hOpen = na
-static float bucket1hHigh = na
-static float bucket1hLow = na
-static float bucket1hVolume = 0.0
-
+// This script intentionally has no HTF arrays, buckets or resampling. The
+// native 15m Ichimoku values below are evaluated only when the chart candle is
+// confirmed, so the strategy cannot use a partly formed candle as a signal.
 bool chartIs15m = interval.isminutes and interval.multiplier == 15
 bool closed15m = chartIs15m and barstate.isconfirmed
-if closed15m {
-    int utcMinute = minute(time, "UTC")
-    // Build a 30m bucket only from :00+:15 or :30+:45.
-    if utcMinute == 0 or utcMinute == 30 {
-        bucket30Open := open
-        bucket30High := high
-        bucket30Low := low
-        bucket30Volume := volume
-        count30 := 1
-    } else if count30 > 0 {
-        bucket30High := math.max(bucket30High, high)
-        bucket30Low := math.min(bucket30Low, low)
-        bucket30Volume += volume
-        count30 += 1
-    }
-    if utcMinute == 15 or utcMinute == 45 {
-        if count30 == 2 {
-            addClosedBar(o30, h30, l30, c30, v30, bucket30Open, bucket30High, bucket30Low, close, bucket30Volume)
-            snap30 := makeSnapshot(o30, h30, l30, c30, v30)
-        }
-        count30 := 0
-    }
 
-    // Build a 1H bucket only from four complete 15m bars.
-    if utcMinute == 0 {
-        bucket1hOpen := open
-        bucket1hHigh := high
-        bucket1hLow := low
-        bucket1hVolume := volume
-        count1h := 1
-    } else if count1h > 0 {
-        bucket1hHigh := math.max(bucket1hHigh, high)
-        bucket1hLow := math.min(bucket1hLow, low)
-        bucket1hVolume += volume
-        count1h += 1
-    }
-    if utcMinute == 45 {
-        if count1h == 4 {
-            addClosedBar(o1h, h1h, l1h, c1h, v1h, bucket1hOpen, bucket1hHigh, bucket1hLow, close, bucket1hVolume)
-            snap1h := makeSnapshot(o1h, h1h, l1h, c1h, v1h)
-        }
-        count1h := 0
-    }
-}
-
-// Native 15m Ichimoku is calculated by talib, avoiding per-bar custom loops.
 float tenkan15 = (talib.highest(high, TENKAN) + talib.lowest(low, TENKAN)) / 2.0
 float kijun15 = (talib.highest(high, KIJUN) + talib.lowest(low, KIJUN)) / 2.0
 float spanA15 = (tenkan15 + kijun15) / 2.0
@@ -261,32 +47,33 @@ float body15 = math.abs(close - open) / range15
 float clv15 = math.min(1.0, math.max(0.0, (close - low) / range15))
 float upperWick15 = math.max(0.0, (high - math.max(open, close)) / range15)
 float lowerWick15 = math.max(0.0, (math.min(open, close) - low) / range15)
+float flatTolerance15 = math.max(close * 0.0003, atr15 * 0.04)
+bool nativeKijunFlat = math.abs(kijun15 - kijun15[1]) <= flatTolerance15
+bool nativeSsbFlat = math.abs(currentB15 - currentB15[1]) <= flatTolerance15
 bool chikouBull15 = close > talib.highest(high[DISPLACEMENT - 1], 7)
 bool chikouBear15 = close < talib.lowest(low[DISPLACEMENT - 1], 7)
+float erPath15 = talib.sma(math.abs(close - close[1]), 14) * 14.0
+float er15 = erPath15 > 0.00000001 ? math.min(1.0, math.abs(close - close[14]) / erPath15) : 0.5
+bool dataReady = closed15m and not na(currentA15) and not na(currentB15) and not na(er15)
 
-float top30 = math.max(snap30.currentA, snap30.currentB)
-float bottom30 = math.min(snap30.currentA, snap30.currentB)
-float top1h = math.max(snap1h.currentA, snap1h.currentB)
-float bottom1h = math.min(snap1h.currentA, snap1h.currentB)
-bool dataReady = closed15m and snap30.ready and snap1h.ready and not na(currentA15) and not na(currentB15)
-
-bool bullishBias = snap1h.c > top1h and snap30.c > top30 and close > top15
-bool bearishBias = snap1h.c < bottom1h and snap30.c < bottom30 and close < bottom15
-bool isLong = bullishBias and not bearishBias ? true : bearishBias and not bullishBias ? false : snap30.tenkan >= snap30.kijun
-
+// Native 15m-only BASE Lite gates. No higher-timeframe bias or confirmation
+// is calculated in this version.
+bool bullishBias = close > top15
+bool bearishBias = close < bottom15
+bool isLong = bullishBias and not bearishBias ? true : bearishBias and not bullishBias ? false : tenkan15 >= kijun15
 bool c1 = isLong ? bullishBias : bearishBias
-bool c2 = isLong ? (snap1h.tenkan >= snap1h.kijun and snap30.tenkan >= snap30.kijun and tenkan15 >= kijun15) : (snap1h.tenkan <= snap1h.kijun and snap30.tenkan <= snap30.kijun and tenkan15 <= kijun15)
-bool c3 = isLong ? (snap1h.tenkan >= snap1h.prevTenkan - snap1h.atr * 0.05 and snap30.tenkan >= snap30.prevTenkan - snap30.atr * 0.05 and tenkan15 >= tenkan15[1] - atr15 * 0.05) : (snap1h.tenkan <= snap1h.prevTenkan + snap1h.atr * 0.05 and snap30.tenkan <= snap30.prevTenkan + snap30.atr * 0.05 and tenkan15 <= tenkan15[1] + atr15 * 0.05)
-bool c4 = isLong ? (snap1h.futureA > snap1h.futureB and snap1h.futureA >= snap1h.prevFutureA and snap30.futureA > snap30.futureB and snap30.futureA >= snap30.prevFutureA) : (snap1h.futureA < snap1h.futureB and snap1h.futureA <= snap1h.prevFutureA and snap30.futureA < snap30.futureB and snap30.futureA <= snap30.prevFutureA)
-bool c5 = math.abs(snap1h.futureA - snap1h.futureB) / math.max(snap1h.atr, 0.00000001) >= 0.05 and math.abs(snap30.futureA - snap30.futureB) / math.max(snap30.atr, 0.00000001) >= 0.04
-bool c6 = isLong ? (snap1h.chikouBull and snap30.chikouBull and chikouBull15) : (snap1h.chikouBear and snap30.chikouBear and chikouBear15)
+bool c2 = isLong ? tenkan15 >= kijun15 : tenkan15 <= kijun15
+bool c3 = isLong ? tenkan15 >= tenkan15[1] - atr15 * 0.05 : tenkan15 <= tenkan15[1] + atr15 * 0.05
+bool c4 = isLong ? (spanA15 > spanB15 and spanA15 >= spanA15[1]) : (spanA15 < spanB15 and spanA15 <= spanA15[1])
+bool c5 = math.abs(spanA15 - spanB15) / math.max(atr15, 0.00000001) >= 0.05
+bool c6 = isLong ? chikouBull15 : chikouBear15
 bool c7 = isLong ? close >= chikouPeak15 - atr15 * 0.15 : close <= chikouTrough15 + atr15 * 0.15
-bool c8 = math.abs(close - kijun15) / atr15 <= maxKijunExtensionAtr and math.abs(snap30.c - snap30.kijun) / math.max(snap30.atr, 0.00000001) <= maxKijunExtensionAtr and not (snap30.kijunFlat and snap30.ssbFlat)
-bool c9 = isLong ? close >= top15 + (snap30.ssbFlat ? atr15 * 0.15 : 0.0) : close <= bottom15 - (snap30.ssbFlat ? atr15 * 0.15 : 0.0)
-bool c10 = not (snap1h.kijunFlat and snap1h.ssbFlat and snap30.kijunFlat and snap30.ssbFlat)
+bool c8 = math.abs(close - kijun15) / atr15 <= maxKijunExtensionAtr and not (nativeKijunFlat and nativeSsbFlat)
+bool c9 = isLong ? close >= top15 + (nativeSsbFlat ? atr15 * 0.15 : 0.0) : close <= bottom15 - (nativeSsbFlat ? atr15 * 0.15 : 0.0)
+bool c10 = not (nativeKijunFlat and nativeSsbFlat)
 bool directionalCandle = isLong ? (close > open and clv15 >= 0.45 and body15 >= 0.22) : (close < open and clv15 <= 0.55 and body15 >= 0.22)
 bool c11 = directionalCandle and volumeRatio15 >= 0.60
-bool c13 = (snap1h.er >= 0.20 or snap30.er >= 0.22) and not (snap1h.kijunFlat and snap30.kijunFlat)
+bool c13 = er15 >= 0.20 and not nativeKijunFlat
 bool c14 = isLong ? (upperWick15 <= 0.45 and (body15 >= 0.22 or lowerWick15 >= 0.25)) : (lowerWick15 <= 0.45 and (body15 >= 0.22 or upperWick15 >= 0.25))
 bool c15 = c13 and c8 and (isLong ? tenkan15 >= kijun15 : tenkan15 <= kijun15)
 
@@ -298,7 +85,7 @@ bool triggerFired = triggerKatana or triggerPullback or triggerBreakout
 float entryAnchor = close
 float stopFloor = math.max(close * 0.0025, atr15 * 0.80)
 float stopCeiling = math.max(stopFloor, atr15 * 2.10)
-float rawStop = isLong ? math.min(kijun15, snap30.kijun) - atr15 * slBufferAtr : math.max(kijun15, snap30.kijun) + atr15 * slBufferAtr
+float rawStop = isLong ? kijun15 - atr15 * slBufferAtr : kijun15 + atr15 * slBufferAtr
 float rawStopDistance = math.abs(entryAnchor - rawStop)
 float stopDistance = math.min(math.max(rawStopDistance, stopFloor), stopCeiling)
 float targetDistance = stopDistance * 2.25
@@ -406,8 +193,8 @@ if justOpened {
     bracketIsLive := true
 }
 
-// On a gap/large bar the entry can fill and exit before the next script pass.
-// Build the same historical bracket from the completed trade in that case.
+// If a trade fills and exits within one historical bar, build that bracket from
+// the completed trade so its entry, SL and TP remain visible in history.
 if filledAndClosedThisBar {
     activeEntryPrice := strategy.closedtrades_entry_price(strategy.closedtrades - 1)
     activeStopPrice := pendingStopPrice
@@ -473,10 +260,9 @@ if strategy.position_size < 0 and strategy.opentrades > 0 and bar_index - strate
     strategy.close("Lite Short", comment="time stop")
 }
 
-// Three readable guides only: native 15m, built 30m, built 1H.
+// Native 15m guides only: no 30m/1H plotted or calculated values exist here.
+plot(tenkan15, title="15m Tenkan", color=color.blue, linewidth=1)
 plot(kijun15, title="15m Kijun", color=color.orange, linewidth=2)
-plot(snap30.kijun, title="Built 30m Kijun", color=color.teal, linewidth=2, style=plotStyle.stepLine)
-plot(snap1h.kijun, title="Built 1H Kijun", color=color.purple, linewidth=2, style=plotStyle.stepLine)
 plotshape(actualLongEntry, title="Accepted Lite long entry", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.normal, text="LITE L")
 plotshape(actualShortEntry, title="Accepted Lite short entry", location=location.abovebar, shape=shape.triangledown, color=color.red, size=size.normal, text="LITE S")
 plotshape(actualLongFillAndExit, title="Accepted Lite long fill and exit", location=location.belowbar, shape=shape.triangleup, color=color.lime, size=size.normal, text="LITE L")
@@ -487,20 +273,20 @@ plotshape(showRawTriggers and blockedByOpenTrade, title="Signal ignored while tr
 
 static table dashboard = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 0.25), border_width=1)
 if barstate.islast {
-    table.cell(dashboard, 0, 0, "BASE LITE 15/30/1H")
+    table.cell(dashboard, 0, 0, "BASE LITE NATIVE 15m")
     table.cell(dashboard, 1, 0, chartIs15m ? "15m OK" : "CHANGE TO 15m", textcolor=chartIs15m ? color.lime : color.red)
-    table.cell(dashboard, 0, 1, "Closed HTF bars")
-    table.cell(dashboard, 1, 1, "30m " + str.tostring(array.length(c30)) + " | 1H " + str.tostring(array.length(c1h)))
-    table.cell(dashboard, 0, 2, "Data")
-    table.cell(dashboard, 1, 2, dataReady ? "READY" : "WARM-UP: need 57 H1", textcolor=dataReady ? color.lime : color.orange)
-    table.cell(dashboard, 0, 3, "Bias")
-    table.cell(dashboard, 1, 3, dataReady ? (isLong ? "LONG" : "SHORT") : "-")
-    table.cell(dashboard, 0, 4, "Trigger")
-    table.cell(dashboard, 1, 4, triggerKatana ? "KATANA" : triggerPullback ? "PULLBACK" : triggerBreakout ? "BREAKOUT" : "-", textcolor=triggerFired ? color.aqua : color.gray)
-    table.cell(dashboard, 0, 5, "Conditions")
-    table.cell(dashboard, 1, 5, str.tostring(passedCount) + " / 17")
-    table.cell(dashboard, 0, 6, "Book gate")
-    table.cell(dashboard, 1, 6, str.tostring(bookPct, "#.0") + "%", textcolor=bookFires ? color.lime : color.orange)
+    table.cell(dashboard, 0, 1, "Data")
+    table.cell(dashboard, 1, 1, dataReady ? "READY" : "WARM-UP: need 80 x 15m", textcolor=dataReady ? color.lime : color.orange)
+    table.cell(dashboard, 0, 2, "Bias")
+    table.cell(dashboard, 1, 2, dataReady ? (isLong ? "LONG" : "SHORT") : "-")
+    table.cell(dashboard, 0, 3, "Trigger")
+    table.cell(dashboard, 1, 3, triggerKatana ? "KATANA" : triggerPullback ? "PULLBACK" : triggerBreakout ? "BREAKOUT" : "-", textcolor=triggerFired ? color.aqua : color.gray)
+    table.cell(dashboard, 0, 4, "Conditions")
+    table.cell(dashboard, 1, 4, str.tostring(passedCount) + " / 17")
+    table.cell(dashboard, 0, 5, "Book gate")
+    table.cell(dashboard, 1, 5, str.tostring(bookPct, "#.0") + "%", textcolor=bookFires ? color.lime : color.orange)
+    table.cell(dashboard, 0, 6, "Model")
+    table.cell(dashboard, 1, 6, "NATIVE 15m ONLY", textcolor=color.aqua)
     table.cell(dashboard, 0, 7, "Status")
     table.cell(dashboard, 1, 7, tradeLockState != 0 ? "LOCKED: ONE TRADE" : strictSignal ? "STRICT SIGNAL" : debugSignal ? "DEBUG ENTRY" : rawTrigger ? "RAW BLOCKED" : hardVetoPassed ? "WAITING" : "HARD VETO", textcolor=tradeLockState != 0 ? color.yellow : strictSignal ? color.lime : debugSignal ? color.aqua : rawTrigger ? color.orange : hardVetoPassed ? color.yellow : color.red)
 }
