@@ -346,7 +346,7 @@ bool directionalCandle = isLong ? (close > open and clv5 >= 0.45 and body5 >= 0.
 bool c11 = directionalCandle and volumeRatio5 >= 0.60
 bool c13 = (snap1h.er >= 0.20 or snap30.er >= 0.22 or confirm15.er >= 0.22) and not (snap1h.kijunFlat and snap30.kijunFlat and confirm15.kijunFlat)
 bool c14 = isLong ? (upperWick5 <= 0.45 and (body5 >= 0.22 or lowerWick5 >= 0.25)) : (lowerWick5 <= 0.45 and (body5 >= 0.22 or upperWick5 >= 0.25))
-bool c15 = c13 and c8 and (isLong ? tenkan5 >= kijun5 : tenkan5 <= kijun5)
+bool condition15 = c13 and c8 and (isLong ? tenkan5 >= kijun5 : tenkan5 <= kijun5)
 
 bool triggerKatana = isLong ? (talib.crossover(tenkan5, kijun5) and close > top5 and close > open) : (talib.crossunder(tenkan5, kijun5) and close < bottom5 and close < open)
 bool triggerPullback = isLong ? (low <= math.max(tenkan5, kijun5) + atr5 * 0.25 and close > tenkan5 and close > top5 and close > open) : (high >= math.min(tenkan5, kijun5) - atr5 * 0.25 and close < tenkan5 and close < bottom5 and close < open)
@@ -369,14 +369,14 @@ float costToRisk = entryAnchor * roundTripCostPct / math.max(stopDistance, 0.000
 bool c17 = costToRisk <= 0.45
 
 float regimeScore = (c1 ? 1.0 : 0.0) + (c3 ? 1.0 : 0.0) + (c4 ? 1.0 : 0.0) + (c6 ? 1.0 : 0.0) + (c17 ? 1.2 : 0.0)
-float qualityScore = (c5 ? 0.6 : 0.0) + (c8 ? 1.0 : 0.0) + (c9 ? 1.0 : 0.0) + (c13 ? 1.0 : 0.0) + (c14 ? 0.6 : 0.0) + (c15 ? 1.0 : 0.0)
+float qualityScore = (c5 ? 0.6 : 0.0) + (c8 ? 1.0 : 0.0) + (c9 ? 1.0 : 0.0) + (c13 ? 1.0 : 0.0) + (c14 ? 0.6 : 0.0) + (condition15 ? 1.0 : 0.0)
 float triggerScore = (c2 ? 0.6 : 0.0) + (c7 ? 0.6 : 0.0) + (c10 ? 0.8 : 0.0) + (c11 ? 1.2 : 0.0) + (c12 ? 1.0 : 0.0) + (c16 ? 1.2 : 0.0) + (c17 ? 1.2 : 0.0)
 float bookPct = (regimeScore + qualityScore + triggerScore) / 17.0 * 100.0
 float qualityPct = qualityScore / 5.2 * 100.0
 float triggerPct = triggerScore / 6.6 * 100.0
 bool hardVetoPassed = c1 and c3 and c4 and c6 and c17
 bool bookFires = hardVetoPassed and qualityPct >= 60.0 and triggerPct >= 60.0 and bookPct >= 70.0
-int passedCount = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0) + (c6 ? 1 : 0) + (c7 ? 1 : 0) + (c8 ? 1 : 0) + (c9 ? 1 : 0) + (c10 ? 1 : 0) + (c11 ? 1 : 0) + (c12 ? 1 : 0) + (c13 ? 1 : 0) + (c14 ? 1 : 0) + (c15 ? 1 : 0) + (c16 ? 1 : 0) + (c17 ? 1 : 0)
+int passedCount = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0) + (c6 ? 1 : 0) + (c7 ? 1 : 0) + (c8 ? 1 : 0) + (c9 ? 1 : 0) + (c10 ? 1 : 0) + (c11 ? 1 : 0) + (c12 ? 1 : 0) + (c13 ? 1 : 0) + (c14 ? 1 : 0) + (condition15 ? 1 : 0) + (c16 ? 1 : 0) + (c17 ? 1 : 0)
 
 bool strictSignal = dataReady and triggerFired and bookFires
 bool rawTrigger = dataReady and triggerFired and not strictSignal
