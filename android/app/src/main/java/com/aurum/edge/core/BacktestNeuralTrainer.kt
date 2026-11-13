@@ -377,13 +377,23 @@ class BacktestNeuralTrainer(
         closedAt = exitTime,
         exitPrice = exitPrice,
         exitReason = exitReason.name,
-        pnlUsd = netPnlUsd,
+        // ── پول وارد آموزش نمی‌شود ───────────────────────────────────────────
+        // قبلاً این‌جا `pnlUsd = netPnlUsd` بود و `fixedRiskUsd` فاصلهٔ قیمتی؛ نتیجه این بود
+        // که Rِ داده‌شده به شبکه = «دلار / فاصلهٔ قیمتی» می‌شد، در حالی که دلار خودش با
+        // سرمایه و ریسک درصدی مقیاس می‌خورد. پس همان ستاپ با سرمایهٔ ۵٬۰۰۰ و ۵۰٬۰۰۰ دلار
+        // دو R کاملاً متفاوت (و بعد از کلیپ [-1.5..4.5] دو برچسب متفاوت) می‌گرفت و شبکه
+        // چیز دیگری یاد می‌گرفت. آزمون این را نشان می‌داد ولی به‌جای رفع علت، تلورانس آزمون
+        // یک‌بار شل شده بود (۰٫۱۱). حالا معیار آموزش **خودِ R موتور** است (خالص بعد از کارمزد)
+        // و چون `fixedRiskUsd = 1.0` است، R نه به سرمایه و نه به ریسک درصدی وابسته نیست.
+        pnlUsd = rMultiple,
         positionOz = 1.0,
         initialStopLoss = stopLoss,
         strategyId = strategyId,
         strategyTitleFa = strategyTitleFa,
-        // ریسک دلاری از فاصلهٔ قیمتی ساخته می‌شود تا R درست محاسبه شود، نه از یک عدد ثابت.
-        fixedRiskUsd = abs(entryPrice - stopLoss).takeIf { it > 0.0 } ?: 1.0,
+        fixedRiskUsd = 1.0,
+        // `rMultiple` هم‌اکنون همان R خالص است؛ نگه‌داشتنش باعث می‌شود مسیر عادی
+        // (`trade.rMultiple ?: pnl / fixedRiskUsd`) در موتور یادگیری دقیقاً همین عدد را ببیند.
+        rMultiple = rMultiple,
         optimalRiskReward = plannedRiskReward.coerceIn(1.5, 3.0),
     )
 }

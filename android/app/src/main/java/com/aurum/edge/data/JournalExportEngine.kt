@@ -456,7 +456,7 @@ object JournalExportEngine {
         val (tf15Cnt, tf15Wr, tf15PfNet) = tfMetrics(Interval.M15)
         val (tf5Cnt, tf5Wr, tf5PfNet) = tfMetrics(Interval.M5)
 
-        // Strategy Leaderboard across all 15 built-in combinations + customs
+        // Strategy Leaderboard: هر مدل فعال (BitcoinStrategyModel.entries) + استراتژی‌های سفارشی
         val strategyMeta = LinkedHashMap<String, Pair<String, String>>()
         BitcoinStrategyModel.entries.forEach { m ->
             strategyMeta[m.id] = m.titleFa to m.badgeFa
