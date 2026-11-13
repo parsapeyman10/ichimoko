@@ -44,6 +44,7 @@ import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.DualTimeframeSymbolReport
 import com.aurum.edge.core.driveBookPlaybook
+import com.aurum.edge.core.isDrivePdfStrategy
 import com.aurum.edge.core.formatLiveBookTelemetryFa
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PriceTick
