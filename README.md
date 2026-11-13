@@ -17,4 +17,6 @@
 
 برای دیدن markerهای سیگنال/ردشدن setup روی خود چارت 15 دقیقه‌ای GoCharting با Lipi v2، فایل
 [`strategies/gocharting/README_BASE_ICHIMOKU_4TF_15M_AUDIT_FA.md`](strategies/gocharting/README_BASE_ICHIMOKU_4TF_15M_AUDIT_FA.md)
-و اسکریپت تشخیصی همراه آن را ببینید. این strategy فقط بک‌تست/شبیه‌سازی است و سفارش واقعی ارسال نمی‌کند.
+و اسکریپت تشخیصی همراه آن را ببینید. برای GoCharting با محدودیت زمان اجرا، نسخهٔ سبک
+[`BASE_ICHIMOKU_15m_30m_1h_Light_Audit.lipi`](strategies/gocharting/BASE_ICHIMOKU_15m_30m_1h_Light_Audit.lipi)
+برای زنجیرهٔ 15m/30m/1H نیز در همان مسیر موجود است. این strategyها فقط بک‌تست/شبیه‌سازی‌اند و سفارش واقعی ارسال نمی‌کنند.
