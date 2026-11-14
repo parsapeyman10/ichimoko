@@ -97,6 +97,7 @@ data class RiskCalculationResult(
         strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
         optimalRiskReward: Double = 0.0,
         rrBreakdownFa: String = "",
+        stateInputs: NeuralStateInputs? = null,
     ): PaperTrade = PaperTrade(
         id = id,
         symbol = symbol,
@@ -123,6 +124,14 @@ data class RiskCalculationResult(
         fixedRiskUsd = round2(riskBudgetUsd),
         optimalRiskReward = if (optimalRiskReward >= 1.5) round2(optimalRiskReward.coerceIn(1.50, 3.00)) else round2(riskReward.coerceIn(1.50, 3.00)),
         rrBreakdownFa = rrBreakdownFa,
+        // حالت بازار در لحظهٔ ورود نگه داشته می‌شود؛ شبکهٔ عصبی بعداً همین را می‌آموزد.
+        // `-1.0` یعنی «نامعلوم» — هیچ عدد ساختگی جای آن نمی‌نشیند.
+        stateTrendPhaseCode = stateInputs?.trendPhaseCode.orEmpty(),
+        stateEr14 = stateInputs?.er14 ?: NeuralStateFeatures.UNKNOWN,
+        stateAtrPctOfPrice = stateInputs?.atrPctOfPrice ?: NeuralStateFeatures.UNKNOWN,
+        stateDistKijunAtr = stateInputs?.distKijunAtr ?: NeuralStateFeatures.UNKNOWN,
+        stateKumoThicknessAtr = stateInputs?.kumoThicknessAtr ?: NeuralStateFeatures.UNKNOWN,
+        stateVolumeRatio20 = stateInputs?.volumeRatio20 ?: NeuralStateFeatures.UNKNOWN,
     )
 }
 

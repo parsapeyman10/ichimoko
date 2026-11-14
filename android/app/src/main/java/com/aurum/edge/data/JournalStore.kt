@@ -180,6 +180,8 @@ class JournalStore(
         optimalRiskReward: Double = 0.0,
         rrBreakdownFa: String = "",
         preEntryCandles: List<Candle> = emptyList(),
+        /** حالت بازار در لحظهٔ ورود (از گزارش استراتژی). خالی = فقط سشن ثبت می‌شود. */
+        stateInputs: com.aurum.edge.core.NeuralStateInputs? = null,
     ): PaperTrade {
         // This synchronous API can be called from a UI action. Use memory-only candles here;
         // parsing the on-device CandleVault is disk I/O and used to freeze the main thread on entry.
@@ -201,6 +203,7 @@ class JournalStore(
             strategyTitleFa = strategyTitleFa,
             optimalRiskReward = optimalRiskReward,
             rrBreakdownFa = rrBreakdownFa,
+            stateInputs = stateInputs ?: com.aurum.edge.core.NeuralStateInputs(entryTimeMs = now),
         )
         val trade = rawTrade.copy(
             tradeNumber = nextTradeNum,

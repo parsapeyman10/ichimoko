@@ -229,7 +229,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 container.neuralEngine.restoreBrainBackupFromPhoneStorage(container.appContext)
             }
 
-            // ── آموزش شبکهٔ عصبی روی همهٔ ۱۶ استراتژی در هر اجرا ──────────────────
+            // ── آموزش شبکهٔ عصبی روی همهٔ استراتژی‌های مشمول یادگیری در هر اجرا ──────────────────
             // بعد از بارگذاری ژورنال/دفتر یادگیری و با فاصله از فریم اول اجرا می‌شود تا UI سبک بماند.
             delay(1_200L)
             TraderMemoryStore.init(container.appContext)
@@ -269,7 +269,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         BackgroundTradingService.syncServiceState(
             context = container.appContext,
             enabled = shouldRunBg,
-            title = "Aurum Edge · رادار ۱۵ نماد (15m + 5m)",
+            title = "Aurum Edge · رادار همهٔ نمادها (15m + 5m)",
             text = "${cfg.activeBitcoinStrategyTitleFa()} · پوزیشن باز: ${trades.value.count { it.isOpen }}",
         )
     }
@@ -460,7 +460,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 val currentReports = _allSymbolStrategyReports.value
                 val currentTicks = _liveTicks.value
 
-                // ۱. دسته‌بندی هوشمند ۱۵ نماد بر اساس ۴ سطح اولویت (بدون هدررفت اینترنت)
+                // ۱. دسته‌بندی هوشمند همهٔ نمادها بر اساس ۴ سطح اولویت (بدون هدررفت اینترنت)
                 val dueCrypto = mutableListOf<String>()
                 val dueTradFi = mutableListOf<String>()
                 var skippedClosed = 0
@@ -1122,6 +1122,11 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             optimalRiskReward = matchedBreakdown?.optimalRiskReward ?: calc.riskReward,
             rrBreakdownFa = matchedBreakdown?.optimalRrReasonFa ?: "",
             preEntryCandles = entryCandles,
+            stateInputs = com.aurum.edge.core.NeuralStateFeatures.fromReport(
+                report = matchedReport,
+                planRr = matchedBreakdown?.optimalRiskReward ?: calc.riskReward,
+                entryTimeMs = now,
+            ),
         )
         val condRecords = matchedReport?.conditions?.map { c ->
             com.aurum.edge.core.PaperConditionRecord(
@@ -1943,7 +1948,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     }
 
     fun scanAndEvaluateBitcoinStrategyNow(userInitiated: Boolean = true) {
-        // اسکن ۱۵ نماد، محاسبهٔ سنگین موتور است؛ روی رشتهٔ اصلی اجرا نمی‌شود (جلوگیری از ANR).
+        // اسکن همهٔ نمادها، محاسبهٔ سنگین موتور است؛ روی رشتهٔ اصلی اجرا نمی‌شود (جلوگیری از ANR).
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             evaluateAll15SymbolsStrategyInternal(
                 userInitiated = userInitiated,
@@ -2295,7 +2300,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 val sell15 = dualMap.values.count { it.report15m.readiness == StrategyReadinessState.SIGNAL_SELL }
                 val buy5 = dualMap.values.count { it.report5m.readiness == StrategyReadinessState.SIGNAL_BUY }
                 val sell5 = dualMap.values.count { it.report5m.readiness == StrategyReadinessState.SIGNAL_SELL }
-                _toast.value = "✅ رصد هم‌زمان ۱۵ نماد — تایم 15m (خرید: $buy15 · فروش: $sell15) | تایم 5m (خرید: $buy5 · فروش: $sell5)"
+                _toast.value = "✅ رصد هم‌زمان همهٔ نمادها — تایم 15m (خرید: $buy15 · فروش: $sell15) | تایم 5m (خرید: $buy5 · فروش: $sell5)"
             }
         } finally {
             _isScanningBtcStrategy.value = false
@@ -2467,19 +2472,68 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             container.settingsStore.update { cur ->
                 cur.copy(baseStrategyConfig = updatedCfg)
             }
-            _toast.value = "🎛️ تیونینگ خودکار پارامترها و ۱۶ ویژگی هر ۱۶ استراتژی (نسل #${tuned.tuningGeneration} · CEM + Bayesian) اعمال شد"
+            _toast.value = "🎛️ تیونینگ خودکار پارامترها و ۲۴ ویژگی هر استراتژی‌های مشمول یادگیری (نسل #${tuned.tuningGeneration} · CEM + Bayesian) اعمال شد"
             scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
         }
     }
 
-    /** متن وضعیت «آموزش روی همهٔ ۱۶ استراتژی» (یادگیری انتقالی). */
+    /** متن وضعیت آخرین «آموزش از ژورنال» (با اعداد سنجش صادقانه). */
+    private val _neuralJournalCalibrationFa = MutableStateFlow("")
+    val neuralJournalCalibrationFa: StateFlow<String> = _neuralJournalCalibrationFa.asStateFlow()
+
+    /**
+     * آموزش شبکهٔ عصبی از **ژورنال واقعی** — برد و باخت، با تمام حالت‌های بازار.
+     *
+     * چرا جدا از [trainNeuralOnAllStrategies] است: آن یکی پروفایل و پارامترها را می‌سازد،
+     * این یکی وزن‌ها را از معامله‌های واقعیِ کاربر می‌آموزد و بعد **صادقانه** می‌گوید آیا از
+     * «همیشه نرخ برد پایه» بهتر است یا نه. اگر بهتر نبود، همین را می‌گوید؛ عدد جعلی ساخته نمی‌شود.
+     *
+     * روی IO اجرا می‌شود: استخراج ویژگی هر معامله کندل‌های ذخیره‌شده را می‌خواند.
+     */
+    fun trainNeuralFromJournalNow() {
+        val closed = container.journalStore.trades.value
+        if (closed.none { !it.isOpen && it.pnlUsd != null }) {
+            _toast.value = "📓 ژورنال هنوز معاملهٔ بسته‌ای ندارد؛ اول باید چند معامله بسته شود"
+            return
+        }
+        _toast.value = "🧠 آموزش از ژورنال شروع شد — نمونه‌سازی و سنجش بیرون‌نمونه‌ای در جریان است…"
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val report = runCatching {
+                container.neuralEngine.trainFromJournal(container.journalStore.trades.value)
+            }.getOrNull()
+            if (report == null) {
+                _toast.value = "⚠️ آموزش از ژورنال انجام نشد (خطای اجرا) — گزارش به‌روزرسانی نشد"
+                return@launch
+            }
+            val detail = buildString {
+                append(report.summaryFa)
+                if (report.outOfSample.regimes.isNotEmpty()) {
+                    append("\n")
+                    report.outOfSample.regimes.take(4).forEach { row ->
+                        append("• ${row.stateCode}: ${row.samples} نمونه · واقعی ${row.actualWinRatePct}٪ · ")
+                        append("پیش‌بینی ${row.meanPredictedPct}٪ · انحراف ${row.biasPct}٪")
+                        append("\n")
+                    }
+                }
+                if (report.withStateData < report.usableSamples) {
+                    append("ℹ️ ${report.usableSamples - report.withStateData} نمونهٔ قدیمی فیلد حالت بازار ندارد ")
+                    append("(قبل از این نسخه ثبت شده‌اند)؛ هشت ویژگی حالت آن‌ها صفر/بی‌طرف شمرده شد، نه حدس.")
+                }
+            }.trim()
+            _neuralJournalCalibrationFa.value = detail
+            _toast.value = report.summaryFa
+            runCatching { scanAndEvaluateBitcoinStrategyNow(userInitiated = false) }
+        }
+    }
+
+    /** متن وضعیت «آموزش روی همهٔ استراتژی‌های مشمول یادگیری» (یادگیری انتقالی). */
     private val _allStrategyLearningFa = MutableStateFlow("")
     val allStrategyLearningFa: StateFlow<String> = _allStrategyLearningFa.asStateFlow()
 
     /**
-     * آموزش یک‌جای شبکهٔ عصبی روی **همهٔ ۱۶ استراتژی و همهٔ نمادها**.
+     * آموزش یک‌جای شبکهٔ عصبی روی **همهٔ استراتژی‌های مشمول یادگیری و همهٔ نمادها**.
      *
-     * هر استراتژی پروفایل ۱۶ ویژگی و پارامترهای خودش را از دادهٔ اختصاصی‌اش می‌گیرد و در صورت
+     * هر استراتژی پروفایل ۲۴ ویژگی و پارامترهای خودش را از دادهٔ اختصاصی‌اش می‌گیرد و در صورت
      * کمبود داده، از تجربهٔ بقیهٔ استراتژی‌ها (یادگیری انتقالی) پر می‌شود. هم‌زمان «شخصیت» هر
      * نماد (روندسواری، نویز شدوی، اعتبار شکست، بهترین استراتژی و حد ضرر مناسبش) ساخته می‌شود و
      * در پیکربندی موتور اعمال می‌گردد.
@@ -2514,7 +2568,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             container.settingsStore.update { cur ->
                 cur.copy(baseStrategyConfig = updatedCfg)
             }
-            _toast.value = "🎯 تیونینگ هوشمند اختصاصی «${prof.strategyBadgeFa}» (نسل #${prof.tuningGeneration}) روی تمام ۱۶ ویژگی و پارامترها اعمال شد"
+            _toast.value = "🎯 تیونینگ هوشمند اختصاصی «${prof.strategyBadgeFa}» (نسل #${prof.tuningGeneration}) روی تمام ۲۴ ویژگی و پارامترها اعمال شد"
             scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
         }
     }
@@ -3136,7 +3190,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 }
                 if (reg.featureSlopes.isNotEmpty()) {
                     add("")
-                    add("شیب ۱۶ ویژگی (بر اساس اهمیت):")
+                    add("شیب ۲۴ ویژگی (بر اساس اهمیت):")
                     reg.featureSlopes.sortedByDescending { it.importancePct }.take(16).forEach { f ->
                         add(
                             "• ${f.featureTitleFa} — اهمیت ${R.pct(f.importancePct)} | β برد ${R.number(f.ridgeBetaWin, 3)} | " +
@@ -3394,7 +3448,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
 
         sections += NeuralCopySection(
             key = "features",
-            titleFa = "وزن ۱۶ ویژگی ایچیموکو در مغز شبکه",
+            titleFa = "وزن ۲۴ ویژگی ایچیموکو در مغز شبکه",
             lines = buildList {
                 if (s.featureInsights.isEmpty()) add("وزن ویژگی‌ها هنوز محاسبه نشده است.")
                 val attnSpread = (s.featureInsights.maxOfOrNull { it.attentionPercent } ?: 0.0) -
@@ -3402,7 +3456,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 val uniformAttention = s.featureInsights.isNotEmpty() && attnSpread < 1.0
                 if (uniformAttention) {
                     add(
-                        "ℹ️ سهم توجه (Self-Attention) در حال حاضر یکنواخت است: هر یک از ۱۶ ویژگی " +
+                        "ℹ️ سهم توجه (Self-Attention) در حال حاضر یکنواخت است: هر یک از ۲۴ ویژگی " +
                             "${R.pct(s.featureInsights.first().attentionPercent)} — یعنی شبکه هنوز هیچ ویژگی را بر دیگری ترجیح نداده است. " +
                             "برای دیدن تفکیک واقعی، ستون «اثر خالص وزن» را بخوانید؛ این فهرست بر اساس همان اثر مرتب شده است.",
                     )

@@ -62,6 +62,7 @@ fun NeuralBrainScreen(
 ) {
     val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
     val allStrategyLearningFa by viewModel.allStrategyLearningFa.collectAsStateWithLifecycle()
+    val neuralJournalCalibrationFa by viewModel.neuralJournalCalibrationFa.collectAsStateWithLifecycle()
     val dualReports by viewModel.dualSymbolStrategyReports.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -230,7 +231,7 @@ fun NeuralBrainScreen(
         SectionCard(
             title = "📐 پنل رگرسیون ماتریسی پارامترها (بهترین متود روز دنیا: Ridge L2 + Huber IRLS)",
             onCopy = { viewModel.copyNeuralBrainSection("regression") },
-            subtitle = "رگرسیون هم‌زمان ۱۰ پارامتر ساختاری، دالان طلایی حد ضرر [0.80..2.10 ATR]، شیب ۱۶ ویژگی و قفل R:R در [1.5..3.0]",
+            subtitle = "رگرسیون هم‌زمان ۱۰ پارامتر ساختاری، دالان طلایی حد ضرر [0.80..2.10 ATR]، شیب ۲۴ ویژگی و قفل R:R در [1.5..3.0]",
             initiallyExpanded = false,
         ) {
             val regReport = neuralState.autoTunedParameters.latestRegressionReport
@@ -264,7 +265,7 @@ fun NeuralBrainScreen(
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                     ) {
                         Text(
-                            text = "🌐 تمام ۱۶ استراتژی (جامع)",
+                            text = "🌐 تمام استراتژی‌های مشمول یادگیری (جامع)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isAllSel) Color.Black else AurumColors.TextPrimary,
@@ -487,7 +488,7 @@ fun NeuralBrainScreen(
                     }
                 }
 
-                // کشویی ۲: شیب رگرسیونی تک‌تک ۱۶ ویژگی ورودی شبکه عصبی (پیش‌فرض بسته)
+                // کشویی ۲: شیب رگرسیونی تک‌تک ۲۴ ویژگی ورودی شبکه عصبی (پیش‌فرض بسته)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -506,13 +507,13 @@ fun NeuralBrainScreen(
                     ) {
                         Text(
                             modifier = Modifier.weight(1f).padding(end = 6.dp),
-                            text = "🧬 شیب رگرسیونی ۱۶ ویژگی ورودی (Huber β_R & Ridge β_Win)",
+                            text = "🧬 شیب رگرسیونی ۲۴ ویژگی ورودی (Huber β_R & Ridge β_Win)",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = if (showRegSlopesTable) "▲ بستن" else "▼ باز کردن (۱۶ ویژگی)",
+                            text = if (showRegSlopesTable) "▲ بستن" else "▼ باز کردن (۲۴ ویژگی)",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Gold,
                         )
@@ -1399,7 +1400,7 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🎛️ تیونینگ ۱۶ مدلِ مشمول یادگیری عصبی (روش‌های BTC و پارسا مستثنا هستند)",
+                        text = "🎛️ تیونینگ مدل‌های مشمول یادگیری عصبی (روش‌های BTC و پارسا مستثنا هستند)",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -1413,7 +1414,7 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🧠 آموزش روی ۱۶ مدلِ مشمول یادگیری و ۱۵ نماد · BTC/پارسا مستثنا هستند",
+                        text = "🧠 آموزش روی مدل‌های مشمول یادگیری و همهٔ نمادها · BTC/پارسا مستثنا هستند",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -1426,6 +1427,36 @@ fun NeuralBrainScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
+                Button(
+                    onClick = { viewModel.trainNeuralFromJournalNow() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Cyan,
+                        contentColor = Color.Black,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = "📓 آموزش از ژورنال واقعی (برد و باخت + حالت بازار) و سنجش صادقانه",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Text(
+                    text = "این دکمه فقط از معامله‌های واقعیِ بسته‌شدهٔ خودتان یاد می‌گیرد: هر برد و هر باخت یک نمونه است، " +
+                        "همراه با ۸ حالت بازار (فاز روند، ER، رژیم نوسان، فاصله از کیجون، ضخامت ابر، نسبت حجم، سشن، R:R پلن). " +
+                        "بعد شبکه‌ای از صفر فقط روی ۷۰٪ اولِ زمانی آموزش می‌بیند و روی ۳۰٪ آخر سنجیده می‌شود؛ " +
+                        "اگر Brier آن از «همیشه نرخ برد پایه» بهتر نباشد، همان را صریح می‌نویسد. اعداد درون‌نمونه به‌تنهایی دلیل بر یادگیری نیستند.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                )
+                if (neuralJournalCalibrationFa.isNotBlank()) {
+                    Text(
+                        text = neuralJournalCalibrationFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Cyan,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
                 if (allStrategyLearningFa.isNotBlank()) {
                     Text(
                         text = allStrategyLearningFa,
@@ -1437,7 +1468,7 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۱-پ-۲. تیونینگ اختصاصی تمام ۱۶ ویژگی یادگرفته‌شده شبکه عصبی به تفکیک هر استراتژی ──
+        // ── ۱-پ-۲. تیونینگ اختصاصی تمام ۲۴ ویژگی یادگرفته‌شده شبکه عصبی به تفکیک هر استراتژی ──
         SectionCard(
             title = "🧬 شخصیت آموخته‌شدهٔ هر نماد بازار (۱۵ نماد)",
             onCopy = { viewModel.copyNeuralBrainSection("persymbol") },
@@ -1556,9 +1587,9 @@ fun NeuralBrainScreen(
         }
 
         SectionCard(
-            title = "🧬 تیونینگ اختصاصی تمام ۱۶ ویژگی شبکه عصبی برای هر استراتژی",
+            title = "🧬 تیونینگ اختصاصی تمام ۲۴ ویژگی شبکه عصبی برای هر استراتژی",
             onCopy = { viewModel.copyNeuralBrainSection("perstrategy") },
-            subtitle = "تنظیم مستقل وزن، ضریب اهمیت و آستانه هر ۱۶ ویژگی یادگرفته‌شده شبکه عصبی + پارامترهای ساختاری مختص هر یک از ۱۶ استراتژی",
+            subtitle = "تنظیم مستقل وزن، ضریب اهمیت و آستانه هر ۲۴ ویژگی یادگرفته‌شده شبکه عصبی + پارامترهای ساختاری مختص هر یک از استراتژی‌های مشمول یادگیری",
             initiallyExpanded = false,
         ) {
             var selectedStratId by rememberSaveable {
@@ -1573,7 +1604,7 @@ fun NeuralBrainScreen(
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "انتخاب استراتژی جهت مشاهده و تیونینگ اختصاصی ۱۶ ویژگی شبکه عصبی:",
+                    text = "انتخاب استراتژی جهت مشاهده و تیونینگ اختصاصی ۲۴ ویژگی شبکه عصبی:",
                     style = MaterialTheme.typography.labelMedium,
                     color = AurumColors.Gold,
                     fontWeight = FontWeight.Bold,
@@ -1672,7 +1703,7 @@ fun NeuralBrainScreen(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
-                                text = "⚡ تیونینگ خودکار اختصاصی «${selectedModel.badgeFa}» (هر ۱۶ ویژگی + پارامترها)",
+                                text = "⚡ تیونینگ خودکار اختصاصی «${selectedModel.badgeFa}» (هر ۲۴ ویژگی + پارامترها)",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -1809,7 +1840,7 @@ fun NeuralBrainScreen(
                         }
                     }
 
-                    // کشویی ۲: تیونینگ تک‌تک ۱۶ ویژگی یادگرفته‌شده شبکه عصبی مختص همین استراتژی (پیش‌فرض بسته)
+                    // کشویی ۲: تیونینگ تک‌تک ۲۴ ویژگی یادگرفته‌شده شبکه عصبی مختص همین استراتژی (پیش‌فرض بسته)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1828,13 +1859,13 @@ fun NeuralBrainScreen(
                         ) {
                             Text(
                                 modifier = Modifier.weight(1f).padding(end = 6.dp),
-                                text = "🧠 تیونینگ تک‌تک ۱۶ ویژگی یادگرفته‌شده در «${selectedModel.badgeFa}»",
+                                text = "🧠 تیونینگ تک‌تک ۲۴ ویژگی یادگرفته‌شده در «${selectedModel.badgeFa}»",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = AurumColors.Green,
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                text = if (showFeaturesDrawer) "▲ بستن" else "▼ باز کردن (۱۶ ویژگی)",
+                                text = if (showFeaturesDrawer) "▲ بستن" else "▼ باز کردن (۲۴ ویژگی)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Cyan,
                             )
@@ -2256,9 +2287,9 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۵. وزن و اهمیت ۱۶ ویژگی ورودی شبکه (FT-Transformer Self-Attention) ──
+        // ── ۵. وزن و اهمیت ۲۴ ویژگی ورودی شبکه (FT-Transformer Self-Attention) ──
         SectionCard(
-            title = "⚖️ کالبدشکافی ۱۶ ویژگی ایچیموکو در مغز شبکه (FT-Attention Weights)",
+            title = "⚖️ کالبدشکافی ۲۴ ویژگی ایچیموکو در مغز شبکه (FT-Attention Weights)",
             onCopy = { viewModel.copyNeuralBrainSection("features") },
             subtitle = "کدام شروط ایچیموکو و پرایس‌اکشن بیشترین وزن را در تصمیم‌گیری شبکه عصبی دارند؟",
             initiallyExpanded = false,

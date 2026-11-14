@@ -238,6 +238,20 @@ data class PaperTrade(
     val origin: String = ORIGIN_LIVE,
     /** متن درسِ همین معامله (اگر موتور یادگیری برایش درسی ساخته باشد). */
     val lessonFa: String = "",
+    /**
+     * ── وضعیت بازار در لحظهٔ ورود (برای آموزش شبکهٔ عصبی) ─────────────────────
+     *
+     * چرا روی خود معامله ذخیره می‌شود؟ چون «آموزش از ژورنال» باید بتواند معاملات قدیمی را
+     * هم ببیند، ولی گزارشِ لحظهٔ ورود (`StrategyEvaluationReport`) در ژورنال ذخیره نمی‌شود.
+     * اگر این اعداد این‌جا نباشند، آموزش از ژورنال فقط می‌تواند «برد/باخت» را ببیند، نه
+     * «در چه وضعیتی». مقدار `-1.0` یعنی «نامعلوم» و در بردار ویژگی به صفر (بی‌طرف) تبدیل می‌شود.
+     */
+    val stateTrendPhaseCode: String = "",
+    val stateEr14: Double = -1.0,
+    val stateAtrPctOfPrice: Double = -1.0,
+    val stateDistKijunAtr: Double = -1.0,
+    val stateKumoThicknessAtr: Double = -1.0,
+    val stateVolumeRatio20: Double = -1.0,
 ) {
     val displayTradeNumber: Int
         get() = if (tradeNumber > 0) tradeNumber else ((kotlin.math.abs(id.hashCode()) % 9000) + 1)
