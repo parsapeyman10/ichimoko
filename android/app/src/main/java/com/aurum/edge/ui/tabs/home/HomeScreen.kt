@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -66,6 +66,12 @@ import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors
 import java.util.Locale
 import kotlin.math.abs
+
+/** تعداد کارت معاملهٔ رندرشده در صفحهٔ نخست میز معاملات باز (سقف measure برای جلوگیری از STALL). */
+private const val HOME_TRADE_CARDS_FIRST_PAGE = 3
+
+/** تعداد کارت‌های افزوده‌شده در هر بار فشردن «نمایش بیشتر». */
+private const val HOME_TRADE_CARDS_PAGE = 8
 
 @Composable
 fun HomeScreen(
@@ -121,12 +127,34 @@ fun HomeScreen(
     val riskStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.riskPerTradeUsd)
     val openTradesStr = openTradesList.size.toString()
 
-    Column(
+        // ── ۵. دستیار ترید با بهترین متود ایچیموکو جهان + نکات قابل اصلاح بعدی (کشویی) ──
+        val homeAssistantCoaching = remember(market.symbol, dualReports) {
+            com.aurum.edge.core.MasterIchimokuTradingAssistant.analyzeSymbolWithMasterMethod(
+                symbol = V1Universe.normalize(market.symbol),
+                dualReport = dualReports[V1Universe.normalize(market.symbol)],
+            )
+        }
+        val homeImprovementNotes = remember(tradesState, dualReports, settings.baseStrategyConfig) {
+            com.aurum.edge.core.MasterIchimokuTradingAssistant.generateActionableImprovementNotes(
+                trades = tradesState,
+                dualReports = dualReports,
+                currentConfig = settings.baseStrategyConfig,
+            )
+        }
+
+    // ── چرا LazyColumn؟ (رفع گزارش STALL نسخهٔ ۳.۹.۷۳) ──────────────────────────
+    // پیش‌تر همهٔ صفحهٔ خانه یک Column با verticalScroll بود: یعنی در **هر** تیک قیمت
+    // (هر ثانیه) و در هر تغییر وضعیت، تمام کارت‌ها — از جمله یک کارت سنگین برای هر
+    // پوزیشن باز — با هم compose و measure می‌شدند. با برداشتن سقف معاملات هم‌زمان،
+    // تعداد این کارت‌ها می‌تواند به ده‌ها برسد و اندازه‌گیری متن‌ها (ParagraphIntrinsics)
+    // رشتهٔ اصلی را چند ثانیه قفل می‌کرد (همان STALL «main-thread blocked 2722ms»).
+    // حالا فقط بخش‌های داخل کادر دید compose می‌شوند.
+    LazyColumn(
         Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .padding(bottom = 14.dp),
     ) {
+        item(key = "hero") {
         // ── ۱. هدر مدرن موجودی و خلاصه پورتفو (Hero Portfolio Card) ──────────────
         Column(
             modifier = Modifier
@@ -308,6 +336,8 @@ fun HomeScreen(
             }
         }
 
+        }
+        item(key = "engine-status") {
         // ── ۲. کارت وضعیت موتور استراتژی‌های هم‌زمان و سشن‌های بازار ───────────────
         SectionCard(
             title = "رادار هم‌زمان ایچیموکو (15m + 5m)",
@@ -437,6 +467,8 @@ fun HomeScreen(
             }
         }
 
+        }
+        item(key = "asset-banner") {
         // ── ۳. بنر متوازن ۳ دسته بازار ──────────────────────────────────────────
         com.aurum.edge.ui.components.AssetClass4SlotsBanner(
             openTrades = openTradesList,
@@ -453,6 +485,8 @@ fun HomeScreen(
             },
         )
 
+        }
+        item(key = "radar") {
         // ── ۳.۵ رادار زنده طلا، نقره، کریپتو و فارکس (15m + 5m) ─────────────────
         LiveMetalsCryptoForexRadarCard(
             viewModel = viewModel,
@@ -464,6 +498,8 @@ fun HomeScreen(
             onSelectSymbol = onChartSymbol,
         )
 
+        }
+        item(key = "open-trades") {
         // ── ۴. معاملات باز زنده (با مدل نوار گیج افقی SL ── Entry ── TP و حالت کشویی جزئیات) ──
         LiveOpenTradesTrackingSection(
             viewModel = viewModel,
@@ -474,20 +510,9 @@ fun HomeScreen(
             onSelectTrade = onChartSymbol,
         )
 
-        // ── ۵. دستیار ترید با بهترین متود ایچیموکو جهان + نکات قابل اصلاح بعدی (کشویی) ──
-        val homeAssistantCoaching = remember(market.symbol, dualReports) {
-            com.aurum.edge.core.MasterIchimokuTradingAssistant.analyzeSymbolWithMasterMethod(
-                symbol = V1Universe.normalize(market.symbol),
-                dualReport = dualReports[V1Universe.normalize(market.symbol)],
-            )
         }
-        val homeImprovementNotes = remember(tradesState, dualReports, settings.baseStrategyConfig) {
-            com.aurum.edge.core.MasterIchimokuTradingAssistant.generateActionableImprovementNotes(
-                trades = tradesState,
-                dualReports = dualReports,
-                currentConfig = settings.baseStrategyConfig,
-            )
-        }
+
+        item(key = "assistant") {
         SectionCard(
             title = "🧭 دستیار استاد ایچیموکو + نکات قابل اصلاح بعدی (${homeImprovementNotes.size})",
             subtitle = "تحلیل ۴ ستون هوسودا روی نماد فعال (${market.symbol}) و لیست نکات فنی برای بهبود استراتژی‌ها",
@@ -568,6 +593,7 @@ fun HomeScreen(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -757,6 +783,7 @@ private fun LiveOpenTradesTrackingSection(
     val dualReports by viewModel.dualSymbolStrategyReports.collectAsStateWithLifecycle()
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
     var expandAllDrawers by rememberSaveable { mutableStateOf(false) }
+    var visibleTradeCount by rememberSaveable { mutableIntStateOf(HOME_TRADE_CARDS_FIRST_PAGE) }
 
     val totalOpenPnl = remember(openTrades, liveTicks, lastMarks, currentMarket, now) {
         openTrades.sumOf { trade ->
@@ -827,8 +854,14 @@ private fun LiveOpenTradesTrackingSection(
                 )
             }
         } else {
+            // ── سقف رندر کارت‌های معامله (رفع STALL رشتهٔ اصلی) ───────────────────
+            // هر LiveTradeGaugeCard ده‌ها Text و چیدمان تودرتو دارد. با پر شدن سقف
+            // معاملات هم‌زمان (۱۵ نماد × ۵ مدل × ۲ تایم‌فریم) رندر یک‌جای همه، متن‌ها را
+            // در یک پاس measure می‌کرد و رشتهٔ اصلی چند ثانیه قفل می‌شد. حالا صفحهٔ اول
+            // محدود است و بقیه با دکمهٔ «نمایش بیشتر» صفحه‌به‌صفحه اضافه می‌شوند.
+            val visibleTrades = openTrades.take(visibleTradeCount)
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                openTrades.forEach { trade ->
+                visibleTrades.forEach { trade ->
                     val normSym = com.aurum.edge.core.V1Universe.normalize(trade.symbol)
                     val matchedReport = dualReports[normSym]?.reportFor(trade.interval, trade.strategyId)
                     LiveTradeGaugeCard(
@@ -841,6 +874,35 @@ private fun LiveOpenTradesTrackingSection(
                         forceExpanded = expandAllDrawers,
                         onSelect = { onSelectTrade(trade.symbol) },
                     )
+                }
+                if (openTrades.size > visibleTrades.size) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Pill(
+                            text = "▼ نمایش ${minOf(HOME_TRADE_CARDS_PAGE, openTrades.size - visibleTrades.size)} معاملهٔ بعدی " +
+                                "(${visibleTrades.size} از ${openTrades.size})",
+                            color = AurumColors.Cyan,
+                            modifier = Modifier.clickable {
+                                visibleTradeCount = (visibleTradeCount + HOME_TRADE_CARDS_PAGE)
+                                    .coerceAtMost(openTrades.size)
+                            },
+                        )
+                    }
+                } else if (visibleTradeCount > HOME_TRADE_CARDS_FIRST_PAGE) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Pill(
+                            text = "▲ جمع کردن فهرست",
+                            color = AurumColors.TextMuted,
+                            modifier = Modifier.clickable {
+                                visibleTradeCount = HOME_TRADE_CARDS_FIRST_PAGE
+                            },
+                        )
+                    }
                 }
             }
         }

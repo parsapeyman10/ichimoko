@@ -3,6 +3,7 @@ package com.aurum.edge.data
 import android.content.Context
 import com.aurum.edge.core.AutoExitEvaluation
 import com.aurum.edge.core.BitcoinStrategyModel
+import com.aurum.edge.core.IchimokuStrategyEngine
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
@@ -48,7 +49,9 @@ class JournalStore(
     private fun ensureSequentialTradeNumbers(list: List<PaperTrade>): List<PaperTrade> {
         if (list.isEmpty()) return list
         val ascending = list.sortedWith(compareBy<PaperTrade> { it.openedAt }.thenBy { it.id })
-        var maxAssigned = ascending.maxOfOrNull { it.tradeNumber } ?: 0
+        // شماره‌گذاری معامله‌های واقعی نباید با ردیف‌های بک‌تست جابه‌جا شود: ۹۶۷ ردیف بک‌تست
+        // می‌توانست سقف شماره را به ۹۶۷ ببرد و معاملهٔ واقعی بعدی «#۹۶۸» شود.
+        var maxAssigned = ascending.filterNot { it.isBacktest }.maxOfOrNull { it.tradeNumber } ?: 0
         val numberedById = HashMap<String, Int>(ascending.size)
         if (maxAssigned <= 0) {
             ascending.forEachIndexed { idx, t ->
@@ -67,8 +70,17 @@ class JournalStore(
         }
         return list.map { t ->
             val assigned = numberedById[t.id] ?: t.tradeNumber
-            val isLegacyDrive = t.strategyId.trim() in BitcoinStrategyModel.legacyIndividualDriveIds
-            val fixedSl = t.initialStopLoss ?: t.stopLoss
+            // حد ضرر ممکن است در مرحلهٔ ریسک‌فری/تریل به سود منتقل شده باشد. بازنویسی آن با
+            // `initialStopLoss` یعنی پاک‌شدن Preserve Mode در هر بار بارگذاری ژورنال.
+            val preservedSl = if (t.note.contains(IchimokuStrategyEngine.BE_TAG_MARK) ||
+                t.note.contains(IchimokuStrategyEngine.TRAIL_TAG_MARK) ||
+                t.note.contains("ریسک‌فری")
+            ) {
+                t.stopLoss
+            } else {
+                t.initialStopLoss ?: t.stopLoss
+            }
+            val fixedSl = preservedSl
             val clampedRr = if (t.riskReward.isFinite()) t.riskReward.coerceIn(1.50, 3.00) else 2.00
             val clampedOptRr = if (t.optimalRiskReward > 0.0 && t.optimalRiskReward.isFinite()) {
                 t.optimalRiskReward.coerceIn(1.50, 3.00)
@@ -78,23 +90,6 @@ class JournalStore(
             val needsFixedSlReset = t.stopLoss != fixedSl || t.initialStopLoss == null ||
                 t.riskReward != clampedRr || t.optimalRiskReward != clampedOptRr
             when {
-                isLegacyDrive && (t.tradeNumber != assigned || needsFixedSlReset) -> t.copy(
-                    tradeNumber = assigned,
-                    stopLoss = fixedSl,
-                    initialStopLoss = fixedSl,
-                    riskReward = clampedRr,
-                    optimalRiskReward = clampedOptRr,
-                    strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
-                    strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
-                )
-                isLegacyDrive -> t.copy(
-                    stopLoss = fixedSl,
-                    initialStopLoss = fixedSl,
-                    riskReward = clampedRr,
-                    optimalRiskReward = clampedOptRr,
-                    strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
-                    strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
-                )
                 t.tradeNumber != assigned || needsFixedSlReset -> t.copy(
                     tradeNumber = assigned,
                     stopLoss = fixedSl,
@@ -234,13 +229,6 @@ class JournalStore(
         applyBalanceDelta(previous, trade)
     }
 
-    @Synchronized
-    fun restoreArchivedTradeIfMissing(trade: PaperTrade): Boolean {
-        if (_trades.value.any { it.id == trade.id }) return false
-        persist(listOf(trade) + _trades.value)
-        return true
-    }
-
     /**
      * قفل حد ضرر ساختاری ثابت (غیرپله‌ای) و حفظ R:R اولیه معامله (`stopLoss = initialStopLoss ?: stopLoss`).
      */
@@ -250,6 +238,7 @@ class JournalStore(
         newStopLoss: Double,
         stageNote: String,
         newTakeProfit: Double? = null,
+        allowRatchet: Boolean = false,
     ): PaperTrade? {
         if (!newStopLoss.isFinite() || newStopLoss <= 0.0) return null
         val target = _trades.value.firstOrNull { it.id == tradeId && it.isOpen } ?: return null
@@ -260,6 +249,29 @@ class JournalStore(
         } else {
             "${target.note} · $stageNote"
         }
+
+        // مسیر پیش‌فرض: قفل حد ضرر ساختاری اولیه (بدون تغییر R:R).
+        // مسیر `allowRatchet` (Preserve Mode): حد ضرر فقط در جهت سود جابه‌جا می‌شود و
+        // حد سود/ R:R اولیه دست‌نخورده می‌ماند.
+        if (allowRatchet) {
+            // قانون قفل: حد ضرر فقط «بهتر» می‌شود و هرگز عقب برنمی‌گردد.
+            val current = target.stopLoss
+            val ratcheted = when (target.action) {
+                SignalAction.BUY -> newStopLoss > current
+                SignalAction.SELL -> newStopLoss < current
+                else -> false
+            }
+            if (!ratcheted) return null
+            val modified = target.copy(
+                stopLoss = newStopLoss,
+                initialStopLoss = target.initialStopLoss ?: target.stopLoss,
+                takeProfit = newTakeProfit ?: target.takeProfit,
+                note = updatedNote,
+            )
+            persist(_trades.value.map { if (it.id == tradeId) modified else it })
+            return modified
+        }
+
         val fixedInitSl = target.initialStopLoss ?: target.stopLoss
         val modified = target.copy(
             stopLoss = fixedInitSl,
@@ -364,14 +376,6 @@ class JournalStore(
             val alarmEnabled = cfg?.notifyOnSignal != false
             val soundUri = cfg?.alertSoundUri.orEmpty()
             closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
-                if (isDefaultJournalFile) {
-                    runCatching {
-                        TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
-                            context = appContext,
-                            trade = closedTrade,
-                        )
-                    }
-                }
                 if (isProfit) {
                     com.aurum.edge.notify.TradeEventAlarmManager.triggerTakeProfitAlarm(
                         context = appContext,
@@ -435,15 +439,6 @@ class JournalStore(
             val alarmEnabled = cfg?.notifyOnSignal != false
             val soundUri = cfg?.alertSoundUri.orEmpty()
             closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
-                if (isDefaultJournalFile) {
-                    runCatching {
-                        TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
-                            context = appContext,
-                            trade = closedTrade,
-                            closeCandles = candles,
-                        )
-                    }
-                }
                 if (isProfit) {
                     com.aurum.edge.notify.TradeEventAlarmManager.triggerTakeProfitAlarm(
                         context = appContext,
@@ -483,14 +478,6 @@ class JournalStore(
         )
         persist(_trades.value.map { if (it.id == tradeId) closed else it })
         settingsStore?.adjustBalance(roundedNet)
-        if (isDefaultJournalFile) {
-            runCatching {
-                TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
-                    context = appContext,
-                    trade = closed,
-                )
-            }
-        }
         val cfg = settingsStore?.read()
         val alarmEnabled = cfg?.notifyOnSignal != false
         val soundUri = cfg?.alertSoundUri.orEmpty()
@@ -527,6 +514,9 @@ class JournalStore(
      * که کاربر در صفحهٔ نخست می‌دید (موجودی ≠ سرمایهٔ پایه + سود/زیان تحققیافته).
      */
     private fun applyBalanceDelta(previous: PaperTrade?, next: PaperTrade?) {
+        // معاملهٔ بک‌تست سود/زیانش در ژورنال دیده می‌شود ولی **هرگز** به موجودی اضافه نمی‌شود؛
+        // درخواست صریح کاربر: «سود هر معامله برود در ژورنال بنشیند، ولی پولش وارد پولم نشود.»
+        if (previous?.isBacktest == true || next?.isBacktest == true) return
         val previousPnl = previous?.takeIf { !it.isOpen }?.pnlUsd ?: 0.0
         val nextPnl = next?.takeIf { !it.isOpen }?.pnlUsd ?: 0.0
         val delta = nextPnl - previousPnl

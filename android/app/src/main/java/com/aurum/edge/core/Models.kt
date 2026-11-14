@@ -11,8 +11,6 @@ data class PriceTick(
     val ask: Double? = null,
     val isTradeTick: Boolean = true,
     val provider: String? = null,
-    val sourceNote: String? = null,
-    val sourceConfirmations: Int = 0,
 ) {
     val spread: Double? get() = if (bid != null && ask != null && ask >= bid) ask - bid else null
 }
@@ -91,33 +89,6 @@ data class SignalProfile(
     companion object {
         val BASE = SignalProfile()
     }
-}
-
-enum class ConfluenceStatus { CONFIRMED, PARTIAL, CONFLICT, UNKNOWN }
-
-data class ConfluenceItem(
-    val name: String,
-    val ok: Boolean,
-    val detail: String,
-    val status: ConfluenceStatus = if (ok) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
-    val scorePercent: Int? = null,
-)
-
-data class Signal(
-    val action: SignalAction,
-    val confidence: Double,
-    val entry: Double? = null,
-    val stopLoss: Double? = null,
-    val takeProfit: Double? = null,
-    val riskReward: Double? = null,
-    val reasons: List<String> = emptyList(),
-    val blockers: List<String> = emptyList(),
-    val confluence: List<ConfluenceItem> = emptyList(),
-    val interval: Interval = Interval.M5,
-    val barTime: Long = 0L,
-    val evaluatedAt: Long = System.currentTimeMillis(),
-) {
-    val isActionable: Boolean get() = action != SignalAction.NO_TRADE
 }
 
 @Serializable
@@ -236,7 +207,6 @@ data class PaperTrade(
     val commissionUsd: Double = 0.0,
     val spreadCostUsd: Double = 0.0,
     val initialStopLoss: Double? = null,
-    val trailExtreme: Double? = null,
     val cryptoVenue: String = "NOBITEX",
     val strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
     val strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
@@ -257,6 +227,17 @@ data class PaperTrade(
     val neoWaveFailedRuleIds: List<Int> = emptyList(),
     /** مسیر ورود: `CRYPTO_NW` (ورود با نئوویو در رمزارز) یا `CLASSIC`. */
     val neoWaveEntryPathTag: String = "",
+    /**
+     * منبع این ردیف: `LIVE` (معاملهٔ واقعی/کاغذی که کاربر یا ربات ثبت کرده) یا `BACKTEST`
+     * (بازپخش آرشیو بک‌تست).
+     *
+     * چرا لازم شد؟ درخواست کاربر: «سود هر معامله برود در ژورنال بنشیند، ولی پولش وارد پولم
+     * نشود.» پس ردیف‌های بک‌تست در ژورنال ثبت می‌شوند تا آمار و درس‌گیری از آن‌ها ساخته شود،
+     * اما هیچ‌جا موجودی حساب را جابه‌جا نمی‌کنند (`applyBalanceDelta` این‌ها را رد می‌کند).
+     */
+    val origin: String = ORIGIN_LIVE,
+    /** متن درسِ همین معامله (اگر موتور یادگیری برایش درسی ساخته باشد). */
+    val lessonFa: String = "",
 ) {
     val displayTradeNumber: Int
         get() = if (tradeNumber > 0) tradeNumber else ((kotlin.math.abs(id.hashCode()) % 9000) + 1)
@@ -267,7 +248,6 @@ data class PaperTrade(
     val assetClass: AssetClass get() = AssetClass.of(symbol)
 
     val riskPerOz: Double get() = kotlin.math.abs(entry - (initialStopLoss ?: stopLoss))
-    val rewardPerOz: Double get() = kotlin.math.abs(takeProfit - entry)
     val effectiveOptimalRr: Double
         get() = if (optimalRiskReward >= 1.5) optimalRiskReward.coerceIn(1.5, 3.0) else riskReward.coerceIn(1.5, 3.0)
 
@@ -351,6 +331,14 @@ data class PaperTrade(
 
     val estimatedRoundTripFeeUsd: Double
         get() = totalRoundTripFeeUsd
+
+    /** آیا این ردیف از بک‌تست آمده (و در نتیجه نباید موجودی را تغییر دهد)؟ */
+    val isBacktest: Boolean get() = origin == ORIGIN_BACKTEST
+
+    companion object {
+        const val ORIGIN_LIVE = "LIVE"
+        const val ORIGIN_BACKTEST = "BACKTEST"
+    }
 }
 
 data class AppSettings(
@@ -366,6 +354,28 @@ data class AppSettings(
     val fixedRiskUsd: Double = 5.0,
     val dailyLossLimitPercent: Double = 100.0,
     val maxDrawdownLimitPercent: Double = 100.0,
+    /**
+     * سقف پوزیشن بازِ هم‌زمان روی کل حساب (دروازهٔ ایمنی ورود). **۰ = بدون سقف** (پیش‌فرض).
+     *
+     * پیش‌تر ۳ بود و به‌خاطر درخواست کاربر برداشته شد؛ اگر کاربر خودش عددی بگذارد، همان
+     * عدد اعمال می‌شود.
+     */
+    val maxOpenTrades: Int = EntrySafetyGate.DEFAULT_MAX_CONCURRENT_POSITIONS,
+    /** سقف پوزیشن باز روی یک نماد. **۰ = بدون سقف** (پیش‌فرض تازه). */
+    val maxOpenTradesPerSymbol: Int = EntrySafetyGate.DEFAULT_MAX_POSITIONS_PER_SYMBOL,
+    // ── لایهٔ رفتاری «عادت‌های معاملاتی» (کتاب Trading Habits — Steve/Holly Burns) ──
+    /** کل لایه روشن باشد. خاموش = رفتار مو‌به‌مو مثل قبل (هیچ معامله‌ای به‌خاطر این لایه رد نمی‌شود). */
+    val habitsGuardEnabled: Boolean = true,
+    /** R32 — سقف ریسک هر معامله (درصد حساب). پیش‌فرض کتاب: ۱٪. */
+    val habitsMaxRiskPerTradePct: Double = TradingHabitsPolicy.MAX_RISK_PER_TRADE_PCT,
+    /** R34 — سقف مجموع ریسک پوزیشن‌های باز (درصد حساب). پیش‌فرض کتاب: ۳٪. */
+    val habitsMaxOpenRiskPct: Double = TradingHabitsPolicy.MAX_OPEN_RISK_PCT,
+    /** R03 — کف پاداش به ریسک. پیش‌فرض کتاب: ۲ (پاداش دو تا سه برابر ریسک). */
+    val habitsMinRiskReward: Double = TradingHabitsPolicy.MIN_RISK_REWARD,
+    /** R39 — حد ضرر باید دست‌کم این‌قدر ATR دورتر از ورود باشد. تست کتاب: زیر ۱×ATR رد. */
+    val habitsStopAtrMultiple: Double = TradingHabitsPolicy.MIN_STOP_ATR_MULTIPLE,
+    /** R23 — افت سرمایه از قله که پس از آن ورود خودکار قفل می‌شود. */
+    val habitsHaltDrawdownPct: Double = TradingHabitsPolicy.DEFAULT_HARD_STOP_DRAWDOWN_PCT,
     val minConfidence: Double = 85.0,
     val spreadPrice: Double = 0.12,
     val commissionPerOz: Double = 0.035,

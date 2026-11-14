@@ -5,14 +5,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
-import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -21,7 +17,6 @@ import com.aurum.edge.MainActivity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.domain.SignalAction
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 
 enum class AlarmTonePreset(
@@ -99,8 +94,6 @@ enum class TradeAlarmKind(
  */
 object TradeEventAlarmManager {
 
-    private val notificationIdSeq = AtomicInteger(4000)
-    private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile
     private var activeRingtone: Ringtone? = null
     private val resolvedTitleUriCache = java.util.concurrent.ConcurrentHashMap<String, String>()

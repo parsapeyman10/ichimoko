@@ -21,3 +21,10 @@ tick-archive/.env
 tick-archive/.venv/
 __pycache__/
 *.py[cod]
+
+# اسکرین‌شات‌های محلی آموزش (منبع استخراج قواعد، نه بخشی از اپ)
+google_drive/
+
+# Local measurement rig output (tools/strategy_lab) — jars/JDK/work dirs must never be committed.
+tools/strategy_lab/*.jar
+tools/strategy_lab/node_modules/

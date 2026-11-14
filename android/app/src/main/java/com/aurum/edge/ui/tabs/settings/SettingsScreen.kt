@@ -418,12 +418,13 @@ fun SettingsScreen(
                                     .background(if (selected) AurumColors.Gold.copy(alpha = 0.22f) else AurumColors.SurfaceAlt)
                                     .border(1.dp, if (selected) AurumColors.Gold else AurumColors.Line, RoundedCornerShape(8.dp))
                                     .clickable {
+                                        // انتخاب «ریسک ثابت دلاری» نباید ترمزهای ریسک را پاک کند.
                                         viewModel.saveRiskAndCapitalSettings(
                                             accountBalance = settings.accountBalance,
                                             initialCapital = settings.initialCapital,
                                             riskPercent = settings.riskPercent,
-                                            dailyLossLimitPercent = 100.0,
-                                            maxDrawdownLimitPercent = 100.0,
+                                            dailyLossLimitPercent = settings.dailyLossLimitPercent,
+                                            maxDrawdownLimitPercent = settings.maxDrawdownLimitPercent,
                                             targetCapital = settings.targetCapital,
                                             useFixedDollarRisk = true,
                                             fixedRiskUsd = usd,
@@ -443,12 +444,15 @@ fun SettingsScreen(
 
                     Button(
                         onClick = {
+                            // این دکمه فقط موجودی و ریسک ثابت را تنظیم می‌کند؛ سقف ضرر روزانه و
+                            // افت سرمایه که کاربر انتخاب کرده دست‌نخورده می‌مانند (قبلاً صریحاً
+                            // ۱۰۰٪ = خاموش نوشته می‌شد).
                             viewModel.saveRiskAndCapitalSettings(
                                 accountBalance = 100_000.0,
                                 initialCapital = 100_000.0,
                                 riskPercent = 0.5,
-                                dailyLossLimitPercent = 100.0,
-                                maxDrawdownLimitPercent = 100.0,
+                                dailyLossLimitPercent = settings.dailyLossLimitPercent,
+                                maxDrawdownLimitPercent = settings.maxDrawdownLimitPercent,
                                 targetCapital = 100_000.0,
                                 useFixedDollarRisk = true,
                                 fixedRiskUsd = 5.0,
@@ -470,7 +474,7 @@ fun SettingsScreen(
                 CapitalAndRiskLimitsCard(
                     settings = settings,
                     riskLimits = riskLimits,
-                    onSaveSettings = { bal, initCap, riskPct, dailyLim, maxDd ->
+                    onSaveSettings = { bal, initCap, riskPct, dailyLim, maxDd, maxOpen, maxPerSymbol ->
                         viewModel.saveRiskAndCapitalSettings(
                             accountBalance = bal,
                             initialCapital = initCap,
@@ -480,7 +484,20 @@ fun SettingsScreen(
                             targetCapital = settings.targetCapital,
                             useFixedDollarRisk = settings.useFixedDollarRisk,
                             fixedRiskUsd = settings.fixedRiskUsd,
+                            maxOpenTrades = maxOpen,
+                            maxOpenTradesPerSymbol = maxPerSymbol,
                         )
+                    },
+                )
+
+                // 🎩 لایهٔ رفتاری «عادت‌های معاملاتی» (کتاب Trading Habits — قواعد ۱ تا ۳۹)
+                TradingHabitsCard(
+                    settings = settings,
+                    trades = trades,
+                    onToggleEnabled = { viewModel.setHabitsGuardEnabled(it) },
+                    onResetToBookDefaults = { viewModel.resetHabitsToBookDefaults() },
+                    onSaveLimits = { risk, open, rr, atr, halt ->
+                        viewModel.saveHabitsLimits(risk, open, rr, atr, halt)
                     },
                 )
 
@@ -596,6 +613,33 @@ fun SettingsScreen(
                     isBackfilling = isBackfilling,
                     onSyncGap = { hours -> viewModel.syncAllOpenAndActiveSymbolsGap(hoursOverride = hours, notifyOnSuccess = true) },
                 )
+                SectionCard(
+                    title = "🗄️ داده و نگهداری",
+                    subtitle = descOrNull("پاک‌سازی دادهٔ هوش مصنوعی استراتژی‌هایی که دیگر در برنامه وجود ندارند"),
+                    initiallyExpanded = false,
+                ) {
+                    Text(
+                        text = "۱۴ مدل استراتژی (ترکیب‌های دوتایی/سه‌تایی، متود جامع ۹ لایه، BTC ۵۲ کندلی، پارسا و هیدن کراس) " +
+                            "از برنامه حذف شده‌اند. پروفایل‌های تیونینگ، برچسب بهترین استراتژی دسته و نمونه‌های تجربهٔ " +
+                            "آن‌ها هنوز در حافظهٔ شبکه عصبی باقی مانده‌اند؛ این کلید فقط همان دادهٔ یتیم را پاک می‌کند " +
+                            "و به وزن‌های شبکه، ژورنال یا معاملات دست نمی‌زند.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Pill(
+                        text = "🧹 پاک‌سازی دادهٔ هوش مصنوعی استراتژی‌های حذف‌شده",
+                        color = AurumColors.Red,
+                        modifier = Modifier.clickable { viewModel.purgeOrphanAiStrategyData() },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "ترکیب فعلی: ${BitcoinStrategyModel.entries.size} مدل — " +
+                            BitcoinStrategyModel.entries.joinToString(" · ") { it.titleFa },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                    )
+                }
             }
         }
     }
@@ -666,7 +710,7 @@ fun NeuralDirectNavigationCard(
             }
             AnimatedVisibility(visible = showDescriptions) {
                 Text(
-                    text = "شبکه عصبی صفحه اختصاصی خود را دارد؛ برای مشاهده آموخته‌ها، کالبدشکافی معاملات، ماتریس ۲۴ استراتژی و تنظیمات کامل مغز عصبی ضربه بزنید.",
+                    text = "شبکه عصبی صفحه اختصاصی خود را دارد؛ برای مشاهده آموخته‌ها، کالبدشکافی معاملات، ماتریس مدل‌ها و تنظیمات کامل مغز عصبی ضربه بزنید.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary.copy(alpha = 0.72f),
                 )

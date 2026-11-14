@@ -69,13 +69,6 @@ data class VenueSpec(
     fun totalRoundTripFeeUsd(price: Double, quantity: Double): Double =
         commissionUsd(price, quantity) * 2.0 + spreadCostUsd(price, quantity)
 
-    /** فاصله قیمتی معادل کل کارمزد رفت‌وبرگشت و اسپرد روی هر واحد از دارایی (برای جبران کارمزد در حد سود). */
-    fun feePriceOffsetPerUnit(price: Double): Double {
-        val commPerSide = if (commissionBpsPerSide > 0.0) price * commissionBpsPerSide / 10_000.0 else commissionPerUnit
-        val spr = if (spreadBps > 0.0) price * spreadBps / 10_000.0 else spreadPrice
-        return commPerSide * 2.0 + spr
-    }
-
     /** توضیح کامل فارسی قوانین خرید، کمیسیون، کارمزد و اسپرد مرجع دیتا برای یک معامله. */
     fun buildRulesSummaryFa(price: Double, quantity: Double): String {
         val entryComm = commissionUsd(price, quantity)

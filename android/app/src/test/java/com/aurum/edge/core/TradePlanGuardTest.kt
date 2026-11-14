@@ -321,4 +321,40 @@ class TradePlanGuardTest {
         "DOW" -> 42_000.0
         else -> 100.0
     }
+
+    @Test
+    fun `take profit must clear at least twice the round-trip fee`() {
+        listOf("BTC/USDT", "ETH/USDT", "XAU/USD", "EUR/USD").forEach { symbol ->
+            val price = when (symbol) {
+                "BTC/USDT" -> 65_000.0
+                "ETH/USDT" -> 3_200.0
+                "XAU/USD" -> 2_400.0
+                else -> 1.08
+            }
+            val spec = VenueSpecs.of(symbol)
+            val feePct = (spec.takerFeeBps * 2.0 + spec.spreadBps) / 10_000.0
+            val minTargetPct = feePct * TradePlanGuard.MIN_TARGET_FEE_MULTIPLE
+            val plan = TradePlanGuard.sanitizePlan(
+                symbol = symbol,
+                action = SignalAction.BUY,
+                entryPrice = price,
+                candidateStopLoss = price * 0.995,
+                candidateTakeProfit = price * 1.002,
+                desiredRiskReward = 1.5,
+                referenceAtr = price * 0.002,
+                triggerInterval = Interval.M15,
+            )
+            if (plan.isUsable) {
+                assertTrue(
+                    "$symbol: target ${plan.targetPct} must clear twice the fee $minTargetPct",
+                    plan.targetPct >= minTargetPct - 1e-9,
+                )
+            } else {
+                assertTrue(
+                    "$symbol: a plan that cannot clear twice the fee must say why",
+                    plan.reasonsFa.any { it.contains("کارمزد") },
+                )
+            }
+        }
+    }
 }

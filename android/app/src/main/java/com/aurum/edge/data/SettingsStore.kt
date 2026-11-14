@@ -2,13 +2,13 @@ package com.aurum.edge.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.CategoryStrategy
 import com.aurum.edge.core.CustomStrategySlot
+import com.aurum.edge.core.EntrySafetyGate
 import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.V1Universe
 import com.aurum.edge.domain.Interval
@@ -34,6 +34,23 @@ class SettingsStore(context: Context) {
     init {
         prefs.edit().remove("embedded_tor_enabled").apply()
         migrateAutoDownload() // owner-requested: in-app updating is on unless switched off
+        migrateOpenPositionCapRemoved()
+    }
+
+    /**
+     * سقف پوزیشن باز هم‌زمان یک‌بار برداشته می‌شود.
+     *
+     * کاربر نصب‌شدهٔ قبلی عدد ۳ (یا ۱) را در حافظه دارد؛ با تغییر «پیش‌فرض» آن عدد عوض
+     * نمی‌شد و سقف سر جایش می‌ماند. این مهاجرت یک‌بار هر دو سقف را صفر می‌کند و پرچم
+     * می‌گذارد؛ از آن به بعد اگر کاربر خودش عددی بگذارد دست‌نخورده می‌مانَد.
+     */
+    private fun migrateOpenPositionCapRemoved() {
+        if (prefs.getBoolean(KEY_OPEN_CAP_REMOVED, false)) return
+        prefs.edit()
+            .putBoolean(KEY_OPEN_CAP_REMOVED, true)
+            .putInt(KEY_MAX_OPEN_TRADES, 0)
+            .putInt(KEY_MAX_OPEN_TRADES_PER_SYMBOL, 0)
+            .apply()
     }
 
     /**
@@ -129,11 +146,7 @@ class SettingsStore(context: Context) {
             ?.takeIf { it.isNotBlank() }
             ?.let { raw -> runCatching { KEY_JSON.decodeFromString(customStrategiesSerializer, raw) }.getOrNull() }
             ?: emptyList()
-        val normalizedStoredBtcId = if (storedBtcStrategyId in BitcoinStrategyModel.legacyIndividualDriveIds) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
-        } else {
-            storedBtcStrategyId
-        }
+        val normalizedStoredBtcId = storedBtcStrategyId
         val validStrategyId = if (
             (
                 BitcoinStrategyModel.entries.any { it.id == normalizedStoredBtcId } &&
@@ -160,22 +173,11 @@ class SettingsStore(context: Context) {
                 .split(',')
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
-                .map { id ->
-                    if (id in BitcoinStrategyModel.legacyIndividualDriveIds) {
-                        BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
-                    } else {
-                        id
-                    }
-                }
                 .filter { id -> id in allKnownIds }
                 .toSet()
             cleaned.ifEmpty { defaultAllIds }
         }
-        val storedEnabledIds = (if (runAllSim && rawParsedEnabledIds.size >= 15) {
-            rawParsedEnabledIds + BitcoinStrategyModel.drivePdfStrategyIds
-        } else {
-            rawParsedEnabledIds
-        })
+        val storedEnabledIds = rawParsedEnabledIds
             // استراتژی‌های موقتاً خاموش (فعلاً جایگاه ۱۶) هرگز به‌صورت خودکار روشن نمی‌شوند؛
             // کاربر می‌تواند بعداً از تنظیمات دوباره فعالشان کند.
             .minus(BitcoinStrategyModel.temporarilyDisabledIds)
@@ -200,6 +202,13 @@ class SettingsStore(context: Context) {
             .takeIf { it.isFinite() }?.coerceIn(0.5, 100.0) ?: 100.0,
         maxDrawdownLimitPercent = prefs.getFloat(KEY_MAX_DRAWDOWN_LIMIT, 100.0f).toDouble()
             .takeIf { it.isFinite() }?.coerceIn(1.0, 100.0) ?: 100.0,
+        // ۰ = بدون سقف (درخواست کاربر)؛ بالا بردن دستی تا ۱۲/۴ همچنان ممکن است.
+        maxOpenTrades = prefs.getInt(KEY_MAX_OPEN_TRADES, EntrySafetyGate.DEFAULT_MAX_CONCURRENT_POSITIONS)
+            .coerceIn(0, 12),
+        maxOpenTradesPerSymbol = prefs.getInt(
+            KEY_MAX_OPEN_TRADES_PER_SYMBOL,
+            EntrySafetyGate.DEFAULT_MAX_POSITIONS_PER_SYMBOL,
+        ).coerceIn(0, 4),
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 85f).toDouble().takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         spreadPrice = prefs.getFloat(KEY_SPREAD, 0.12f).toDouble(),
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.035f).toDouble(),
@@ -281,36 +290,6 @@ class SettingsStore(context: Context) {
         return false
     }
 
-    /** Market-only archive on the user's own HTTPS host. Never send journal/account data.
-     * The bearer token stays in app-private preferences, not in AppSettings/Compose state.
-     */
-    fun tickArchiveConfig(): Pair<String, String>? {
-        val url = prefs.getString(KEY_TICK_ARCHIVE_URL, null)?.trim().orEmpty()
-        val token = prefs.getString(KEY_TICK_ARCHIVE_TOKEN, null).orEmpty()
-        val parsed = url.toHttpUrlOrNull() ?: return null
-        if (parsed.scheme != "https" || parsed.username.isNotEmpty() || parsed.password.isNotEmpty() ||
-            parsed.query != null || parsed.fragment != null || parsed.encodedPath != "/" || token.length < 32)
-            return null
-        return url.trimEnd('/') to token
-    }
-
-    fun tickArchiveUrl(): String = prefs.getString(KEY_TICK_ARCHIVE_URL, null).orEmpty()
-    fun hasTickArchive(): Boolean = tickArchiveConfig() != null
-
-    @Synchronized
-    fun saveTickArchive(urlInput: String, tokenInput: String): Boolean {
-        val url = urlInput.trim().trimEnd('/')
-        if (url.isBlank()) return prefs.edit().remove(KEY_TICK_ARCHIVE_URL)
-            .remove(KEY_TICK_ARCHIVE_TOKEN).commit()
-        val parsed = url.toHttpUrlOrNull() ?: return false
-        if (parsed.scheme != "https" || parsed.username.isNotEmpty() || parsed.password.isNotEmpty() ||
-            parsed.query != null || parsed.fragment != null || parsed.encodedPath != "/") return false
-        val token = tokenInput.trim().ifEmpty { prefs.getString(KEY_TICK_ARCHIVE_TOKEN, null).orEmpty() }
-        if (token.length < 32 || token.any { it.isWhitespace() }) return false
-        return prefs.edit().putString(KEY_TICK_ARCHIVE_URL, url)
-            .putString(KEY_TICK_ARCHIVE_TOKEN, token).commit()
-    }
-
     /**
      * Real-time continuous balance adjustment upon settled paper trade (profit or loss).
      * Ensures position sizing and compounding dynamically track actual account equity.
@@ -356,6 +335,10 @@ class SettingsStore(context: Context) {
             dailyLossLimitPercent = proposed.dailyLossLimitPercent.takeIf { it.isFinite() }?.coerceIn(0.5, 25.0) ?: 3.0,
             maxDrawdownLimitPercent = proposed.maxDrawdownLimitPercent.takeIf { it.isFinite() }?.coerceIn(1.0, 50.0) ?: 10.0,
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
+            // سقف پوزیشن‌ها به‌صورت عدد صحیح و محدود ذخیره می‌شود تا مقدار خراب ذخیره‌شده
+            // هرگز دروازهٔ ایمنی را باز نکند.
+            maxOpenTrades = proposed.maxOpenTrades.coerceIn(0, 12),
+            maxOpenTradesPerSymbol = proposed.maxOpenTradesPerSymbol.coerceIn(0, 4),
         )
         prefs.edit()
             .putString(KEY_API, next.apiKey.trim())
@@ -369,6 +352,8 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_FIXED_RISK_USD, next.fixedRiskUsd.toFloat())
             .putFloat(KEY_DAILY_LOSS_LIMIT, next.dailyLossLimitPercent.toFloat())
             .putFloat(KEY_MAX_DRAWDOWN_LIMIT, next.maxDrawdownLimitPercent.toFloat())
+            .putInt(KEY_MAX_OPEN_TRADES, next.maxOpenTrades)
+            .putInt(KEY_MAX_OPEN_TRADES_PER_SYMBOL, next.maxOpenTradesPerSymbol)
             .putFloat(KEY_MIN_CONF, next.minConfidence.toFloat())
             .putFloat(KEY_SPREAD, next.spreadPrice.toFloat())
             .putFloat(KEY_COMMISSION, next.commissionPerOz.toFloat())
@@ -437,9 +422,48 @@ class SettingsStore(context: Context) {
     }
 
     /**
+     * 🚨 ترمز پیش‌فرض ریسک (یک‌بار، نسخهٔ ۳.۹.۵۰).
+     *
+     * پیش از این `ensureBalance100kMigrated` در **هر** اجرا سقف ضرر روزانه و افت سرمایه را
+     * ۱۰۰٪ می‌کرد، یعنی «بدون ترمز». با ۱۶۰ معاملهٔ پیوستهٔ زیان‌ده همین یک خط کافی بود تا
+     * حساب هیچ‌گاه متوقف نشود. این تابع فقط مقادیر «خاموش‌کننده» (≥۵۰٪) را یک‌بار به مقدار
+     * محافظتی برمی‌گرداند؛ هر انتخاب دستی پایین‌تر از ۵۰٪ دست‌نخورده می‌ماند و پس از مهاجرت هم
+     * دیگر اجرا نمی‌شود.
+     */
+    @Synchronized
+    private fun applyRiskBrakeMigration() {
+        if (prefs.getBoolean(KEY_RISK_BRAKE_V3950, false)) return
+        val currentDaily = prefs.getFloat(KEY_DAILY_LOSS_LIMIT, 100.0f).toDouble()
+        val currentMaxDd = prefs.getFloat(KEY_MAX_DRAWDOWN_LIMIT, 100.0f).toDouble()
+        val editor = prefs.edit()
+        val storedCurrent = read()
+        if (!currentDaily.isFinite() || currentDaily >= 50.0) {
+            editor.putFloat(KEY_DAILY_LOSS_LIMIT, DEFAULT_DAILY_LOSS_LIMIT_PERCENT.toFloat())
+        }
+        if (!currentMaxDd.isFinite() || currentMaxDd >= 50.0) {
+            editor.putFloat(KEY_MAX_DRAWDOWN_LIMIT, DEFAULT_MAX_DRAWDOWN_LIMIT_PERCENT.toFloat())
+        }
+        editor.putBoolean(KEY_RISK_BRAKE_V3950, true).commit()
+        // جریان وضعیت باید مقدار تازه را ببیند، وگرنه UI تا اجرای بعدی همان ۱۰۰٪ را نشان می‌دهد.
+        _settings.value = storedCurrent.copy(
+            dailyLossLimitPercent = if (!currentDaily.isFinite() || currentDaily >= 50.0) {
+                DEFAULT_DAILY_LOSS_LIMIT_PERCENT
+            } else {
+                storedCurrent.dailyLossLimitPercent
+            },
+            maxDrawdownLimitPercent = if (!currentMaxDd.isFinite() || currentMaxDd >= 50.0) {
+                DEFAULT_MAX_DRAWDOWN_LIMIT_PERCENT
+            } else {
+                storedCurrent.maxDrawdownLimitPercent
+            },
+        )
+    }
+
+    /**
      * مهاجرت یک‌باره موجودی حساب به ۱۰۰,۰۰۰ دلار و تنظیم کلید پیش‌فرض AvalAI در زمان اجرای برنامه روی دستگاه کاربر
      */
     fun ensureBalance100kMigrated() {
+        runCatching { applyRiskBrakeMigration() }
         val cur = read()
         val needsBalanceUpgrade = !prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false) && cur.accountBalance < 50_000.0
         val needsKeyPreload = cur.newsAiApiKey.isBlank()
@@ -460,8 +484,9 @@ class SettingsStore(context: Context) {
                 it.copy(
                     accountBalance = if (needsBalanceUpgrade) 100_000.0 else it.accountBalance,
                     initialCapital = if (needsBalanceUpgrade) 100_000.0 else it.initialCapital,
-                    dailyLossLimitPercent = 100.0,
-                    maxDrawdownLimitPercent = 100.0,
+                    // ترمز پیش‌فرض در `applyRiskBrakeMigration` انجام می‌شود (پایین‌تر) تا
+                    // مقدار ۱۰۰٪ قبلی، که `update` آن را به ۲۵٪/۵۰٪ محدود می‌کند، مسیر مهاجرت
+                    // را خراب نکند.
                     useFixedDollarRisk = true,
                     fixedRiskUsd = 5.0,
                     alarmTonePreset = if (needsCleanAlarmMigration) "CUSTOM_ONLY" else it.alarmTonePreset,
@@ -482,6 +507,13 @@ class SettingsStore(context: Context) {
         private val customStrategiesSerializer = ListSerializer(CustomStrategySlot.serializer())
         private val KEY_JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true }
         private const val KEY_CLEAN_ALARM_V3915 = "clean_alarm_migrated_v3915"
+        private const val KEY_RISK_BRAKE_V3950 = "risk_brake_migrated_v3950"
+
+        /** سقف پیش‌فرض ضرر روزانه پس از مهاجرت (۵٪ از ارزش آغاز روز). */
+        const val DEFAULT_DAILY_LOSS_LIMIT_PERCENT: Double = 5.0
+
+        /** سقف پیش‌فرض افت سرمایه پس از مهاجرت (۱۵٪ از سرمایهٔ اولیه). */
+        const val DEFAULT_MAX_DRAWDOWN_LIMIT_PERCENT: Double = 15.0
         private const val KEY_API = "td_api_key"
         private const val KEY_TD_KEYS = "td_symbol_keys_json"
         private const val KEY_SYMBOL = "symbol"
@@ -491,6 +523,8 @@ class SettingsStore(context: Context) {
         private const val KEY_INITIAL_CAPITAL = "initial_capital"
         private const val KEY_DAILY_LOSS_LIMIT = "daily_loss_limit_percent"
         private const val KEY_MAX_DRAWDOWN_LIMIT = "max_drawdown_limit_percent"
+        private const val KEY_MAX_OPEN_TRADES = "max_open_trades"
+        private const val KEY_MAX_OPEN_TRADES_PER_SYMBOL = "max_open_trades_per_symbol"
         private const val KEY_MIN_CONF = "min_confidence"
         private const val KEY_SPREAD = "spread_price"
         private const val KEY_COMMISSION = "commission_per_oz"
@@ -509,13 +543,13 @@ class SettingsStore(context: Context) {
         private const val KEY_SL_ALARM_SOUND_NAME = "sl_alarm_sound_name_v3913"
         private const val KEY_MAX_LEVERAGE_CAP = "max_leverage_cap_v3913"
         private const val KEY_NEWS_URL = "news_base_url"
-        private const val KEY_TICK_ARCHIVE_URL = "tick_archive_url"
-        private const val KEY_TICK_ARCHIVE_TOKEN = "tick_archive_token"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
         // Historical preference key must not be renamed: an existing opt-in survives an upgrade.
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
         private const val KEY_AUTO_DOWNLOAD_UPDATES = "auto_download_updates"
         private const val KEY_AUTO_DOWNLOAD_MIGRATED = "auto_download_updates_migrated_2_0_2"
+        /** یک‌بار گذاشته می‌شود تا سقف پوزیشن باز فقط یک‌بار برداشته شود. */
+        private const val KEY_OPEN_CAP_REMOVED = "open_position_cap_removed_3_9_70"
         private const val KEY_AVAL_AI_ENABLED = "aval_ai_pretrade_enabled"
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"

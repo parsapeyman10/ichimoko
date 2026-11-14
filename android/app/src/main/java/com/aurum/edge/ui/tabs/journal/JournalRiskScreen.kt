@@ -16,15 +16,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -65,10 +64,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.CandleBackfillSummary
 import com.aurum.edge.core.DayPnlSummary
-import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
@@ -101,6 +98,15 @@ import kotlin.math.max
 private val WEEKDAY_HEADERS_FA = listOf("شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه")
 private val RISK_PRESETS = listOf(0.5, 1.0, 1.5, 2.0, 3.0, 5.0)
 private val RR_PRESETS = listOf(1.5, 2.0, 3.0)
+
+/**
+ * کف ارتفاع هر خانهٔ تقویم.
+ *
+ * قبلاً خانه‌ها فقط `aspectRatio(1f)` داشتند و ارتفاع ردیف از محتوای همان ردیف می‌آمد؛ نتیجه
+ * این بود که ردیف بدون معامله کوتاه‌تر می‌شد و شبکه «دندانه‌دار» می‌شد. با کف ثابت، همهٔ
+ * ردیف‌ها هم‌ارتفاع‌اند حتی وقتی هیچ خانه‌ای معامله ندارد.
+ */
+private val CALENDAR_CELL_MIN_HEIGHT = 34.dp
 
 @Composable
 fun JournalRiskScreen(
@@ -283,13 +289,13 @@ fun JournalRiskScreen(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // ترتیب تب‌ها = ترتیب منطقی کار: تقویم ← معاملات باز ← ماشین‌حساب ← خروجی ← آرشیو
+            // ترتیب تب‌ها = ترتیب منطقی کار: تقویم ← معاملات باز ← ماشین‌حساب ← خروجی
+            // ژورنال: معاملات، تقویم و گزارش‌ها. هیچ تب تصویری در این صفحه نیست.
             listOf(
                 0 to "📅 تقویم ژورنال (${filteredClosedTrades.size})",
                 1 to "📜 معاملات باز (${filteredOpenTrades.size})",
                 2 to "🧮 ماشین‌حساب حجم",
                 3 to "📊 خروجی و بکاپ",
-                4 to "📸 آرشیو تصویری",
             ).forEach { (idx, label) ->
                 Pill(
                     text = label,
@@ -317,7 +323,7 @@ fun JournalRiskScreen(
             report = performanceReport,
             scopeLabelFa = filterScopeLabelFa,
             onOpenExport = { subPage = 3 },
-            onOpenArchive = { subPage = 4 },
+            onOpenArchive = {},
         )
 
         // ── ۲. جعبه‌ابزار ژورنال: همهٔ خروجی‌ها/بکاپ/تنظیمات در یک کارت تاشو ──────────
@@ -377,11 +383,6 @@ fun JournalRiskScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Pill(
-                        text = "📸📄 PDF آرشیو اسکرین‌شات‌ها",
-                        color = AurumColors.Gold,
-                        modifier = Modifier.clickable { viewModel.exportArchiveScreenshotsPdfNow(shareAfterExport = true) },
-                    )
                     Pill(
                         text = "🧠📄 PDF هوش مصنوعی + رگرسیون",
                         color = AurumColors.Cyan,
@@ -487,13 +488,6 @@ fun JournalRiskScreen(
             trades = filteredTrades,
         )
 
-            }
-
-            4 -> {
-                com.aurum.edge.ui.components.TradeSnapshotArchiveGallerySection(
-                    viewModel = viewModel,
-                    initiallyExpanded = false,
-                )
             }
 
             3 -> {
@@ -689,9 +683,19 @@ private fun StrategyJournalCategorizationCard(
 internal fun CapitalAndRiskLimitsCard(
     settings: com.aurum.edge.core.AppSettings,
     riskLimits: com.aurum.edge.core.RiskLimitStatus,
-    onSaveSettings: (Double, Double, Double, Double, Double) -> Unit,
+    /**
+     * پارامترها: موجودی، سرمایهٔ اولیه، درصد ریسک، سقف ضرر روزانه، سقف افت سرمایه،
+     * سقف پوزیشن هم‌زمان و سقف پوزیشن هر نماد.
+     */
+    onSaveSettings: (Double, Double, Double, Double, Double, Int, Int) -> Unit,
 ) {
     var editing by rememberSaveable { mutableStateOf(false) }
+    var maxOpenTradesText by rememberSaveable(settings.maxOpenTrades) {
+        mutableStateOf(settings.maxOpenTrades.toString())
+    }
+    var maxPerSymbolText by rememberSaveable(settings.maxOpenTradesPerSymbol) {
+        mutableStateOf(settings.maxOpenTradesPerSymbol.toString())
+    }
     var balanceText by rememberSaveable(settings.accountBalance) {
         mutableStateOf(String.format(Locale.US, "%.2f", settings.accountBalance))
     }
@@ -863,6 +867,8 @@ internal fun CapitalAndRiskLimitsCard(
                                 pct,
                                 settings.dailyLossLimitPercent,
                                 settings.maxDrawdownLimitPercent,
+                                settings.maxOpenTrades,
+                                settings.maxOpenTradesPerSymbol,
                             )
                         }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -946,6 +952,26 @@ internal fun CapitalAndRiskLimitsCard(
                         modifier = Modifier.weight(1f),
                     )
                 }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = maxOpenTradesText,
+                        onValueChange = { maxOpenTradesText = it.filter(Char::isDigit).take(2) },
+                        label = { Text("سقف پوزیشن باز هم‌زمان") },
+                        supportingText = { Text("۰ = بدون سقف (پیش‌فرض) · ۱ تا ۱۲ = سقف دستی") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = maxPerSymbolText,
+                        onValueChange = { maxPerSymbolText = it.filter(Char::isDigit).take(1) },
+                        label = { Text("سقف پوزیشن هر نماد") },
+                        supportingText = { Text("۰ = بدون سقف (پیش‌فرض)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 Button(
                     onClick = {
                         val bal = balanceText.trim().toDoubleOrNull() ?: settings.accountBalance
@@ -953,7 +979,9 @@ internal fun CapitalAndRiskLimitsCard(
                         val risk = riskPctText.trim().toDoubleOrNull() ?: settings.riskPercent
                         val daily = dailyLimitText.trim().toDoubleOrNull() ?: settings.dailyLossLimitPercent
                         val maxDd = maxDdText.trim().toDoubleOrNull() ?: settings.maxDrawdownLimitPercent
-                        onSaveSettings(bal, initCap, risk, daily, maxDd)
+                        val maxOpen = maxOpenTradesText.trim().toIntOrNull() ?: settings.maxOpenTrades
+                        val maxPerSymbol = maxPerSymbolText.trim().toIntOrNull() ?: settings.maxOpenTradesPerSymbol
+                        onSaveSettings(bal, initCap, risk, daily, maxDd, maxOpen, maxPerSymbol)
                         editing = false
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -964,6 +992,289 @@ internal fun CapitalAndRiskLimitsCard(
                 ) {
                     Text("ذخیره تنظیمات سرمایه و ریسک", fontWeight = FontWeight.Bold)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * # کارت «عادت‌های معاملاتی» (کتاب Steve Burns / Holly Burns — قواعد ۱ تا ۳۹)
+ *
+ * این کارت فقط نمایش و یک کلید روشن/خاموش است؛ داوری واقعی در
+ * `TradingHabitsPolicy` و مسیر ورود خودکار (`AurumViewModel.applyTradingHabitsGuard`) است.
+ *
+ * چرا نمایشش لازم بود؟ چون قانونی که دیده نشود، اجرا هم نمی‌شود: ریسک باز، حرارت پورتفو،
+ * افت **از قله**، سری باخت و «بازده لازم برای جبران» همان اعدادی هستند که آدم را از یک
+ * معاملهٔ اضافی نگه می‌دارند.
+ */
+@Composable
+internal fun TradingHabitsCard(
+    settings: com.aurum.edge.core.AppSettings,
+    trades: List<com.aurum.edge.core.PaperTrade>,
+    onToggleEnabled: (Boolean) -> Unit,
+    onResetToBookDefaults: () -> Unit,
+    onSaveLimits: (Double, Double, Double, Double, Double) -> Unit,
+) {
+    var editing by rememberSaveable { mutableStateOf(false) }
+    fun fmt(v: Double): String = String.format(Locale.US, "%.2f", v).trimEnd('0').trimEnd('.')
+    var riskText by rememberSaveable(settings.habitsMaxRiskPerTradePct) { mutableStateOf(fmt(settings.habitsMaxRiskPerTradePct)) }
+    var openText by rememberSaveable(settings.habitsMaxOpenRiskPct) { mutableStateOf(fmt(settings.habitsMaxOpenRiskPct)) }
+    var rrText by rememberSaveable(settings.habitsMinRiskReward) { mutableStateOf(fmt(settings.habitsMinRiskReward)) }
+    var atrText by rememberSaveable(settings.habitsStopAtrMultiple) { mutableStateOf(fmt(settings.habitsStopAtrMultiple)) }
+    var haltText by rememberSaveable(settings.habitsHaltDrawdownPct) { mutableStateOf(fmt(settings.habitsHaltDrawdownPct)) }
+    val openTrades = remember(trades) { trades.filter { it.isOpen } }
+    val equity = settings.accountBalance
+    val peak = remember(trades, equity, settings.initialCapital) {
+        maxOf(equity, com.aurum.edge.core.TradingHabitsPolicy.peakEquityUsd(
+            trades, settings.initialCapital.coerceAtLeast(equity),
+        ))
+    }
+    val ddPct = com.aurum.edge.core.TradingHabitsPolicy.drawdownFromPeakPct(equity, peak)
+    val openRiskPct = com.aurum.edge.core.TradingHabitsPolicy.openRiskPct(openTrades, equity)
+    val heatPct = com.aurum.edge.core.TradingHabitsPolicy.portfolioHeatPct(
+        openTrades.map { if (equity > 0.0) it.riskUsd / equity * 100.0 else 0.0 },
+    )
+    val streak = com.aurum.edge.core.TradingHabitsPolicy.lossStreak(trades)
+    val audit = remember(trades) { com.aurum.edge.core.TradingHabitsPolicy.auditClosed(trades) }
+    val openColor = when {
+        openRiskPct >= settings.habitsMaxOpenRiskPct -> AurumColors.Red
+        heatPct >= settings.habitsMaxOpenRiskPct -> AurumColors.Orange
+        else -> AurumColors.Green
+    }
+    val ddColor = when {
+        ddPct >= settings.habitsHaltDrawdownPct -> AurumColors.Red
+        ddPct >= com.aurum.edge.core.TradingHabitsPolicy.DRAWDOWN_HALVE_AT_PCT -> AurumColors.Orange
+        else -> AurumColors.Green
+    }
+    val f2 = { v: Double -> String.format(Locale.US, "%.2f", v) }
+    val f1 = { v: Double -> String.format(Locale.US, "%.1f", v) }
+
+    SectionCard(
+        title = "🎩 عادت‌های معاملاتی — ۳۹ قاعدهٔ کتاب",
+        subtitle = "ریسک ۱٪ هر معامله · حرارت باز ۳٪ · R:R ≥ ۲ · حد ضرر بیرون از نویز ATR · " +
+            "ممنوعیت میانگین‌گیری روی ضرر · کوچک‌کردن سایز در سری باخت و افت از قله",
+        initiallyExpanded = false,
+        trailing = {
+            Pill(
+                text = if (settings.habitsGuardEnabled) "فعال ✓" else "خاموش",
+                color = if (settings.habitsGuardEnabled) AurumColors.Green else AurumColors.TextMuted,
+            )
+        },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(
+                    text = if (settings.habitsGuardEnabled) {
+                        "فعال: هر ورود خودکار پیش از ثبت، از این ۳۹ قاعده عبور می‌کند"
+                    } else {
+                        "خاموش: ورود خودکار بدون داوری رفتاری انجام می‌شود"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (settings.habitsGuardEnabled) AurumColors.Green else AurumColors.TextSecondary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "سقف ریسک هر معامله ${f2(settings.habitsMaxRiskPerTradePct)}٪ · حرارت باز " +
+                        "${f2(settings.habitsMaxOpenRiskPct)}٪ · کف R:R ۱:${f2(settings.habitsMinRiskReward)} · " +
+                        "حد ضرر ≥ ${f2(settings.habitsStopAtrMultiple)}×ATR · قفل افت ${f1(settings.habitsHaltDrawdownPct)}٪",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Switch(
+                checked = settings.habitsGuardEnabled,
+                onCheckedChange = onToggleEnabled,
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            StatTile(
+                label = "ریسک باز / سقف",
+                value = "${f2(openRiskPct)}٪ / ${f2(settings.habitsMaxOpenRiskPct)}٪",
+                valueColor = openColor,
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                label = "حرارت پورتفو (ρ=۰٫۸)",
+                value = "${f2(heatPct)}٪",
+                valueColor = openColor,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            StatTile(
+                label = "افت از قله",
+                value = "${f1(ddPct)}٪ · جبران ${f1(com.aurum.edge.core.TradingHabitsPolicy.recoveryReturnPct(ddPct))}٪",
+                valueColor = ddColor,
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                label = "سری باخت فعلی",
+                value = if (streak == 0) "۰ (پاک)" else "$streak باخت پیاپی",
+                valueColor = if (streak >= com.aurum.edge.core.TradingHabitsPolicy.LOSS_STREAK_TRIGGER) AurumColors.Orange else AurumColors.TextPrimary,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        if (audit.trades > 0) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.SurfaceAlt.copy(alpha = 0.6f))
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "📊 ممیزی ${audit.trades} معاملهٔ بسته‌شده با قواعد کتاب",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "برد ${f1(audit.winRatePct)}٪ · حد لازم برای همین R:R ${f1(audit.avgNeededWinRatePct)}٪ · " +
+                        "میانگین ${f2(audit.avgR)}R · مجموع ${f2(audit.totalR)}R",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (audit.winRatePct >= audit.avgNeededWinRatePct) AurumColors.Green else AurumColors.Red,
+                )
+                Text(
+                    text = "بزرگ‌ترین ضرر ${f2(audit.maxLossR)}R · بزرگ‌ترین برد ${f2(audit.maxWinR)}R · " +
+                        "بلندترین سری باخت ${audit.maxLossStreak}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+                audit.violationsFa.forEach { v ->
+                    Text(
+                        text = "⚠️ $v",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Orange,
+                    )
+                }
+                if (audit.violationsFa.isEmpty()) {
+                    Text(
+                        text = "✅ هیچ تخلف رفتاری در ژورنال نیست",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Green,
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Pill(
+                text = "↺ بازنشانی روی اعداد کتاب",
+                color = AurumColors.Cyan,
+                modifier = Modifier.clickable { onResetToBookDefaults() },
+            )
+            Pill(
+                text = if (editing) "بستن ویرایش" else "✎ ویرایش اعداد",
+                color = AurumColors.Gold,
+                modifier = Modifier.clickable { editing = !editing },
+            )
+        }
+
+        if (editing) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.SurfaceAlt.copy(alpha = 0.6f))
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = riskText,
+                        onValueChange = { riskText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("ریسک هر معامله ٪") },
+                        supportingText = { Text("کتاب R32: ۱٪ سقف") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = openText,
+                        onValueChange = { openText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("ریسک باز کل ٪") },
+                        supportingText = { Text("کتاب R34: ۳٪ سقف") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = rrText,
+                        onValueChange = { rrText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("کف R:R") },
+                        supportingText = { Text("کتاب R03: ۲") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = atrText,
+                        onValueChange = { atrText = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("حد ضرر ≥ ... ×ATR") },
+                        supportingText = { Text("کتاب R39: ۱") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                OutlinedTextField(
+                    value = haltText,
+                    onValueChange = { haltText = it.filter { c -> c.isDigit() || c == '.' } },
+                    label = { Text("قفل ورود پس از افت از قله ٪") },
+                    supportingText = { Text("کتاب R23: آستانهٔ دردی که تحمل می‌کنی (پیش‌فرض ۱۵٪)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = {
+                        onSaveLimits(
+                            riskText.toDoubleOrNull() ?: settings.habitsMaxRiskPerTradePct,
+                            openText.toDoubleOrNull() ?: settings.habitsMaxOpenRiskPct,
+                            rrText.toDoubleOrNull() ?: settings.habitsMinRiskReward,
+                            atrText.toDoubleOrNull() ?: settings.habitsStopAtrMultiple,
+                            haltText.toDoubleOrNull() ?: settings.habitsHaltDrawdownPct,
+                        )
+                        editing = false
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Gold,
+                        contentColor = Color(0xFF14100A),
+                    ),
+                ) {
+                    Text("ذخیرهٔ اعداد لایه", fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    text = "کتاب: «سیستم را بر اساس دردی که تحمل می‌کنی بساز» (R23). اعداد پیش‌فرض همان اعداد صریح کتاب‌اند.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                )
             }
         }
     }
@@ -1943,7 +2254,20 @@ private fun MonthlyPnlCalendarSection(
     // ۰ = کل ماه، ۱..۳۱ = معاملات همان روز
     var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(0) }
 
-    val calendar = remember(selectedYear, selectedMonth, trades.size, closedTrades.size, closedTrades.firstOrNull()?.id) {
+    // کلیدهای remember باید «نسخهٔ داده» را نشان دهند، نه چیزهایی که هر ۲۰ ثانیه عوض می‌شوند.
+    // قبلاً `closedTrades.size` و شناسهٔ اولین معامله به‌عنوان کلید بودند: با هر تیک ساعت
+    // recomposition رخ می‌داد و اگر یکی از این‌ها تغییر می‌کرد، کل تقویم ماه دوباره ساخته می‌شد.
+    val journalRevision = remember(trades) {
+        var hash = trades.size
+        trades.forEach { trade ->
+            hash = 31 * hash + trade.id.hashCode()
+            hash = 31 * hash + (trade.closedAt ?: trade.openedAt).hashCode()
+            hash = 31 * hash + (trade.pnlUsd?.hashCode() ?: 0)
+            hash = 31 * hash + if (trade.isOpen) 1 else 0
+        }
+        hash
+    }
+    val calendar = remember(selectedYear, selectedMonth, journalRevision) {
         RiskAndCalendarEngine.buildMonthlyCalendar(
             year = selectedYear,
             month = selectedMonth,
@@ -2145,8 +2469,15 @@ private fun MonthlyPnlCalendarSection(
                             calendar.days[dayNumber - 1]
                         } else null
                         if (daySummary == null) {
-                            // خانهٔ خالی هم‌ارتفاع ردیف می‌ماند تا شبکه دندانه‌دار نشود.
-                            Box(modifier = Modifier.weight(1f).aspectRatio(1f))
+                            // خانهٔ خالی فقط با aspectRatio(1f) هم‌ارتفاع بقیه نمی‌شود: ارتفاع
+                            // ردیف از محتوای واقعی می‌آید. با کف ارتفاع، ردیف اول ماه‌هایی که
+                            // روز خالی دارند کوتاه‌تر از ردیف‌های دیگر نمی‌شود.
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .heightIn(min = CALENDAR_CELL_MIN_HEIGHT),
+                            )
                         } else {
                             val intensity = if (maxAbsDayPnl <= 0.0) {
                                 0.0
@@ -2158,7 +2489,10 @@ private fun MonthlyPnlCalendarSection(
                                 isSelected = selectedDayOfMonth == daySummary.dayOfMonth,
                                 isToday = isCurrentMonth && todayZoned.dayOfMonth == daySummary.dayOfMonth,
                                 intensity = intensity,
-                                modifier = Modifier.weight(1f).aspectRatio(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .heightIn(min = CALENDAR_CELL_MIN_HEIGHT),
                                 onClick = {
                                     selectedDayOfMonth = if (selectedDayOfMonth == daySummary.dayOfMonth) {
                                         0
@@ -2210,6 +2544,12 @@ private fun MonthlyPnlCalendarSection(
         }
         val shownTrades = if (selectedDayOfMonth in 1..calendar.daysInMonth) panelTrades else monthTrades
         val shownNet = remember(shownTrades) { shownTrades.sumOf { it.pnlUsd ?: 0.0 } }
+        // تفکیک «چه روزی چیکار کردم»: سود واقعی حساب جدا از سود بک‌تست، چون بک‌تست
+        // موجودی را تکان نمی‌دهد و قاطی‌کردن این دو، عدد روز را دروغ می‌کرد.
+        val shownBacktestNet = remember(shownTrades) {
+            shownTrades.filter { it.isBacktest }.sumOf { it.pnlUsd ?: 0.0 }
+        }
+        val shownRealNet = shownNet - shownBacktestNet
 
         Row(
             modifier = Modifier
@@ -2234,6 +2574,14 @@ private fun MonthlyPnlCalendarSection(
                     style = MaterialTheme.typography.labelSmall,
                     color = if (shownNet >= 0.0) AurumColors.Green else AurumColors.Red,
                 )
+                if (shownBacktestNet != 0.0) {
+                    Text(
+                        text = "از این مقدار ${formatUsdExact(shownRealNet)} واقعی حساب · " +
+                            "${formatUsdExact(shownBacktestNet)} از بک‌تست (بدون اثر روی موجودی)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                    )
+                }
             }
             if (selectedDayOfMonth != 0) {
                 Pill(
@@ -2515,6 +2863,14 @@ private fun ClosedJournalTradeRow(
                     text = trade.displayTradeNumberBadgeFa,
                     color = AurumColors.Gold,
                 )
+                // ردیف‌های بک‌تست در ژورنال می‌نشینند تا درسشان گرفته شود، ولی پولشان به
+                // موجودی اضافه نمی‌شود؛ این نشان همین را بی‌ابهام می‌کند.
+                if (trade.isBacktest) {
+                    Pill(
+                        text = "🧪 بک‌تست · بدون اثر روی پول",
+                        color = AurumColors.TextMuted,
+                    )
+                }
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -2674,6 +3030,14 @@ private fun ClosedJournalTradeRow(
                 }
             }
 
+            if (trade.isBacktest && trade.lessonFa.isNotBlank()) {
+                Text(
+                    text = "🎓 درس این معامله: ${trade.lessonFa}",
+                    color = AurumColors.Gold,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp,
+                )
+            }
             if (trade.note.isNotBlank()) {
                 Text(
                     text = "یادداشت: ${trade.note}",

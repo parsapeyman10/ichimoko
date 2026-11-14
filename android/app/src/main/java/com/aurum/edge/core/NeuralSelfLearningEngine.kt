@@ -12,7 +12,6 @@ import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.round
-import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -150,8 +149,10 @@ data class PerStrategyNeuralTuningProfile(
     val strategyBadgeFa: String,
     val tuningGeneration: Int = 1,
     val samplesAnalyzed: Int = 0,
-    val winRatePct: Double = 68.5,
-    val expectedProfitFactor: Double = 2.45,
+    // صفر = «هنوز هیچ نمونه‌ای نداشته‌ایم». پیش از این ۶۸.۵٪ و ۲.۴۵ اینجا نشسته بود و
+    // قبل از اولین معامله هم به کاربر «نرخ برد ۶۸.۵٪» نشان می‌داد.
+    val winRatePct: Double = 0.0,
+    val expectedProfitFactor: Double = 0.0,
     val minRiskReward: Double = 1.65,
     val maxKijunExtensionAtr: Double = 1.68,
     val slBufferAtr: Double = 0.25,
@@ -200,7 +201,7 @@ data class PerSymbolNeuralTuningProfile(
     /** تعداد نمونه‌ای که برای آموزش شخصیت این نماد استفاده شده (خودش + انتقالی). */
     val samplesAnalyzed: Int = 0,
     val winRatePct: Double = 0.0,
-    val expectedProfitFactor: Double = 2.20,
+    val expectedProfitFactor: Double = 0.0,
     val avgRMultiple: Double = 0.0,
     val posteriorWinProbPct: Double = 50.0,
     val minRiskReward: Double = 1.60,
@@ -249,6 +250,14 @@ data class NeuralRegressedParameterRow(
     val confidenceIntervalLabel: String,
     val unitLabel: String,
     val impactVerdictFa: String,
+    /**
+     * آیا این مقدار رگرسیون‌شده واقعاً **اعمال** شده است؟
+     * فقط وقتی `true` است که نمونه کافی (≥۳۰)، R² > ۰٫۰۲ و |t| ≥ ۱٫۹۶ باشد؛ وگرنه مقدار
+     * پیشین دست‌نخورده می‌ماند و گزارش هم همان را نشان می‌دهد.
+     */
+    val applied: Boolean = false,
+    /** دلیل اعمال‌شدن یا اعمال‌نشدن — تا گزارش «چرا» را هم بگوید. */
+    val significanceNoteFa: String = "",
 )
 
 @Serializable
@@ -264,7 +273,7 @@ data class NeuralFeatureRegressionSlope(
 @Serializable
 data class NeuralParameterRegressionReport(
     val strategyId: String = "ALL",
-    val strategyTitleFa: String = "تمام ۱۶ استراتژی (رگرسیون جامع)",
+    val strategyTitleFa: String = "تمام مدل‌های فعال (رگرسیون جامع)",
     val regressionMethodFa: String = "Ridge L2 + Huber Robust IRLS + Walk-Forward CV + Empirical Bayes (2026 SOTA)",
     val ridgeLambda: Double = 0.25,
     val huberDelta: Double = 1.35,
@@ -280,6 +289,12 @@ data class NeuralParameterRegressionReport(
     val optimalRrCorridorFa: String = "بازه قفل‌شده و رگرسیون‌شده R:R: [1:1.50 .. 1:3.00] (حداقل ۱.۵ و حداکثر ۳.۰)",
     val parameterRows: List<NeuralRegressedParameterRow> = emptyList(),
     val featureSlopes: List<NeuralFeatureRegressionSlope> = emptyList(),
+    /** چند پارامتر واقعاً از Prior تغییر کرد (بقیه معنادار نبودند و دست‌نخورده ماندند). */
+    val parametersApplied: Int = 0,
+    /** چند ویژگی از ۱۶ ویژگی ضریب معنادار (|t| ≥ ۱٫۹۶) داشت. */
+    val significantFeatures: Int = 0,
+    /** قضاوت یک‌خطی دربارهٔ اعتبار آماری همین برازش. */
+    val fitQualityVerdictFa: String = "هنوز برازشی اجرا نشده است",
     val regressionDiagnosticNotesFa: List<String> = emptyList(),
     val computedAtMs: Long = 0L,
 )
@@ -298,9 +313,19 @@ data class NeuralAutoTunedParameters(
     val minVolumeRatio20: Double = 0.65,
     val minDriveBooksConsensus: Int = 6,
     val neuralWinProbGatePct: Double = 56.0,
-    val expectedWinRatePct: Double = 71.5,
-    val expectedProfitFactor: Double = 2.55,
-    val falsePositiveReductionPct: Double = 38.0,
+    /**
+     * سقف فاصلهٔ مجاز ورود از نقطهٔ بهینه در شرط ۱۶ (`Sniper Pocket`)، بر حسب ATR.
+     *
+     * این فیلد پیش‌فرض ۰.۳۵ دارد (همان سقف سخت موتور). تیونینگ فقط می‌تواند آن را
+     * سخت‌گیرانه‌تر کند، نه شل‌تر؛ پیش از این پارامتر «حداقل» اشتباهاً به‌جای سقف استفاده می‌شد.
+     */
+    val maxSniperDistanceAtr: Double = 0.35,
+    /** نرخ برد اندازه‌گیری‌شده؛ ۰ = هنوز هیچ نمونه‌ای اندازه‌گیری نشده (نه یک عدد خوش‌بینانهٔ ساختگی). */
+    val expectedWinRatePct: Double = 0.0,
+    /** پروفیت فاکتور اندازه‌گیری‌شده؛ ۰ = بدون نمونه. */
+    val expectedProfitFactor: Double = 0.0,
+    /** سهم نمونه‌هایی که در خوشه‌های «ورود ممنوع» افتاده‌اند (اندازه‌گیری‌شده). */
+    val falsePositiveReductionPct: Double = 0.0,
     val bestStrategyByCategory: Map<String, String> = emptyMap(),
     val tuningSummaryFa: String = "پارامترهای استراتژی، حد ضرر ساختاری و گیت شبکه عصبی با رگرسیون Ridge L2 + Huber IRLS + بیزین کالیبره شدند.",
     val parameterChangeLogFa: List<String> = emptyList(),
@@ -517,6 +542,27 @@ data class NeuralMarketInference(
     val newsImpactSummaryFa: String = "",
 )
 
+/**
+ * گزارش پاک‌سازی داده‌های هوش مصنوعی استراتژی‌های حذف‌شده.
+ * هیچ عددی در آن ساختگی نیست؛ همه از نقشه‌های واقعی مغز شمرده می‌شوند.
+ */
+data class OrphanStrategyDataPurgeReport(
+    val knownStrategyIds: Int,
+    val removedProfiles: Int,
+    val removedCategoryBestStrategy: Int,
+    val removedReplaySamples: Int,
+    val remainingProfiles: Int,
+) {
+    val summaryFa: String
+        get() = if (removedProfiles == 0 && removedCategoryBestStrategy == 0 && removedReplaySamples == 0) {
+            "هیچ دادهٔ یتیمی از استراتژی‌های حذف‌شده پیدا نشد؛ $remainingProfiles مدل فعلی دست‌نخورده است."
+        } else {
+            "پاک‌شد: $removedProfiles پروفایل تیونینگ، $removedCategoryBestStrategy برچسب «بهترین استراتژی دسته» " +
+                "و $removedReplaySamples نمونهٔ تجربهٔ مربوط به استراتژی‌های حذف‌شده. " +
+                "$remainingProfiles مدل فعلی دست‌نخورده ماند."
+        }
+}
+
 class NeuralSelfLearningEngine(
     context: Context? = null,
     private val storageFile: File? = context?.let { File(it.filesDir, "neural_self_learning_v1.json") },
@@ -562,6 +608,12 @@ class NeuralSelfLearningEngine(
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+        // ⚠️ ضروری: آماره‌ها می‌توانند `NaN` باشند (مثلاً R² وقتی نمونه برای برآورد واریانس
+        // کافی نیست، یا t متناظر). پیش‌فرض kotlinx.serialization روی NaN **استثنا** می‌دهد و
+        // همین باعث می‌شد `persistState` بی‌صدا شکست بخورد: حافظهٔ شبکه ذخیره نمی‌شد و
+        // «حافظه پر نشد» در آزمون‌ها و «یادگیری صفر» در برنامه دیده می‌شد. با این تنظیم،
+        // `NaN` به‌صورت عادی در فایل می‌نشیند و خواننده‌اش آن را «نامعلوم» تفسیر می‌کند.
+        allowSpecialFloatingPointValues = true
     }
 
     private val appContext: Context? = context?.applicationContext
@@ -677,7 +729,7 @@ class NeuralSelfLearningEngine(
             }
         }
         if (total == 0) {
-            insightsFeed += "📚 وضعیت پایه (دانش اولیه ۲۴ استراتژی): شبکه عصبی با دانش پایه ایچیموکو (تقویت کارایی روند ER14، ضخامت ابر آینده ۲۶ کندلی و جریمه کشیدگی C-Clamp و شدوهای فیک‌بریک‌اوت) مقداردهی شده و به محض بسته شدن اولین معامله، وزن‌ها را با الگوریتم AdamW به‌روزرسانی می‌کند."
+            insightsFeed += "📚 وضعیت پایه (دانش اولیهٔ ایچیموکو): شبکه عصبی با دانش پایه ایچیموکو (تقویت کارایی روند ER14، ضخامت ابر آینده ۲۶ کندلی و جریمه کشیدگی C-Clamp و شدوهای فیک‌بریک‌اوت) مقداردهی شده و به محض بسته شدن اولین معامله، وزن‌ها را با الگوریتم AdamW به‌روزرسانی می‌کند."
         } else {
             insightsFeed += String.format(
                 Locale.US,
@@ -764,7 +816,8 @@ class NeuralSelfLearningEngine(
             val count = samples.size
             val wins = samples.filter { it.won }
             val losses = samples.filter { !it.won }
-            val wr = if (count > 0) (wins.size.toDouble() / count.toDouble()) * 100.0 else 64.0
+            // پیش‌ازاین بدون هیچ نمونه‌ای، نرخ برد ۶۴٪ «ساختگی» گزارش می‌شد. حالا صفر است.
+            val wr = if (count > 0) (wins.size.toDouble() / count.toDouble()) * 100.0 else 0.0
             val grossProfitR = wins.sumOf { it.achievedR.coerceAtLeast(0.1) }
             val grossLossR = losses.sumOf { abs(it.achievedR).coerceAtLeast(0.1) }
             val pf = when {
@@ -810,72 +863,37 @@ class NeuralSelfLearningEngine(
             )
         }.sortedWith(compareByDescending<NeuralStrategyTradingEdge> { it.tradesCount }.thenByDescending { it.edgeScore })
 
-        // ── ۲. هوش سشن‌های معاملاتی (آسیا، لندن، هم‌پوشانی لندن-نیویورک، نیویورک) ──
-        fun utcHourOf(ms: Long): Int = ((ms / 3_600_000L) % 24L).toInt()
-        val sessionSpecs = listOf(
-            Triple("OVERLAP_LDN_NY", "🔥 هم‌پوشانی لندن و نیویورک (طلایی‌ترین حجم)", "12:00 تا 16:00 UTC") to (12..15),
-            Triple("LONDON", "🇬🇧 سشن لندن و اروپا (شروع روندهای اصلی)", "07:00 تا 12:00 UTC") to (7..11),
-            Triple("NEW_YORK", "🇺🇸 سشن نیویورک (ادامه موج و شاخص داوجونز)", "16:00 تا 21:00 UTC") to (16..20),
-            Triple("ASIA", "🇯🇵 سشن آسیا و توکیو (نوسان متعادل/پولبک)", "00:00 تا 07:00 UTC") to (0..6),
-        )
-        val sessionEdges = sessionSpecs.map { (meta, hourRange) ->
-            val (code, titleFa, hoursLabel) = meta
-            val sList = cur.replayBuffer.filter { utcHourOf(it.timestampMs) in hourRange }
-            val sCount = sList.size
-            val sWr = if (sCount > 0) (sList.count { it.won }.toDouble() / sCount.toDouble()) * 100.0 else when (code) {
-                "OVERLAP_LDN_NY" -> 71.0
-                "LONDON" -> 67.0
-                "NEW_YORK" -> 64.0
-                else -> 58.0
-            }
-            val sAvgR = if (sCount > 0) sList.sumOf { it.achievedR } / sCount.toDouble() else when (code) {
-                "OVERLAP_LDN_NY" -> 1.15
-                "LONDON" -> 0.92
-                "NEW_YORK" -> 0.78
-                else -> 0.45
-            }
-            val advice = when (code) {
-                "OVERLAP_LDN_NY" -> "بهترین سشن برای شکست کومو (تاتل، لایهٔ ۱ بولینگر و لایهٔ ۸) روی طلا، فارکس و بیت‌کوین"
-                "LONDON" -> "بهترین سشن برای موج N هوسودا و سیستم سریع 7-22-44 (لایهٔ ۹) در شروع روند روزانه"
-                "NEW_YORK" -> "بهترین سشن برای پولبک کیجون پاتل و لایهٔ ۲ (EMA21+RSI7+Fractal) روی طلا، داوجونز و کریپتو"
-                else -> "در سشن آسیا از استراتژی‌های شکست پرهیز کنید و فقط پولبک‌های دقیق کیجون و لایهٔ ۳ (10,30,60) را شکار کنید"
-            }
-            NeuralTradingSessionEdge(
-                sessionCode = code,
-                sessionTitleFa = titleFa,
-                utcHoursLabel = hoursLabel,
-                tradesCount = sCount,
-                winRatePercent = round(sWr * 10.0) / 10.0,
-                avgR = round(sAvgR * 100.0) / 100.0,
-                sessionAdviceFa = advice,
-            )
-        }
+        // ── ۲. هیچ لبهٔ سشنی ساخته نمی‌شود: یادگیری بر پایهٔ ساختار است، نه ساعتِ روز ──────
+        // آمار سشن (آسیا/لندن/هم‌پوشانی/نیویورک) دیگر نه محاسبه می‌شود، نه در کارنامه می‌آید و
+        // هیچ پارامتری از آن تیون نمی‌شود. تنها بازدارندهٔ زمانی، «بازار بسته» است که در
+        // `EntrySafetyGate` و `MarketHours` سنجیده می‌شود: با پوزیشن باز داخل بازار تعطیل نمی‌رویم.
+        val sessionEdges = emptyList<NeuralTradingSessionEdge>()
 
         // ── ۳. کالبدشکافی تریدی علل تارگت و استاپ (Trade Outcome Forensics) ──
         val allWins = cur.replayBuffer.filter { it.won }
         val allLosses = cur.replayBuffer.filter { !it.won }
         val sumWinR = allWins.sumOf { it.achievedR.coerceAtLeast(0.05) }
         val sumLossR = allLosses.sumOf { abs(it.achievedR).coerceAtLeast(0.05) }
-        val overallPf = if (sumLossR > 0.0) round((sumWinR / sumLossR) * 100.0) / 100.0 else if (sumWinR > 0.0) 3.20 else 1.85
+        val overallPf = if (sumLossR > 0.0) round((sumWinR / sumLossR) * 100.0) / 100.0 else 0.0
         val overallExpR = if (cur.replayBuffer.isNotEmpty()) {
             round((cur.replayBuffer.sumOf { it.achievedR } / cur.replayBuffer.size.toDouble()) * 100.0) / 100.0
-        } else 0.72
+        } else 0.0
         val tf15List = cur.replayBuffer.filter { it.timeframeLabel.equals("15m", ignoreCase = true) }
         val tf5List = cur.replayBuffer.filter { it.timeframeLabel.equals("5m", ignoreCase = true) }
         val tfComparisonFa = String.format(
             Locale.US,
             "تایم 15m: %d معامله (میانگین %+.2fR) · تایم 5m: %d معامله (میانگین %+.2fR)",
             tf15List.size,
-            if (tf15List.isNotEmpty()) tf15List.sumOf { it.achievedR } / tf15List.size else 0.85,
+            if (tf15List.isNotEmpty()) tf15List.sumOf { it.achievedR } / tf15List.size else 0.0,
             tf5List.size,
-            if (tf5List.isNotEmpty()) tf5List.sumOf { it.achievedR } / tf5List.size else 0.65,
+            if (tf5List.isNotEmpty()) tf5List.sumOf { it.achievedR } / tf5List.size else 0.0,
         )
 
         val tradeForensics = NeuralTradeForensicsSummary(
             totalWinsAnalyzed = allWins.size,
             totalLossesAnalyzed = allLosses.size,
-            avgWinR = if (allWins.isNotEmpty()) round((sumWinR / allWins.size) * 100.0) / 100.0 else 2.25,
-            avgLossR = if (allLosses.isNotEmpty()) round((sumLossR / allLosses.size) * 100.0) / 100.0 else 1.00,
+            avgWinR = if (allWins.isNotEmpty()) round((sumWinR / allWins.size) * 100.0) / 100.0 else 0.0,
+            avgLossR = if (allLosses.isNotEmpty()) round((sumLossR / allLosses.size) * 100.0) / 100.0 else 0.0,
             profitFactor = overallPf,
             expectancyPerTradeR = overallExpR,
             bestTimeframeSummaryFa = tfComparisonFa,
@@ -1034,6 +1052,8 @@ class NeuralSelfLearningEngine(
         model: BitcoinStrategyModel,
         attnWeights: List<Double>,
         winWeights: List<Double>,
+        knownWinRatePct: Double = 0.0,
+        knownSamples: Int = 0,
     ): PerStrategyNeuralTuningProfile {
         val minRr = max(1.5, round((model.baseOptimalRr - 0.35).coerceIn(1.55, 2.25) * 100.0) / 100.0)
         val maxKijunExt = when {
@@ -1057,9 +1077,11 @@ class NeuralSelfLearningEngine(
             strategyTitleFa = model.titleFa,
             strategyBadgeFa = model.badgeFa,
             tuningGeneration = 1,
-            samplesAnalyzed = 0,
-            winRatePct = if (model.isDrivePdfStrategy || model == BitcoinStrategyModel.BASE_ICHIMOKU) 72.5 else 68.0,
-            expectedProfitFactor = if (model.isDrivePdfStrategy || model == BitcoinStrategyModel.BASE_ICHIMOKU) 2.65 else 2.35,
+            // عدد اندازه‌گیری‌شده، نه کف مصنوعی: نرخ برد از تجربهٔ واقعی همان استراتژی می‌آید و
+            // اگر هیچ نمونه‌ای نباشد نامعلوم (۰) می‌ماند.
+            winRatePct = knownWinRatePct.coerceIn(0.0, 100.0),
+            expectedProfitFactor = 0.0,
+            samplesAnalyzed = knownSamples,
             minRiskReward = minRr,
             maxKijunExtensionAtr = maxKijunExt,
             slBufferAtr = slBuf,
@@ -1119,6 +1141,57 @@ class NeuralSelfLearningEngine(
         } else {
             withProfiles
         }
+    }
+
+    /**
+     * پاک‌سازی «داده‌های هوش مصنوعی استراتژی‌هایی که دیگر وجود ندارند».
+     *
+     * چرا لازم است؟ با حذف ۱۴ مدل (ترکیب‌ها، متود جامع ۹ لایه، BTC ۵۲ کندلی، پارسا و
+     * هیدن کراس) پروفایل‌های تیونینگ آن‌ها در فایل مغز باقی می‌مانند؛ نه جایی برای نمایش
+     * دارند و نه در آموزش شرکت می‌کنند. این تابع فقط ردیف‌های «یتیم» (پروفایل استراتژی و
+     * برچسب «بهترین استراتژی دسته») و تجربه‌های بافر تکرار مربوط به آن مدل‌ها را حذف می‌کند
+     * و به هیچ وزن شبکهٔ عصبی دست نمی‌زند.
+     */
+    @Synchronized
+    fun purgeOrphanStrategyData(): OrphanStrategyDataPurgeReport {
+        val knownIds = BitcoinStrategyModel.entries.map { it.id }.toSet()
+        val cur = persistedState
+        val params = cur.autoTunedParameters
+
+        val orphanProfiles = params.perStrategyProfiles.keys.filterNot { it in knownIds }
+        val keptProfiles = params.perStrategyProfiles.filterKeys { it in knownIds }
+        val orphanCategoryBest = params.bestStrategyByCategory.filterValues { it !in knownIds }
+        val keptCategoryBest = params.bestStrategyByCategory.filterValues { it in knownIds }
+        val keptBuffer = cur.replayBuffer.filter { it.strategyId in knownIds }
+        val orphanBuffer = cur.replayBuffer.size - keptBuffer.size
+        if (orphanProfiles.isEmpty() && orphanCategoryBest.isEmpty() && orphanBuffer == 0) {
+            return OrphanStrategyDataPurgeReport(
+                knownStrategyIds = knownIds.size,
+                removedProfiles = 0,
+                removedCategoryBestStrategy = 0,
+                removedReplaySamples = 0,
+                remainingProfiles = keptProfiles.size,
+            )
+        }
+
+        persistState(
+            cur.copy(
+                replayBuffer = keptBuffer,
+                autoTunedParameters = params.copy(
+                    perStrategyProfiles = LinkedHashMap(keptProfiles),
+                    bestStrategyByCategory = LinkedHashMap(keptCategoryBest),
+                    tuningSummaryFa = "دادهٔ هوش مصنوعی استراتژی‌های حذف‌شده پاک شد؛ " +
+                        "${keptProfiles.size} مدل باقی‌مانده دست‌نخورده است.",
+                ),
+            ),
+        )
+        return OrphanStrategyDataPurgeReport(
+            knownStrategyIds = knownIds.size,
+            removedProfiles = orphanProfiles.size,
+            removedCategoryBestStrategy = orphanCategoryBest.size,
+            removedReplaySamples = orphanBuffer,
+            remainingProfiles = keptProfiles.size,
+        )
     }
 
     private fun sanitizeLoadedState(loaded: NeuralNetworkPersistedState): NeuralNetworkPersistedState {
@@ -1517,14 +1590,6 @@ class NeuralSelfLearningEngine(
             changeLog = persistedState.knowledgeChangeLog,
         )
     }
-
-    /** خروجی JSON کامل بستهٔ دانش (برای اشتراک‌گذاری یا تست). */
-    fun knowledgeBundleJson(appVersionName: String, appVersionCode: Int): String =
-        NeuralLearningLedger.encodeBundle(buildKnowledgeBundle(appVersionName, appVersionCode))
-
-    /** منیفست فارسی خوانا از دانش فعلی. */
-    fun knowledgeManifestFa(appVersionName: String, appVersionCode: Int): String =
-        NeuralLearningLedger.buildManifestFa(buildKnowledgeBundle(appVersionName, appVersionCode))
 
     /**
      * ذخیرهٔ بستهٔ دانش + منیفست فارسی در `Download/AurumEdge/Archive` گوشی.
@@ -2049,6 +2114,29 @@ class NeuralSelfLearningEngine(
      * عبور رو به جلو (Forward Pass) در معماری `FT-Attention + SwiGLU Residual + LayerNorm`:
      * با اعمال ضریب تیونینگ و وزن یادگرفته‌شده اختصاصی هر استراتژی روی هر ۱۶ ویژگی (`PerStrategyNeuralFeatureTuning`).
      */
+    /**
+     * پیش‌بینی احتمال برد برای یک بردار ویژگی — فقط خواندن، هیچ آموزشی.
+     *
+     * برای «اتاق تمرین بک‌تست» لازم شد: آنجا باید بشود پرسید «شبکه بعد از دیدن این
+     * معاملات، این شرایط را چقدر می‌پسندد؟» بدون آن‌که چیزی به حالت اضافه شود.
+     *
+     * @return احتمال برد در بازهٔ ۰..۱ (۰٫۵ = بی‌نظر).
+     */
+    fun predictWinProbability(
+        features: List<Double>,
+        strategyId: String? = null,
+        symbol: String? = null,
+    ): Double = forwardPass(features, persistedState, strategyId, symbol).first.coerceIn(0.0, 1.0)
+
+    /**
+     * وزن خالص یادگرفته‌شدهٔ یک ویژگی (ایندکس ۰..۱۵) در لایهٔ خروجی.
+     * مثبت = «این ویژگی در معاملات برنده حاضر بود»، منفی = «علامت هشدار».
+     */
+    fun featureHeadWeight(featureIndex: Int): Double {
+        if (featureIndex !in 0 until INPUT_DIM) return 0.0
+        return persistedState.headWinWeights.getOrElse(featureIndex) { 0.0 }
+    }
+
     private fun forwardPass(
         features: List<Double>,
         cur: NeuralNetworkPersistedState = persistedState,
@@ -2229,20 +2317,31 @@ class NeuralSelfLearningEngine(
         val gatePct = symbolProfile?.takeIf { it.ownSamples > 0 }?.neuralWinProbGatePct
             ?: stratProfile?.neuralWinProbGatePct
             ?: persistedState.autoTunedParameters.neuralWinProbGatePct
-        val tunedGateProb = (gatePct / 100.0).coerceIn(0.42, 0.72)
-        val isNoTradeDetected = newsAdjustedWinProb < min(0.46, tunedGateProb * 0.84) ||
-            blendedExpectedR < 0.05 ||
-            cluster?.isFlaggedNoTradeRegime == true ||
-            (persistedState.latestNewsSnapshot.isHighImpactNewsWindow && newsDirectionFactor < -0.35)
+        val highImpactNewsDanger =
+            persistedState.latestNewsSnapshot.isHighImpactNewsWindow && newsDirectionFactor < -0.35
+        // سیاست پیش‌رونده: کف‌ها از پلهٔ نمونه‌های یادگیری‌شده می‌آیند (نه از شرط ۱۰٬۰۰۰ معامله)،
+        // و تا زمانی که کاربر گیت را روشن نکرده باشد فقط هشدار داده می‌شود.
+        val policy = NeuralGatePolicy.decide(
+            learnedTotal = persistedState.totalLearnedTrades,
+            userActivationEnabled = persistedState.gateUserActivationEnabled,
+            winProbabilityPct = newsAdjustedWinProb * 100.0,
+            expectedR = blendedExpectedR,
+            clusterFlaggedNoTrade = cluster?.isFlaggedNoTradeRegime == true,
+            clusterSamples = cluster?.totalCount ?: 0,
+            tunedGatePct = gatePct,
+        )
+        val isNoTradeDetected = policy.blocksTrade || highImpactNewsDanger ||
+            newsAdjustedWinProb * 100.0 < policy.winProbFloorPct ||
+            blendedExpectedR < policy.expectedRFloor ||
+            (cluster?.isFlaggedNoTradeRegime == true && (cluster?.totalCount ?: 0) >= NeuralGatePolicy.MIN_CLUSTER_SAMPLES)
 
-        // قانون دوشرطی: (۱) رسیدن به ۱۰,۰۰۰ معاملهٔ یادگیری‌شده و (۲) فعال‌سازی صریح خود کاربر.
         val gate = NeuralLearningLedger.gateState(
             learnedTotal = persistedState.totalLearnedTrades,
             target = persistedState.warmupTargetTrades,
             userActivationEnabled = persistedState.gateUserActivationEnabled,
         )
         val isWarmupComplete = gate.isGateActive
-        val isBlockingNow = isWarmupComplete && isNoTradeDetected
+        val isBlockingNow = policy.blocksTrade || (isWarmupComplete && highImpactNewsDanger)
 
         val topFeatureNamesFa = listOf(
             "رژیم دسته رمزارز",
@@ -2269,9 +2368,9 @@ class NeuralSelfLearningEngine(
 
         val whyFa = when {
             isBlockingNow ->
-                "🧠⛔ گیت شبکه عصبی (پس از ${persistedState.totalLearnedTrades} معامله): این شرایط در ${categoryTitleFa(assetClass)} پرخطر تشخیص داده شد (${causalAttr.primaryCauseBadgeFa} · احتمال برد ${winProbPct}% · امید ریاضی ${String.format(Locale.US, "%+.2fR", blendedExpectedR)}) — ورود ممنوع."
+                "🧠⛔ گیت شبکه عصبی (${policy.stage.labelFa} · نمونه ${persistedState.totalLearnedTrades}): این شرایط در ${categoryTitleFa(assetClass)} پرخطر تشخیص داده شد (${causalAttr.primaryCauseBadgeFa} · احتمال برد ${winProbPct}% · امید ریاضی ${String.format(Locale.US, "%+.2fR", blendedExpectedR)}) — ورود ممنوع. دلیل: ${policy.reasonFa}"
             isNoTradeDetected && !isWarmupComplete ->
-                "🧠⚠️ تشخیص شبکه عصبی (${if (gate.volumeConditionMet) "شرط ۱ کامل شده اما گیت با درخواست شما فعال نشده" else "فاز یادگیری ${persistedState.totalLearnedTrades}/${persistedState.warmupTargetTrades}"}): این شرایط در ${categoryTitleFa(assetClass)} مستعد استاپ خوردن است (${causalAttr.primaryCauseBadgeFa} · احتمال برد ${winProbPct}%)؛ فعلاً فقط هشدار داده می‌شود."
+                "🧠⚠️ تشخیص شبکه عصبی (نمونه ${persistedState.totalLearnedTrades} · ${policy.stage.labelFa}): این شرایط در ${categoryTitleFa(assetClass)} مستعد استاپ خوردن است (${causalAttr.primaryCauseBadgeFa} · احتمال برد ${winProbPct}% · کف مجاز ${policy.winProbFloorPct}%)؛ گیت با فعال‌سازی شما روشن نشده، پس فعلاً فقط هشدار داده می‌شود."
             else ->
                 "🧠✅ شرایط مساعد در ${categoryTitleFa(assetClass)} (علت حرکت: ${causalAttr.primaryCauseBadgeFa} · احتمال برد: ${winProbPct}% · امید ریاضی: ${String.format(Locale.US, "%+.2fR", blendedExpectedR)} · فاکتور کلیدی: $topAttentionFactorFa)"
         }
@@ -2339,6 +2438,23 @@ class NeuralSelfLearningEngine(
         )
     }
 
+    /**
+     * آستانهٔ آموخته‌شدهٔ گیت برای همین ترکیب «نماد + استراتژی».
+     * اولویت: شخصیت نماد ← پروفایل استراتژی ← تیونینگ عمومی.
+     */
+    private fun strategyGatePct(
+        state: NeuralNetworkPersistedState,
+        symbol: String,
+        strategyId: String,
+    ): Double {
+        val normSym = V1Universe.normalize(symbol)
+        val normStrat = BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        val symbolPct = state.autoTunedParameters.perSymbolProfiles[normSym]
+            ?.takeIf { it.ownSamples > 0 }?.neuralWinProbGatePct
+        val stratPct = state.autoTunedParameters.perStrategyProfiles[normStrat]?.neuralWinProbGatePct
+        return symbolPct ?: stratPct ?: state.autoTunedParameters.neuralWinProbGatePct
+    }
+
     @Synchronized
     fun evaluateFeatures(
         symbol: String,
@@ -2374,22 +2490,33 @@ class NeuralSelfLearningEngine(
             blendedWinProb
         }
 
-        val isNoTrade = effectiveWinProb < 0.44 ||
-            blendedExpectedR < 0.05 ||
-            cluster?.isFlaggedNoTradeRegime == true
         val gate = NeuralLearningLedger.gateState(
             learnedTotal = persistedState.totalLearnedTrades,
             target = persistedState.warmupTargetTrades,
             userActivationEnabled = persistedState.gateUserActivationEnabled,
         )
-        val isWarmupDone = gate.isGateActive
-        val isBlocking = isWarmupDone && isNoTrade
+        // سیاست پیش‌رونده: کف احتمال برد/امید ریاضی از پلهٔ نمونه‌ها می‌آید، نه از یک شرط
+        // «پس از ۱۰٬۰۰۰ معامله». تا وقتی کاربر گیت را روشن نکرده فقط هشدار داده می‌شود.
+        val policy = NeuralGatePolicy.decide(
+            learnedTotal = persistedState.totalLearnedTrades,
+            userActivationEnabled = persistedState.gateUserActivationEnabled,
+            winProbabilityPct = effectiveWinProb * 100.0,
+            expectedR = blendedExpectedR,
+            clusterFlaggedNoTrade = cluster?.isFlaggedNoTradeRegime == true,
+            clusterSamples = cluster?.totalCount ?: 0,
+            tunedGatePct = strategyGatePct(persistedState, normSym, conditionKey),
+        )
+        // «پرخطر» = زیر کف پلهٔ فعلی؛ «مسدود» = گیت در مدار است و همان شرط‌ها را اعمال می‌کند.
+        val isNoTrade = policy.blocksTrade ||
+            effectiveWinProb * 100.0 < policy.winProbFloorPct ||
+            blendedExpectedR < policy.expectedRFloor
+        val isBlocking = policy.blocksTrade
 
-        val summaryFa = "احتمال برد شبکه عصبی: ${(effectiveWinProb * 100).toInt()}% · امید ریاضی: ${String.format(Locale.US, "%+.2fR", blendedExpectedR)}"
-        val warningFa = if (isNoTrade) {
-            "شرایط پرخطر/ممنوعه تشخیص داده شد ($summaryFa)"
-        } else {
-            null
+        val summaryFa = "احتمال برد شبکه عصبی: ${(effectiveWinProb * 100).toInt()}% · امید ریاضی: ${String.format(Locale.US, "%+.2fR", blendedExpectedR)} · ${policy.stage.labelFa}"
+        val warningFa = when {
+            isBlocking -> "⛔ گیت ورود را مسدود کرد: ${policy.reasonFa}"
+            isNoTrade -> "شرایط پرخطر/ممنوعه تشخیص داده شد ($summaryFa) — گیت غیرفعال است، فقط هشدار"
+            else -> null
         }
         return NeuralSignalEvaluation(
             symbol = normSym,
@@ -2425,6 +2552,15 @@ class NeuralSelfLearningEngine(
     }
 
     /**
+     * تعداد نمونه‌هایی که تا امروز آموخته شده‌اند (فقط خواندن).
+     *
+     * برای «اتاق تمرین» لازم است: پیش از تغذیهٔ نمونه‌های تازه باید بدانیم چند نمونه از قبل
+     * در حافظه بوده تا بتوانیم بگوییم «۳۰۰ نمونه از بک‌تست‌های قبلی + ۴۰ نمونهٔ این اجرا».
+     * این تابع هیچ چیزی را تغییر نمی‌دهد و فایل را نمی‌نویسد.
+     */
+    fun totalLearnedTradesCount(): Int = persistedState.totalLearnedTrades
+
+    /**
      * شرط دوم فعال‌سازی گیت: تصمیم صریح کاربر.
      * این کلید هیچ‌گاه شرط اول (۱۰,۰۰۰ معاملهٔ یادگیری‌شده) را دور نمی‌زند؛ فقط به آن اجازهٔ اجرا می‌دهد.
      */
@@ -2453,10 +2589,6 @@ class NeuralSelfLearningEngine(
             ),
         )
     }
-
-    @Deprecated("از setGateUserActivation استفاده کنید؛ فعال‌سازی زودهنگام دیگر شرط ۱۰,۰۰۰ معامله را دور نمی‌زند.")
-    @Synchronized
-    fun setForceActiveBeforeWarmup(enabled: Boolean) = setGateUserActivation(enabled)
 
     private fun learnFromClosedTradeInternal(
         trade: PaperTrade,
@@ -3134,15 +3266,6 @@ class NeuralSelfLearningEngine(
         return tuned
     }
 
-    @Synchronized
-    fun getStrategyTuningProfile(strategyId: String): PerStrategyNeuralTuningProfile {
-        val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
-        val model = BitcoinStrategyModel.fromId(normId)
-        val ensured = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
-        return ensured.perStrategyProfiles[model.id]
-            ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
-    }
-
     /**
      * تیونینگ اختصاصی هر یک از ۱۶ ویژگی یادگرفته‌شده شبکه عصبی برای یک استراتژی مشخص (`strategyId`).
      */
@@ -3324,7 +3447,11 @@ class NeuralSelfLearningEngine(
                 minSniperDistanceAtr = round(regMinSniper * 100.0) / 100.0,
                 neuralWinProbGatePct = round(regGatePct * 10.0) / 10.0,
                 featureTunings = newFeats,
-                tuningSummaryFa = "رگرسیون Ridge L2 + Huber IRLS (R²=${String.format(Locale.US, "%.2f", report.rSquared)} · λ=$safeLambda): R:R∈[1:${regMinRr}..1:3.00] · استاپ=${regSlBuf}ATR · کیجون≤${regKijunExt}ATR.",
+                tuningSummaryFa = if (report.parametersApplied == 0) {
+                    "رگرسیون اجرا شد ولی هیچ پارامتری معنادار نبود (${report.fitQualityVerdictFa}) — تنظیمات دست‌نخورده ماند."
+                } else {
+                    "رگرسیون Ridge L2 + Huber IRLS (R²=${String.format(Locale.US, "%.3f", report.rSquared)} · λ=$safeLambda · ${report.parametersApplied} پارامتر معنادار): R:R∈[1:${regMinRr}..1:3.00] · استاپ=${regSlBuf}ATR · کیجون≤${regKijunExt}ATR."
+                },
             )
         }
 
@@ -3341,10 +3468,105 @@ class NeuralSelfLearningEngine(
             neuralWinProbGatePct = round(regGatePct * 10.0) / 10.0,
             perStrategyProfiles = updatedProfiles,
             latestRegressionReport = report,
-            tuningSummaryFa = "رگرسیون ماتریسی Ridge L2 + Huber IRLS (R²=${String.format(Locale.US, "%.2f", report.rSquared)} · RMSE=${String.format(Locale.US, "%.2f", report.walkForwardRmse)}): پارامترهای حد ضرر ساختاری و R:R در بازه [1:1.50 .. 1:3.00] کالیبره شدند.",
+            tuningSummaryFa = if (report.parametersApplied == 0) {
+                "رگرسیون ماتریسی اجرا شد و هیچ پارامتری معنادار نبود (${report.fitQualityVerdictFa})."
+            } else {
+                "رگرسیون ماتریسی Ridge L2 + Huber IRLS (R²=${String.format(Locale.US, "%.3f", report.rSquared)} · RMSE=${String.format(Locale.US, "%.2f", report.walkForwardRmse)} · ${report.parametersApplied} از ۱۰ پارامتر معنادار): پارامترهای حد ضرر و R:R کالیبره شدند."
+            },
         )
         persistState(persistedState.copy(autoTunedParameters = nextAuto))
         return report
+    }
+
+    /** خروجی آمارهٔ برازش Ridge وزن‌دار: خطای معیار هر ضریب + شاخص‌های نکویی برازش. */
+    private class WeightedFitStats(
+        val se: DoubleArray,
+        val sigmaSquared: Double,
+        val effectiveSamples: Double,
+    )
+
+    /**
+     * خطای معیار **واقعی** ضرایب رگرسیون Ridge وزن‌دار.
+     *
+     * `XᵀWX + λI` ساخته و معکوس می‌شود؛ سپس `Cov(β) = σ̂² (XᵀWX + λI)⁻¹` و
+     * `σ̂² = Σwᵢrᵢ² / (Σwᵢ − p)`. اگر نمونه از درجهٔ آزادی کمتر باشد، `NaN` برمی‌گردد
+     * تا گزارش به‌جای عدد ساختگی، «—» چاپ کند.
+     */
+    private fun weightedRidgeFitStats(
+        samples: List<ReplayExperienceSample>,
+        beta: DoubleArray,
+        ridgeLambda: Double,
+        huberDelta: Double,
+    ): WeightedFitStats {
+        val n = samples.size
+        val p = INPUT_DIM
+        val nan = WeightedFitStats(DoubleArray(p) { Double.NaN }, Double.NaN, 0.0)
+        if (n < p + 2) return nan
+
+        // وزن‌های Huber روی باقی‌ماندهٔ مدل نهایی
+        val weights = DoubleArray(n) { i ->
+            val smp = samples[i]
+            var pred = 0.45
+            for (j in 0 until p) pred += smp.features.getOrElse(j) { 0.0 } * beta[j]
+            val res = abs(smp.achievedR.coerceIn(-1.0, 3.0) - pred)
+            if (res <= huberDelta) 1.0 else huberDelta / (res + 1e-6)
+        }
+
+        val xtwx = Array(p) { DoubleArray(p) }
+        for (j in 0 until p) {
+            for (k in j until p) {
+                var acc = 0.0
+                for (i in 0 until n) {
+                    val xi = samples[i].features
+                    acc += weights[i] * xi.getOrElse(j) { 0.0 } * xi.getOrElse(k) { 0.0 }
+                }
+                if (j == k) acc += ridgeLambda * 4.0
+                xtwx[j][k] = acc
+                xtwx[k][j] = acc
+            }
+        }
+
+        val wSum = weights.sum()
+        var sseW = 0.0
+        for (i in 0 until n) {
+            val smp = samples[i]
+            var pred = 0.45
+            for (j in 0 until p) pred += smp.features.getOrElse(j) { 0.0 } * beta[j]
+            val r = smp.achievedR.coerceIn(-1.0, 3.0) - pred
+            sseW += weights[i] * r * r
+        }
+        // σ̂² با درجهٔ آزادی مؤثر (تعداد وزن‌ها منهای تعداد پارامترها و یک عرض از مبدأ)
+        val dofEff = wSum - p - 1.0
+        if (dofEff <= 0.0) return nan
+        val sigma2 = sseW / dofEff
+
+        val inv = invertMatrix(xtwx) ?: return nan
+        val se = DoubleArray(p) { j ->
+            val v = sigma2 * inv[j][j]
+            if (v.isFinite() && v > 0.0) sqrt(v) else Double.NaN
+        }
+        return WeightedFitStats(se, sigma2, wSum)
+    }
+
+    /** معکوس ماتریس با حذف گاوسی — `null` اگر تکین باشد. */
+    private fun invertMatrix(m: Array<DoubleArray>): Array<DoubleArray>? {
+        val n = m.size
+        val a = Array(n) { i -> DoubleArray(2 * n) { j -> if (j < n) m[i][j] else if (j - n == i) 1.0 else 0.0 } }
+        for (col in 0 until n) {
+            var pivot = col
+            for (r in col + 1 until n) if (abs(a[r][col]) > abs(a[pivot][col])) pivot = r
+            if (abs(a[pivot][col]) < 1e-12) return null
+            if (pivot != col) { val tmp = a[pivot]; a[pivot] = a[col]; a[col] = tmp }
+            val div = a[col][col]
+            for (j in 0 until 2 * n) a[col][j] /= div
+            for (r in 0 until n) {
+                if (r == col) continue
+                val f = a[r][col]
+                if (f == 0.0) continue
+                for (j in 0 until 2 * n) a[r][j] -= f * a[col][j]
+            }
+        }
+        return Array(n) { i -> DoubleArray(n) { j -> a[i][j + n] } }
     }
 
     private fun computeParameterRegressionInternal(
@@ -3357,13 +3579,15 @@ class NeuralSelfLearningEngine(
         val isAll = strategyId.equals("ALL", ignoreCase = true)
         val normId = if (isAll) "ALL" else BitcoinStrategyModel.normalizeStrategyId(strategyId)
         val modelOrNull = if (isAll) null else BitcoinStrategyModel.fromId(normId)
-        val stratTitleFa = modelOrNull?.titleFa ?: "تمام ۱۶ استراتژی (رگرسیون ماتریسی جامع)"
+        val stratTitleFa = modelOrNull?.titleFa ?: "تمام مدل‌های فعال (رگرسیون ماتریسی جامع)"
 
+        // ⚠️ پیش‌ازاین اگر یک استراتژی نمونه نداشت، بی‌صدا نمونه‌های **همهٔ** استراتژی‌ها
+        // جای آن می‌نشست؛ نتیجه این بود که هر پروفایل شبیه هم و «قالب‌گونه» می‌شد.
+        // حالا نمونهٔ هر استراتژی فقط مال خودش است؛ اگر نداشته باشد، گزارش «بدون نمونه» می‌گوید.
         val filteredSamples = if (isAll) {
             cur.replayBuffer
         } else {
             cur.replayBuffer.filter { BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == normId }
-                .ifEmpty { cur.replayBuffer }
         }
         val nSamples = filteredSamples.size
 
@@ -3421,14 +3645,25 @@ class NeuralSelfLearningEngine(
             }
         }
 
+        // ── آمارهٔ برازش واقعی (نه عدد ثابت) ─────────────────────────────────
+        // پیش‌ازاین خطای معیار هر ضریب با یک فرمول ساختگی `0.06/sqrt(n+8)` ساخته می‌شد و
+        // t-stat چند ردیف پارامتر هم عددهای دستی (۴٫۶۵، ۳٫۹۲، −۴٫۸۵ …) بودند. نتیجه: گزارشی
+        // که «t=−145» نشان می‌داد ولی R² صفر بود. اکنون خطای معیار از کوواریانس واقعیِ
+        // برازش Ridge وزن‌دار (Huber) می‌آید:
+        //   Cov(β) = σ̂² · (XᵀWX + λI)⁻¹ ,  σ̂² = Σwᵢrᵢ² / (Σwᵢ − p)
+        val fit = weightedRidgeFitStats(filteredSamples, betaR, ridgeLambda, huberDelta)
+        val seBeta = fit.se
+
         val absSum = betaR.sumOf { abs(it) }.coerceAtLeast(1e-6)
         val featureSlopes = (0 until INPUT_DIM).map { idx ->
             val (titleFa, _) = featureTitleFa(idx)
             val bR = round(betaR[idx] * 1000.0) / 1000.0
             val bW = round(betaWin[idx] * 1000.0) / 1000.0
             val imp = round(((abs(betaR[idx]) / absSum) * 100.0) * 10.0) / 10.0
-            val se = round((0.06 / sqrt((nSamples + 8).toDouble())) * 1000.0) / 1000.0
-            val tStat = round((bR / se.coerceAtLeast(0.005)) * 100.0) / 100.0
+            // خطای معیار واقعی؛ اگر نمونه برای برآورد واریانس کافی نباشد `NaN` می‌ماند
+            // تا در گزارش «—» چاپ شود، نه یک t ساختگی.
+            val se = seBeta[idx]
+            val tStat = if (se.isFinite() && se > 1e-9) round((betaR[idx] / se) * 100.0) / 100.0 else Double.NaN
             NeuralFeatureRegressionSlope(
                 featureIndex = idx,
                 featureTitleFa = titleFa,
@@ -3457,138 +3692,171 @@ class NeuralSelfLearningEngine(
         val regMaxWick = round((0.46 - wickPenalty * 0.12).coerceIn(0.34, 0.44) * 100.0) / 100.0
         val regSniperDist = round((0.68 - sniperSlope * 0.14).coerceIn(0.48, 0.72) * 100.0) / 100.0
 
+        // ── معیارهای برازش: اندازه‌گیری روی همان داده، نه عدد ثابت ──────────────
+        // پیش از این R² = ۰٫۸۴ و RMSE = ۰٫۳۱ بود؛ هیچ‌کدام محاسبه نمی‌شدند و فقط به `nSamples`
+        // وابسته بودند. اکنون باقی‌ماندهٔ واقعی (SSE/SST) روی پیش‌بینی مدل محاسبه می‌شود.
+        val fittedPreds = filteredSamples.map { sample ->
+            var pred = 0.45
+            for (j in 0 until INPUT_DIM) pred += sample.features.getOrElse(j) { 0.0 } * betaR[j]
+            pred
+        }
+        val targets = filteredSamples.map { it.achievedR.coerceIn(-1.0, 3.0) }
+        val meanTarget = if (targets.isNotEmpty()) targets.average() else 0.0
+        val sse = targets.indices.sumOf { i -> (targets[i] - fittedPreds[i]) * (targets[i] - fittedPreds[i]) }
+        val sst = targets.sumOf { t -> (t - meanTarget) * (t - meanTarget) }
+        // R² واقعی: پیش‌ازاین با `coerceIn(0.0, 0.99)` منفی‌ها به صفر چسبانده می‌شد و
+        // گزارش «R²=0.00» می‌داد در حالی که عدد واقعی منفی بود — یعنی بدتر از میانگین.
+        val r2Raw = if (nSamples >= 2 && sst > 1e-9) 1.0 - sse / sst else Double.NaN
+        val r2 = if (r2Raw.isFinite()) round(r2Raw * 1000.0) / 1000.0 else Double.NaN
+        val adjR2 = if (nSamples > INPUT_DIM + 1 && r2.isFinite()) {
+            val dof = nSamples - INPUT_DIM - 1
+            round((1.0 - (1.0 - r2) * (nSamples - 1).toDouble() / dof) * 1000.0) / 1000.0
+        } else {
+            Double.NaN
+        }
+        val rmse = if (nSamples >= 2) {
+            round(sqrt(sse / nSamples) * 100.0) / 100.0
+        } else {
+            0.0
+        }
+        val mae = if (nSamples >= 2) {
+            round(targets.indices.sumOf { i -> abs(targets[i] - fittedPreds[i]) } / nSamples * 100.0) / 100.0
+        } else {
+            0.0
+        }
+
+        // ── ده پارامتر ساختاری: عدد، خطای معیار و بازهٔ اطمینان همه محاسبه‌شده ─────
+        // حساسیت هر پارامتر به ضریب ویژگی‌اش (`∂param/∂β`) از همان فرمول کالیبراسیون
+        // می‌آید؛ خطای معیار پارامتر = |حساسیت| × SE(β) و بازهٔ ۹۵٪ = مقدار ± ۱٫۹۶×SE.
+        // گزارش فقط وقتی پارامتر را «اعمال‌شده» می‌داند که برازش معنا داشته باشد:
+        //   نمونهٔ کافی (≥۳۰) · R² > ۰٫۰۲ · |t| ≥ ۱٫۹۶.
+        // وگرنه مقدار Prior می‌ماند و دلیلش در گزارش نوشته می‌شود.
+        val modelTrustworthy = nSamples >= 30 && r2 > 0.02
+        fun paramRow(
+            key: String,
+            titleFa: String,
+            prior: Double,
+            value: Double,
+            betaIndex: Int,
+            sensitivity: Double,
+            unit: String,
+            fmt: (Double) -> String,
+            corridorLow: Double,
+            corridorHigh: Double,
+            verdictFa: String,
+        ): NeuralRegressedParameterRow {
+            val rawSe = seBeta[betaIndex]
+            val seParam = if (rawSe.isFinite() && rawSe > 0.0) abs(sensitivity) * rawSe else Double.NaN
+            val t = if (rawSe.isFinite() && rawSe > 1e-9) round((betaR[betaIndex] / rawSe) * 100.0) / 100.0 else Double.NaN
+            val significant = t.isFinite() && abs(t) >= 1.96
+            val applied = modelTrustworthy && significant
+            val finalValue = if (applied) value else prior
+            val ciLow = if (seParam.isFinite()) (finalValue - 1.96 * seParam).coerceIn(corridorLow, corridorHigh) else Double.NaN
+            val ciHigh = if (seParam.isFinite()) (finalValue + 1.96 * seParam).coerceIn(corridorLow, corridorHigh) else Double.NaN
+            val ciLabel = if (seParam.isFinite()) "[${fmt(ciLow)} .. ${fmt(ciHigh)}]" else "[n کم است]"
+            val note = when {
+                nSamples < 30 -> "نمونه کافی نیست ($nSamples < ۳۰) — مقدار پیشین حفظ شد"
+                r2 <= 0.02 -> "R² = ${String.format(Locale.US, "%.3f", r2)} ≤ ۰٫۰۲ — برازش قدرت توضیح‌دهی ندارد"
+                !significant -> "|t| = ${if (t.isFinite()) String.format(Locale.US, "%.2f", abs(t)) else "—"} < ۱٫۹۶ — ضریب معنادار نیست"
+                else -> "معنادار (|t| = ${String.format(Locale.US, "%.2f", abs(t))}) و اعمال شد"
+            }
+            return NeuralRegressedParameterRow(
+                paramKey = key,
+                paramTitleFa = titleFa,
+                priorValue = prior,
+                regressedValue = finalValue,
+                slopeBeta = round(betaR[betaIndex] * 1000.0) / 1000.0,
+                stdError = if (seParam.isFinite()) round(seParam * 1000.0) / 1000.0 else -1.0,
+                tStat = if (t.isFinite()) t else -999.0,
+                confidenceIntervalLabel = ciLabel,
+                unitLabel = unit,
+                impactVerdictFa = verdictFa,
+                applied = applied,
+                significanceNoteFa = note,
+            )
+        }
+
         val paramRows = listOf(
-            NeuralRegressedParameterRow(
-                paramKey = "optimalRiskRewardTarget",
-                paramTitleFa = "۱. هدف بهینه R:R (قفل در بازه ۱.۵ تا ۳.۰)",
-                priorValue = baseOptRr,
-                regressedValue = regOptRr,
-                slopeBeta = round(betaR[14] * 100.0) / 100.0,
-                stdError = 0.04,
-                tStat = 4.65,
-                confidenceIntervalLabel = "[1:${String.format(Locale.US, "%.2f", (regOptRr - 0.15).coerceAtLeast(1.50))} .. 1:${String.format(Locale.US, "%.2f", (regOptRr + 0.15).coerceAtMost(3.00))}]",
-                unitLabel = "R:R",
-                impactVerdictFa = "🎯 سقف ۳.۰ و کف ۱.۵ قفل شد؛ بیشترین نرخ برخورد به TP در موج N/V هوسودا",
+            paramRow(
+                "optimalRiskRewardTarget", "۱. هدف بهینه R:R (قفل در بازه ۱.۵ تا ۳.۰)",
+                prior = baseOptRr, value = regOptRr, betaIndex = 10, sensitivity = 0.25,
+                unit = "R:R", fmt = { String.format(Locale.US, "1:%.2f", it) },
+                corridorLow = 1.50, corridorHigh = 3.00,
+                verdictFa = "🎯 سقف ۳.۰ و کف ۱.۵ قفل است؛ هدف از خلوص حرکت (ER14) کالیبره می‌شود",
             ),
-            NeuralRegressedParameterRow(
-                paramKey = "minRiskReward",
-                paramTitleFa = "۲. حداقل R:R مجاز ورود (کف مطلق ≥ ۱.۵۰)",
-                priorValue = 1.50,
-                regressedValue = regMinRr,
-                slopeBeta = 0.31,
-                stdError = 0.03,
-                tStat = 3.92,
-                confidenceIntervalLabel = "[1:1.50 .. 1:${String.format(Locale.US, "%.2f", regMinRr + 0.12)}]",
-                unitLabel = "R:R",
-                impactVerdictFa = "🛡️ حذف معاملات کم‌بازده زیر ۱:۱.۵ و تضمین امید ریاضی مثبت",
+            paramRow(
+                "minRiskReward", "۲. حداقل R:R مجاز ورود (کف مطلق ≥ ۱.۵۰)",
+                prior = 1.50, value = regMinRr, betaIndex = 10, sensitivity = 0.22,
+                unit = "R:R", fmt = { String.format(Locale.US, "1:%.2f", it) },
+                corridorLow = 1.50, corridorHigh = 3.00,
+                verdictFa = "🛡️ حذف معاملات کم‌بازده زیر ۱:۱.۵",
             ),
-            NeuralRegressedParameterRow(
-                paramKey = "slBufferAtr",
-                paramTitleFa = "۳. بافر محافظ ضد استاپ‌هانت پشت سنگر ساختاری",
-                priorValue = 0.25,
-                regressedValue = regSlBuf,
-                slopeBeta = round(-betaR[13] * 100.0) / 100.0,
-                stdError = 0.02,
-                tStat = 4.18,
-                confidenceIntervalLabel = "[${String.format(Locale.US, "%.2f", regSlBuf - 0.03)} .. ${String.format(Locale.US, "%.2f", regSlBuf + 0.03)} ATR]",
-                unitLabel = "ATR",
-                impactVerdictFa = "🛡️ قرارگیری دقیق پشت فرکتال ۵ کندلی + کیجون۲۶ برای مصونیت از شدوی مارکت‌میکر",
+            paramRow(
+                "slBufferAtr", "۳. بافر محافظ ضد استاپ‌هانت پشت سنگر ساختاری",
+                prior = 0.25, value = regSlBuf, betaIndex = 13, sensitivity = 0.12,
+                unit = "ATR", fmt = { String.format(Locale.US, "%.2f ATR", it) },
+                corridorLow = 0.18, corridorHigh = 0.45,
+                verdictFa = "🛡️ فاصله از فرکتال ۵ کندلی + کیجون۲۶",
             ),
-            NeuralRegressedParameterRow(
-                paramKey = "maxSlDistanceAtr",
-                paramTitleFa = "۴. سقف مجاز فاصله حد ضرر (حذف استاپ‌های خیلی دور و بی‌خاصیت)",
-                priorValue = 2.50,
-                regressedValue = regMaxSlAtr,
-                slopeBeta = -0.44,
-                stdError = 0.05,
-                tStat = -4.85,
-                confidenceIntervalLabel = "[1.60 .. ${String.format(Locale.US, "%.2f", regMaxSlAtr)} ATR]",
-                unitLabel = "ATR",
-                impactVerdictFa = "⚡ جلوگیری از دور شدن بیش‌ازحد ۱R و دور شدن غیرواقعی تارگت TP",
+            paramRow(
+                "maxSlDistanceAtr", "۴. سقف مجاز فاصله حد ضرر",
+                prior = 2.50, value = regMaxSlAtr, betaIndex = 12, sensitivity = 0.22,
+                unit = "ATR", fmt = { String.format(Locale.US, "%.2f ATR", it) },
+                corridorLow = 1.60, corridorHigh = 2.50,
+                verdictFa = "⚡ جلوگیری از دور شدن بیش‌ازحد ۱R",
             ),
-            NeuralRegressedParameterRow(
-                paramKey = "minSlDistanceAtr",
-                paramTitleFa = "۵. کف فاصله ایمن حد ضرر ساختاری (ضد نویز لحظه‌ای)",
-                priorValue = 0.80,
-                regressedValue = regMinSlAtr,
-                slopeBeta = 0.29,
-                stdError = 0.03,
-                tStat = 3.74,
-                confidenceIntervalLabel = "[0.80 .. ${String.format(Locale.US, "%.2f", regMinSlAtr + 0.08)} ATR]",
-                unitLabel = "ATR",
-                impactVerdictFa = "🔒 جلوگیری از استاپ خوردن در نوسان عادی ۱ کندل اول پس از ورود",
+            paramRow(
+                "minSlDistanceAtr", "۵. کف فاصله ایمن حد ضرر ساختاری",
+                prior = 0.80, value = regMinSlAtr, betaIndex = 13, sensitivity = 0.14,
+                unit = "ATR", fmt = { String.format(Locale.US, "%.2f ATR", it) },
+                corridorLow = 0.75, corridorHigh = 1.20,
+                verdictFa = "🔒 جلوگیری از استاپ خوردن در نوسان عادی",
             ),
-            NeuralRegressedParameterRow(
-                paramKey = "maxKijunExtensionAtr",
-                paramTitleFa = "۶. سقف کشیدگی از کیجون‌سن (فیلتر ضد C-Clamp)",
-                priorValue = 1.75,
-                regressedValue = regKijunExt,
-                slopeBeta = round(betaR[12] * 100.0) / 100.0,
-                stdError = 0.04,
-                tStat = -4.52,
-                confidenceIntervalLabel = "[1.40 .. ${String.format(Locale.US, "%.2f", regKijunExt + 0.08)} ATR]",
-                unitLabel = "ATR",
-                impactVerdictFa = "🧲 جلوگیری از خرید در سقف و فروش در کف دور از تعادل کیجون",
+            paramRow(
+                "maxKijunExtensionAtr", "۶. سقف کشیدگی از کیجون‌سن (فیلتر C-Clamp)",
+                prior = 1.75, value = regKijunExt, betaIndex = 12, sensitivity = 0.28,
+                unit = "ATR", fmt = { String.format(Locale.US, "%.2f ATR", it) },
+                corridorLow = 1.30, corridorHigh = 2.20,
+                verdictFa = "🧲 جلوگیری از خرید در سقف دور از تعادل کیجون",
             ),
-            NeuralRegressedParameterRow(
-                paramKey = "minEfficiencyRatio",
-                paramTitleFa = "۷. کف کارایی جهت‌دار روند کافمن (ER14)",
-                priorValue = 0.20,
-                regressedValue = regMinEr,
-                slopeBeta = round(betaR[10] * 100.0) / 100.0,
-                stdError = 0.02,
-                tStat = 5.12,
-                confidenceIntervalLabel = "[${(regMinEr * 100 - 2).toInt()}% .. ${(regMinEr * 100 + 3).toInt()}%]",
-                unitLabel = "ER",
-                impactVerdictFa = "📈 فیلتر کامل بازار رِنج و ورود صرفاً در روندهای با خلوص حرکتی بالا",
+            paramRow(
+                "minEfficiencyRatio", "۷. کف کارایی جهت‌دار روند کافمن (ER14)",
+                prior = 0.20, value = regMinEr, betaIndex = 10, sensitivity = 0.08,
+                unit = "ER", fmt = { String.format(Locale.US, "%.3f", it) },
+                corridorLow = 0.14, corridorHigh = 0.45,
+                verdictFa = "📈 فیلتر بازار رِنج",
             ),
-            NeuralRegressedParameterRow(
-                paramKey = "maxAdverseWickRatio",
-                paramTitleFa = "۸. سقف نسبت شدوی مخالف کندل ماشه",
-                priorValue = 0.45,
-                regressedValue = regMaxWick,
-                slopeBeta = round(betaR[13] * 100.0) / 100.0,
-                stdError = 0.02,
-                tStat = -4.35,
-                confidenceIntervalLabel = "[32% .. ${(regMaxWick * 100).toInt()}%]",
-                unitLabel = "Wick%",
-                impactVerdictFa = "🕯️ حذف کندل‌های پین‌بار معکوس و فیک‌بریک‌اوت‌های نقدینگی",
+            paramRow(
+                "maxAdverseWickRatio", "۸. سقف نسبت شدوی مخالف کندل ماشه",
+                prior = 0.45, value = regMaxWick, betaIndex = 13, sensitivity = 0.12,
+                unit = "Wick%", fmt = { String.format(Locale.US, "%.3f", it) },
+                corridorLow = 0.28, corridorHigh = 0.55,
+                verdictFa = "🕯️ حذف پین‌بار معکوس و فیک‌بریک‌اوت",
             ),
-            NeuralRegressedParameterRow(
-                paramKey = "minSniperDistanceAtr",
-                paramTitleFa = "۹. شعاع مجاز نقطه‌زنی اسنایپر از تنکان/کیجون",
-                priorValue = 0.65,
-                regressedValue = regSniperDist,
-                slopeBeta = round(betaR[15] * 100.0) / 100.0,
-                stdError = 0.03,
-                tStat = 4.40,
-                confidenceIntervalLabel = "[0.45 .. ${String.format(Locale.US, "%.2f", regSniperDist)} ATR]",
-                unitLabel = "ATR",
-                impactVerdictFa = "🎯 ورود میلی‌متری در پولبک تنکان و کاهش ریسک اولیه معامله",
+            paramRow(
+                "minSniperDistanceAtr", "۹. شعاع مجاز نقطه‌زنی اسنایپر",
+                prior = 0.65, value = regSniperDist, betaIndex = 15, sensitivity = 0.14,
+                unit = "ATR", fmt = { String.format(Locale.US, "%.2f ATR", it) },
+                corridorLow = 0.40, corridorHigh = 0.90,
+                verdictFa = "🎯 ورود میلی‌متری در پولبک تنکان",
             ),
-            NeuralRegressedParameterRow(
-                paramKey = "minVolumeRatio20",
-                paramTitleFa = "۱۰. کف نسبت حجم کندل ماشه به میانگین ۲۰ دوره",
-                priorValue = 0.60,
-                regressedValue = regMinVol,
-                slopeBeta = 0.27,
-                stdError = 0.03,
-                tStat = 3.60,
-                confidenceIntervalLabel = "[0.58x .. ${String.format(Locale.US, "%.2fx", regMinVol + 0.08)}]",
-                unitLabel = "Vol×",
-                impactVerdictFa = "📊 تایید حضور سفارشات نهادی در لحظه شکست یا پولبک",
+            paramRow(
+                "minVolumeRatio20", "۱۰. کف نسبت حجم کندل ماشه به میانگین ۲۰ دوره",
+                prior = 0.60, value = regMinVol, betaIndex = 10, sensitivity = 0.10,
+                unit = "Vol×", fmt = { String.format(Locale.US, "%.2fx", it) },
+                corridorLow = 0.40, corridorHigh = 1.15,
+                verdictFa = "📊 تایید حضور سفارشات نهادی",
             ),
         )
-
-        val r2 = round((0.82 + min(0.12, nSamples * 0.002) - (ridgeLambda - 0.25) * 0.03).coerceIn(0.74, 0.94) * 100.0) / 100.0
-        val adjR2 = round((r2 - 0.03).coerceIn(0.70, 0.92) * 100.0) / 100.0
-        val rmse = round((0.33 - min(0.08, nSamples * 0.001)).coerceIn(0.18, 0.42) * 100.0) / 100.0
-        val mae = round((rmse * 0.72) * 100.0) / 100.0
+        val appliedCount = paramRows.count { it.applied }
+        val appliedMap = paramRows.associate { it.paramKey to String.format(Locale.US, "%.2f", it.regressedValue) }
 
         val notes = listOf(
             "🔬 علت بی‌فایده بودن برخی حد ضررهای قبلی: در روش قبلی یا کف درصدی مصنوعی (مثلاً ۰.۸۵٪ در کریپتو معادل ۵ برابر ATR) استاپ را در فضای خالی و بسیار دور قرار می‌داد که باعث می‌شد تارگت ۱.۵R تا ۳R به فاصله ۱۰ برابر ATR پرتاب شده و هرگز تاچ نشود، و یا صرفاً زیر شدوی ۱ کندل اخیر بدون فرکتال ۵ کندلی قرار می‌گرفت و شکار شدو می‌شد.",
-            "🛡️ متود روز دنیا برای بهترین محل حد ضرر (Multi-Anchor Structural Invalidation + Liquidity-Sweep Shield): اکنون حد ضرر دقیقاً پشت «هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون‌سن ۲۶/۳۰ + لبه کومو» به‌علاوه بافر تطبیقی ضد استاپ‌هانت ($regSlBuf ATR) و محصور در دالان طلایی [$regMinSlAtr ATR .. $regMaxSlAtr ATR] قرار می‌گیرد.",
-            "🎯 قفل سخت‌گیرانه بازه R:R در [1:1.50 .. 1:3.00]: بر اساس رگرسیون Huber-Ridge، نسبت R:R هیچ معامله‌ای کمتر از ۱.۵ و بیشتر از ۳.۰ نخواهد بود (بهترین نقطه تعادل نرخ برد و سود خالص روی 1:$regOptRr).",
+            "🛡️ متود روز دنیا برای بهترین محل حد ضرر (Multi-Anchor Structural Invalidation + Liquidity-Sweep Shield): اکنون حد ضرر دقیقاً پشت «هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون‌سن ۲۶/۳۰ + لبه کومو» به‌علاوه بافر تطبیقی ضد استاپ‌هانت (${appliedMap["slBufferAtr"]} ATR) و محصور در دالان [${appliedMap["minSlDistanceAtr"]} ATR .. ${appliedMap["maxSlDistanceAtr"]} ATR] قرار می‌گیرد.",
+            "🎯 قفل سخت‌گیرانه بازه R:R در [1:1.50 .. 1:3.00]: نسبت R:R هیچ معامله‌ای کمتر از ۱.۵ و بیشتر از ۳.۰ نخواهد بود.",
+            "🧪 آماره‌ها محاسبه می‌شوند، نه نوشته: خطای معیار از Cov(β)=σ̂²(XᵀWX+λI)⁻¹ و σ̂² بر درجهٔ آزادی مؤثر. از ۱۰ پارامتر، $appliedCount مورد معنادار و اعمال شد؛ بقیه با مقدار پیشین ماندند.",
+            "🚫 پارامتری که |t| < ۱٫۹۶ یا R² ≤ ۰٫۰۲ دارد اعمال نمی‌شود: روی دادهٔ نویزی، تغییر پارامتر به‌جای یادگیری، سردرگمی است.",
         )
 
         return NeuralParameterRegressionReport(
@@ -3603,12 +3871,28 @@ class NeuralSelfLearningEngine(
             adjustedRSquared = adjR2,
             walkForwardRmse = rmse,
             walkForwardMae = mae,
-            expectedWinRateLiftPct = 10.8,
-            expectedRLiftPerTrade = 0.46,
-            optimalStopLossCorridorFa = "بازه بهینه حد ضرر ساختاری: [$regMinSlAtr ATR .. $regMaxSlAtr ATR] پشت فرکتال ۵ کندلی + کیجون۲۶ + بافر $regSlBuf ATR",
-            optimalRrCorridorFa = "بازه قفل‌شده R:R: [1:1.50 .. 1:3.00] · نقطه بهینه رگرسیون: 1:$regOptRr",
+            // «لیفت» فقط با نمونهٔ کافی، برازش مثبت و امید ریاضی مثبت اعلام می‌شود؛ وگرنه صفر
+            // (بدون ادعا). با دادهٔ ۱۶۰ معامله‌ای ۱-برد، هر لیفت مثبتی ادعای بی‌پایه است.
+            expectedWinRateLiftPct = if (nSamples >= 30 && r2 > 0.20 && meanTarget > 0.0) {
+                round(r2 * 11.5 * 10.0) / 10.0
+            } else 0.0,
+            expectedRLiftPerTrade = if (nSamples >= 30 && r2 > 0.20 && meanTarget > 0.0) {
+                round(r2 * 0.49 * 100.0) / 100.0
+            } else 0.0,
+            // این دو متن از **مقادیر نهایی** (اعمال‌شده یا پیشین) ساخته می‌شوند، نه از خروجی خام
+            // رگرسیون؛ وگرنه گزارش یک عدد می‌نوشت و موتور عدد دیگری اجرا می‌کرد.
+            optimalStopLossCorridorFa = "دالان حد ضرر: [${appliedMap["minSlDistanceAtr"]} ATR .. ${appliedMap["maxSlDistanceAtr"]} ATR] · بافر ${appliedMap["slBufferAtr"]} ATR پشت فرکتال ۵ کندلی + کیجون۲۶",
+            optimalRrCorridorFa = "همین حالا اجرا می‌شود: کف R:R = 1:${appliedMap["minRiskReward"]} · هدف = 1:${appliedMap["optimalRiskRewardTarget"]} (سقف قفل‌شده 1:3.00)",
             parameterRows = paramRows,
             featureSlopes = featureSlopes,
+            parametersApplied = appliedCount,
+            significantFeatures = featureSlopes.count { it.tStat.isFinite() && abs(it.tStat) >= 1.96 },
+            fitQualityVerdictFa = when {
+                nSamples < 30 -> "نمونه کافی نیست ($nSamples < ۳۰) — هیچ پارامتری اعمال نشد"
+                !r2.isFinite() -> "هدف تنوع ندارد (SST≈۰) — رگرسیون بی‌معناست"
+                r2 <= 0.02 -> "R² = ${String.format(Locale.US, "%.3f", r2)} — مدل قدرت توضیح‌دهی ندارد؛ پارامترها اعمال نشدند"
+                else -> "R² = ${String.format(Locale.US, "%.3f", r2)} — مدل ضعیف ولی معنادار؛ فقط ضرایب با |t| ≥ ۱٫۹۶ اعمال شدند"
+            },
             regressionDiagnosticNotesFa = notes,
             computedAtMs = nowMs,
         )
@@ -3784,12 +4068,10 @@ class NeuralSelfLearningEngine(
         updatedAtMs: Long,
     ): PerSymbolNeuralTuningProfile {
         val assetClass = AssetClass.of(symbol)
-        val wrDefault = when (assetClass) {
-            AssetClass.CRYPTO -> 64.0
-            AssetClass.COMMODITY -> 66.0
-            AssetClass.FOREX -> 58.0
-            AssetClass.STOCK -> 60.0
-        }
+        // بدون نمونهٔ اختصاصی نماد، نرخ برد و اعتبار شکست «نامعلوم» است (۰)، نه یک عدد
+        // خوش‌بینانهٔ ثابت. شواهد ۱۶۰ معامله‌ای نشان داد همان نمادها با «نرخ برد ۶۴–۶۶٪»
+        // گزارش می‌شدند در حالی که نرخ واقعی برخی ۰٪ بود.
+        val wrDefault = 0.0
         val trendDefault = when (assetClass) {
             AssetClass.CRYPTO -> 58.0
             AssetClass.COMMODITY -> 62.0
@@ -3830,7 +4112,7 @@ class NeuralSelfLearningEngine(
             ownSamples = 0,
             samplesAnalyzed = 0,
             winRatePct = wrDefault,
-            expectedProfitFactor = 2.20,
+            expectedProfitFactor = 0.0,
             avgRMultiple = 0.0,
             posteriorWinProbPct = 50.0,
             minRiskReward = max(1.5, auto.minRiskReward),
@@ -3843,7 +4125,9 @@ class NeuralSelfLearningEngine(
             minDriveBooksConsensus = auto.minDriveBooksConsensus.coerceIn(4, 9),
             trendPersistencePct = trendDefault,
             wickNoisePct = wickDefault,
-            breakoutReliabilityPct = wrDefault,
+            // اعتبار شکست هم مثل نرخ برد تا رسیدن نمونهٔ اختصاصی «نامعلوم» است؛ پیش از این
+            // همان نرخ برد ساختگی کلاس دارایی به‌عنوان «اعتبار شکست» چاپ می‌شد.
+            breakoutReliabilityPct = 0.0,
             decisionStyleFa = when (assetClass) {
                 AssetClass.CRYPTO -> "پرنوسان (پیش‌فرض کلاس رمزارز)"
                 AssetClass.COMMODITY -> "پناهگاه امن روندی (پیش‌فرض فلزات)"
@@ -4062,6 +4346,11 @@ class NeuralSelfLearningEngine(
             breakoutBufferAtr = t.breakoutBufferAtr.coerceIn(0.08, 0.30),
             minEfficiencyRatio = t.minEfficiencyRatio.coerceIn(0.18, 0.36),
             minVolumeRatio20 = t.minVolumeRatio20.coerceIn(0.50, 0.95),
+            // سقف نقطه‌زنی: سخت‌گیرانه‌تر از پیش‌فرض (۰٫۳۵) هرگز از تیونینگ پذیرفته نمی‌شود.
+            maxSniperDistanceAtr = minOf(
+                baseConfig.maxSniperDistanceAtr,
+                t.maxSniperDistanceAtr.coerceIn(0.20, 0.55),
+            ),
             minDriveBooksConsensus = t.minDriveBooksConsensus.coerceIn(5, 8),
             autoTunedGeneration = t.tuningGeneration,
             perStrategyOverrides = overrides,
@@ -4074,7 +4363,21 @@ class NeuralSelfLearningEngine(
         cur: NeuralNetworkPersistedState,
         existingProfile: PerStrategyNeuralTuningProfile?,
     ): PerStrategyNeuralTuningProfile {
-        val baseDefault = buildDefaultProfileForStrategy(model, cur.attentionWeights, cur.headWinWeights)
+        val knownForModel = cur.replayBuffer.filter {
+            BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == model.id
+        }
+        val knownRate = if (knownForModel.isNotEmpty()) {
+            round((knownForModel.count { it.won }.toDouble() / knownForModel.size.toDouble()) * 1000.0) / 10.0
+        } else {
+            0.0
+        }
+        val baseDefault = buildDefaultProfileForStrategy(
+            model = model,
+            attnWeights = cur.attentionWeights,
+            winWeights = cur.headWinWeights,
+            knownWinRatePct = knownRate,
+            knownSamples = knownForModel.size,
+        )
         val stratSamples = cur.replayBuffer.filter {
             BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == model.id
         }
@@ -4156,21 +4459,31 @@ class NeuralSelfLearningEngine(
         }
 
         val nextGen = (existingProfile?.tuningGeneration ?: 1) + 1
-        val expectedWr = round(max(68.0, wrRaw + 6.5).coerceAtMost(88.5) * 10.0) / 10.0
-        val expectedPf = round(max(2.35, (expectedWr / (100.0 - expectedWr)) * 1.40).coerceAtMost(4.20) * 100.0) / 100.0
+        // نرخ برد و پروفیت فاکتور «اندازه‌گیری» می‌شوند؛ کف مصنوعی ۶۸٪/۲.۳۵ حذف شد چون باعث می‌شد
+        // با ۰٪ برد واقعی هم سیستم سالم به‌نظر برسد.
+        val measuredWr = round(wrRaw.coerceIn(0.0, 100.0) * 10.0) / 10.0
+        val measuredPf = if (wins.isNotEmpty() && losses.isNotEmpty()) {
+            val grossWin = wins.sumOf { it.achievedR.coerceAtLeast(0.0) }
+            val grossLoss = losses.sumOf { abs(it.achievedR).coerceAtLeast(1e-6) }
+            round((grossWin / grossLoss) * 100.0) / 100.0
+        } else {
+            0.0
+        }
 
         return baseDefault.copy(
             tuningGeneration = nextGen,
             samplesAnalyzed = stratSamples.size,
-            winRatePct = expectedWr,
-            expectedProfitFactor = expectedPf,
+            winRatePct = measuredWr,
+            expectedProfitFactor = measuredPf,
             minRiskReward = tunedMinRr,
             maxKijunExtensionAtr = round(tunedMaxKijun * 100.0) / 100.0,
             slBufferAtr = round(tunedSlBuf * 100.0) / 100.0,
             minEfficiencyRatio = tunedMinEr,
             neuralWinProbGatePct = tunedGate,
             featureTunings = tunedFeatures,
-            tuningSummaryFa = "پروفایل اختصاصی ${model.badgeFa} (نسل #$nextGen): تمام ۱۶ ویژگی + پارامترها تیون شدند (R:R≥1:$tunedMinRr · کیجون≤${String.format(Locale.US, "%.2f", tunedMaxKijun)}ATR · امید برد=${expectedWr}%).",
+            tuningSummaryFa = "پروفایل اختصاصی ${model.badgeFa} (نسل #$nextGen): تمام ۱۶ ویژگی + پارامترها تیون شدند " +
+                "(R:R≥1:$tunedMinRr · کیجون≤${String.format(Locale.US, "%.2f", tunedMaxKijun)}ATR · " +
+                "نرخ برد اندازه‌گیری‌شده=${measuredWr}% روی ${stratSamples.size} نمونه · PF=$measuredPf).",
         )
     }
 
@@ -4228,9 +4541,9 @@ class NeuralSelfLearningEngine(
                         val l = list.size - w
                         val thompsonMean = (w + 2.0) / (w + l + 3.0)
                         thompsonMean * (1.0 + list.map { it.achievedR }.average().coerceAtLeast(-0.5) * 0.35)
-                    }?.key ?: BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
+                    }?.key ?: BitcoinStrategyModel.BASE_ICHIMOKU.id
             } else {
-                BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
+                BitcoinStrategyModel.BASE_ICHIMOKU.id
             }
             ac.code to bestId
         }
@@ -4242,8 +4555,30 @@ class NeuralSelfLearningEngine(
         }
 
         val nextGen = cur.autoTunedParameters.tuningGeneration + 1
-        val expectedWr = round(max(68.5, wrPct + 9.5).coerceAtMost(88.0) * 10.0) / 10.0
-        val expectedPf = round(max(2.35, (expectedWr / (100.0 - expectedWr)) * 1.45).coerceAtMost(4.20) * 100.0) / 100.0
+        // عدد اندازه‌گیری‌شده از دادهٔ واقعی (بدون کف مصنوعی).
+        val measuredWr = round(wrPct.coerceIn(0.0, 100.0) * 10.0) / 10.0
+        // «کاهش سیگنال کاذب» قبلاً عدد ثابت ۳۶٫۵٪ بود؛ اکنون همان سهم نمونه‌هایی است که
+        // واقعاً در خوشه‌های «ورود ممنوع» افتاده‌اند.
+        val blockedSamples = cur.conditionClusters.values
+            .filter { it.isFlaggedNoTradeRegime }
+            .sumOf { it.totalCount }
+        val blockedSharePct = if (samples.isNotEmpty()) {
+            round((blockedSamples.toDouble() / samples.size.toDouble()) * 100.0 * 10.0) / 10.0
+        } else {
+            0.0
+        }
+        val measuredPf = if (samples.isNotEmpty()) {
+            val grossWin = samples.filter { it.won }.sumOf { it.achievedR.coerceAtLeast(0.0) }
+            val grossLoss = samples.filter { !it.won }.sumOf { abs(it.achievedR).coerceAtLeast(1e-6) }
+            if (grossLoss > 0.0) round((grossWin / grossLoss) * 100.0) / 100.0 else 0.0
+        } else {
+            0.0
+        }
+        val measuredExpR = if (samples.isNotEmpty()) {
+            round(samples.sumOf { it.achievedR } / samples.size.toDouble() * 100.0) / 100.0
+        } else {
+            0.0
+        }
 
         val changeLog = listOf(
             "🎯 حداقل R:R بهینه روی 1:${String.format(Locale.US, "%.2f", tunedMinRr)} تنظیم شد (حداقل قانون پایه 1:1.5 حفظ و بهینه گردید).",
@@ -4255,13 +4590,16 @@ class NeuralSelfLearningEngine(
 
         val summaryFa = String.format(
             Locale.US,
-            "نسل #%d تیونینگ خودکار (CEM + Bayesian): R:R≥1:%.2f · سقف کیجون=%.2f ATR · بافر استاپ=%.2f ATR · اجماع ساختاری=%d/9 لایه · امید برد=%.1f%%",
+            "نسل #%d تیونینگ خودکار (CEM + Bayesian): R:R≥1:%.2f · سقف کیجون=%.2f ATR · بافر استاپ=%.2f ATR · " +
+                "اجماع ساختاری=%d/9 لایه · نرخ برد اندازه‌گیری‌شده=%.1f%% · امید ریاضی=%+.2fR روی %d نمونه",
             nextGen,
             tunedMinRr,
             tunedMaxKijunExt,
             tunedSlBuffer,
             tunedConsensus,
-            expectedWr,
+            measuredWr,
+            measuredExpR,
+            samples.size,
         )
 
         val existingMap = ensurePerStrategyProfiles(cur.autoTunedParameters, cur).perStrategyProfiles
@@ -4294,9 +4632,9 @@ class NeuralSelfLearningEngine(
             minVolumeRatio20 = 0.65,
             minDriveBooksConsensus = tunedConsensus,
             neuralWinProbGatePct = tunedGatePct,
-            expectedWinRatePct = expectedWr,
-            expectedProfitFactor = expectedPf,
-            falsePositiveReductionPct = 36.5,
+            expectedWinRatePct = measuredWr,
+            expectedProfitFactor = measuredPf,
+            falsePositiveReductionPct = blockedSharePct,
             bestStrategyByCategory = bestStratByCat,
             tuningSummaryFa = summaryFa,
             parameterChangeLogFa = changeLog,

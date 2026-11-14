@@ -124,7 +124,9 @@ class JournalExportEngineTest {
         assertEquals(2, report.longTradesCount)
         assertEquals(1, report.shortTradesCount)
         assertEquals(4, report.equityCurve.size) // baseline + 3 closed trades
-        assertTrue(report.strategyLeaderboard.size >= 15)
+        // از ۳.۹.۷۴ فقط ۵ مدل استراتژی وجود دارد؛ انتظار «۱۵ ردیف» از دوران ۱۹ مدل مانده بود
+        // و همین باعث شکست آزمون می‌شد، نه خودِ گزارش. عدد به منبع حقیقت گره خورد.
+        assertTrue(report.strategyLeaderboard.size >= com.aurum.edge.core.BitcoinStrategyModel.entries.size)
         assertEquals(15, report.symbolLeaderboard.size)
     }
 

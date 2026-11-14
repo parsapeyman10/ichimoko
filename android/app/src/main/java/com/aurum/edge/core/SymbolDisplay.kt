@@ -108,10 +108,4 @@ object SymbolDisplay {
         return if (name == k) k else "$name · $k"
     }
 
-    /** آیا برای این نماد نام شاخص ثبت شده است. */
-    fun hasIndexName(symbol: String): Boolean {
-        val k = key(symbol)
-        return NAMES_FA.containsKey(k) || CRYPTO_NAMES_FA.containsKey(k) ||
-            (k.contains("/") && CRYPTO_NAMES_FA.containsKey(k.substringBefore("/")))
-    }
 }

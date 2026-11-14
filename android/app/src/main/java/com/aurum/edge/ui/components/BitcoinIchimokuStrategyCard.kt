@@ -44,6 +44,7 @@ import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.DualTimeframeSymbolReport
 import com.aurum.edge.core.driveBookPlaybook
+import com.aurum.edge.core.isDrivePdfStrategy
 import com.aurum.edge.core.formatLiveBookTelemetryFa
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PriceTick
@@ -100,11 +101,7 @@ fun BitcoinIchimokuStrategyCard(
     val selectedId = settings.selectedBitcoinStrategyId
     val selectedChecklistCount = dualReports[focusedSymbol]
         ?.reportFor(focusedInterval, selectedId)?.conditions?.size
-        ?: when (selectedId) {
-            BitcoinStrategyModel.BTC_52_CANDLE_REGIME.id -> 10
-            BitcoinStrategyModel.PARSA_52_LINE_TURN.id -> 9
-            else -> 16
-        }
+        ?: 17
     val executionEnabled = settings.autoPaperTrading
     val activeTitle = settings.activeBitcoinStrategyTitleFa()
     val currentConfig = settings.activeBitcoinStrategyConfig()
@@ -257,39 +254,6 @@ fun BitcoinIchimokuStrategyCard(
             )
         }
 
-        // ── لایهٔ اختیاری نئوویو (NeoWave) ─────────────────────────────────────
-        Text(
-            "توجه: لایهٔ نئوویو–الیوت فقط در «استراتژی ۱۶» ادغام می‌شود؛ هیچ روش دیگری محاسبهٔ نئوویو ندارد.",
-            style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.TextMuted,
-            modifier = Modifier.padding(bottom = 4.dp),
-        )
-        val focusedReportForNeoWave = dualReports[focusedSymbol]?.reportFor(focusedInterval, selectedId) ?: report
-        NeoWaveOptionCard(
-            // لایهٔ نئوویو–الیوت به‌صورت داخلی در استراتژی ۱۶ ادغام شده و کلید کاربر ندارد.
-            enabled = true,
-            minRulesPassed = settings.baseStrategyConfig.neoWaveMinRulesPassed,
-            minConfidencePct = settings.baseStrategyConfig.neoWaveMinConfidencePct,
-            statusBadge = focusedReportForNeoWave?.neoWaveBadgeFa.orEmpty(),
-            onToggle = { on ->
-                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveEnabled = on))
-            },
-            onRulesChange = { rules ->
-                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveMinRulesPassed = rules))
-            },
-            onConfidenceChange = { pct ->
-                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveMinConfidencePct = pct))
-            },
-            autoTuneEnabled = settings.baseStrategyConfig.neoWaveAutoTuneEnabled,
-            autoRules = settings.baseStrategyConfig.neoWaveAutoRules,
-            autoConfidencePct = settings.baseStrategyConfig.neoWaveAutoConfidencePct,
-            autoSamples = settings.baseStrategyConfig.neoWaveAutoSamples,
-            autoBasisFa = settings.baseStrategyConfig.neoWaveAutoBasisFa,
-            onAutoTuneToggle = { on ->
-                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveAutoTuneEnabled = on))
-            },
-            onRetrainNeural = { viewModel.retrainNeoWaveNeuralTuningNow() },
-        )
     }
 }
 
@@ -493,7 +457,7 @@ private fun Live12ConditionChecklistPage(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             allItems.forEach { item ->
-                // استراتژی ۱۶ (پیمان) موقتاً غیرفعال است؛ گزارش جایگزین اشتباه نمایش داده نمی‌شود.
+                // استراتژی خاموش: گزارش جایگزین اشتباه نمایش داده نمی‌شود.
                 val repStrat = if (item.isTemporarilyDisabled) null else dualReport?.reportFor(focusedInterval, item.id)
                 val shortState = if (item.isTemporarilyDisabled) "موقتاً غیرفعال" else repStrat?.readinessShortFa() ?: ""
                 Pill(
@@ -525,11 +489,7 @@ private fun Live12ConditionChecklistPage(
         }
 
         if (report == null) {
-            val expectedChecklistCount = when (selectedStrategyId) {
-                BitcoinStrategyModel.BTC_52_CANDLE_REGIME.id -> 10
-                BitcoinStrategyModel.PARSA_52_LINE_TURN.id -> 9
-                else -> 16
-            }
+            val expectedChecklistCount = 17
             Text(
                 text = "در حال محاسبه چک‌لیست $expectedChecklistCount شرطی $focusedSymbol (${focusedInterval.label})...",
                 style = MaterialTheme.typography.labelSmall,
@@ -694,21 +654,8 @@ private fun Live12ConditionChecklistPage(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
-                if (report.kijunGateFa.isNotBlank()) {
-                    Text(
-                        text = "🎯 گیت کیجون (استراتژی ۱۶): ${report.kijunGateFa}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (report.kijunGateFa.startsWith("✅")) AurumColors.Green else AurumColors.Orange,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                if (report.kijunStopRuleFa.isNotBlank()) {
-                    Text(
-                        text = "📏 قاعدهٔ حد ضرر کیجون: ${report.kijunStopRuleFa}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.Cyan,
-                    )
-                }
+                // «گیت کیجون» و «قاعدهٔ حد ضرر کیجون» با حذف استراتژی ۱۶ از گزارش پاک شدند؛
+                // این دو بلوک فیلدهای ناموجود را صدا می‌زدند و کل کامپایل UI را می‌شکستند.
                 report.waveProjection?.let { w ->
                     Text(
                         text = "TP1(V): ${formatPrice(w.targetV)} · TP2(N): ${formatPrice(w.targetN)} · TP3(E): ${formatPrice(w.targetE)} · NT: ${formatPrice(w.targetNT)}",
@@ -1213,7 +1160,10 @@ internal fun BaseStrategyRefinementPanel(
         RuleToggleRow("شیب و ضخامت ابر آینده (Future Kumo)", requireFutureKumo) { requireFutureKumo = it }
         RuleToggleRow("ماشه ۱: پولبک کیجون/تنکان/S-Point", enablePullback) { enablePullback = it }
         RuleToggleRow("ماشه ۲: شکست کومو و سقف چیکو", enableBreakout) { enableBreakout = it }
-        RuleToggleRow("سیو سود خودکار (Preserve Mode)", enablePreserve) { enablePreserve = it }
+        RuleToggleRow(
+            "سیو سود خودکار (ریسک‌فری در +۱R · قفل سود روی تنکان در +۲R)",
+            enablePreserve,
+        ) { enablePreserve = it }
 
         Button(
             onClick = {

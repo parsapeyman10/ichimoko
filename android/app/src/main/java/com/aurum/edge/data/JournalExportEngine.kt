@@ -12,6 +12,11 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextDirectionHeuristics
+import android.text.TextPaint
+import android.text.TextUtils
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -81,7 +86,7 @@ enum class JournalExportFormat(
     JSON_QUANT(
         id = "json",
         titleFa = "🧬 خروجی کوانت و هوش مصنوعی (Structured JSON)",
-        subtitleFa = "ساختار کامل متریک‌های آماری، لیدربورد ۲۴ استراتژی (۱۵ ترکیب + ۹ لایهٔ ساختاری)، منحنی سرمایه و آرایه معاملات",
+        subtitleFa = "ساختار کامل متریک‌های آماری، لیدربورد مدل‌های ایچیموکو، منحنی سرمایه و آرایه معاملات",
         extension = "json",
         mimeType = "application/json",
     ),
@@ -456,7 +461,7 @@ object JournalExportEngine {
         val (tf15Cnt, tf15Wr, tf15PfNet) = tfMetrics(Interval.M15)
         val (tf5Cnt, tf5Wr, tf5PfNet) = tfMetrics(Interval.M5)
 
-        // Strategy Leaderboard across all 15 built-in combinations + customs
+        // Strategy Leaderboard: هر مدل فعال (BitcoinStrategyModel.entries) + استراتژی‌های سفارشی
         val strategyMeta = LinkedHashMap<String, Pair<String, String>>()
         BitcoinStrategyModel.entries.forEach { m ->
             strategyMeta[m.id] = m.titleFa to m.badgeFa
@@ -1000,11 +1005,6 @@ function filterRows() {
         outputFile: File,
         context: Context? = null,
     ) {
-        if (context != null && report.trades.isNotEmpty()) {
-            runCatching {
-                TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(context, report.trades)
-            }
-        }
         val doc = PdfDocument()
         try {
             val pageW = 842 // A4 Landscape width in points
@@ -1181,83 +1181,7 @@ function filterRows() {
                 doc.finishPage(page)
             }
 
-            // ── Visual Archive Screenshot Pages: Ichimoku Chart Snapshot for Every Trade ──
-            val sortedTradesForSnapshots = report.trades.sortedBy { it.displayTradeNumber }
-            val tradeBasedSnapshots = sortedTradesForSnapshots.flatMap { t ->
-                val existing = TradeSnapshotArchiveManager.recordsForTrade(t.id)
-                if (existing.isNotEmpty()) {
-                    existing
-                } else {
-                    buildList {
-                        add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = false))
-                        if (!t.isOpen) {
-                            add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = true))
-                        }
-                    }
-                }
-            }
-            val snapshotRecords = if (tradeBasedSnapshots.isNotEmpty()) {
-                tradeBasedSnapshots
-            } else {
-                TradeSnapshotArchiveManager.records.value.sortedBy { it.displayTradeNumber }
-            }
-            val snapChunks = snapshotRecords.chunked(2)
-            snapChunks.forEachIndexed { idx, pair ->
-                val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, currentPageNumber++).create()
-                val page = doc.startPage(pInfo)
-                val c = page.canvas
-                val bitmapsToRecycle = mutableListOf<android.graphics.Bitmap>()
-                c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
-                c.drawText(
-                    "Visual Ichimoku Archive Screenshots — Sheet ${idx + 1} of ${snapChunks.size} (${snapshotRecords.size} Total Snapshots)",
-                    24f,
-                    28f,
-                    titlePaint,
-                )
-                pair.forEachIndexed { slotIdx, rec ->
-                    val slotLeft = if (slotIdx == 0) 20f else 426f
-                    val slotRight = if (slotIdx == 0) 416f else 822f
-                    val cardRect = RectF(slotLeft, 40f, slotRight, pageH - 18f)
-                    c.drawRoundRect(cardRect, 10f, 10f, cardPaint)
-                    c.drawRoundRect(cardRect, 10f, 10f, borderPaint)
-
-                    val phaseTag = if (rec.isCloseSnapshot) "CLOSE" else "OPEN"
-                    val pnlTag = if (rec.isCloseSnapshot && rec.realizedPnlUsd != null) {
-                        String.format(Locale.US, " | PnL: %+.2f$ (%+.2fR)", rec.realizedPnlUsd, rec.realizedRMultiple ?: 0.0)
-                    } else {
-                        String.format(Locale.US, " | Risk: -$%.2f -> Target: +$%.2f", rec.fixedRiskUsd, rec.expectedProfitUsd)
-                    }
-                    c.drawText(
-                        "Trade #${rec.displayTradeNumber} [$phaseTag] · ${rec.symbol} (${rec.timeframeLabel}) · ${rec.action}",
-                        slotLeft + 10f,
-                        58f,
-                        headerCellPaint,
-                    )
-                    c.drawText(
-                        "Entry: ${rec.entryPrice} | Fixed SL: ${rec.stopLossPrice} | TP: ${rec.takeProfitPrice} | R:R 1:${String.format(Locale.US, "%.2f", rec.riskReward.coerceIn(1.5, 3.0))}$pnlTag",
-                        slotLeft + 10f,
-                        73f,
-                        cellPaint,
-                    )
-                    c.drawText(
-                        "Strategy: ${rec.strategyTitleFa} (${rec.strategyId})",
-                        slotLeft + 10f,
-                        87f,
-                        subPaint,
-                    )
-
-                    val bmp = runCatching {
-                        TradeSnapshotArchiveManager.loadOrRenderSnapshotBitmap(rec)
-                    }.getOrNull()
-                    if (bmp != null && !bmp.isRecycled) {
-                        val dstRect = RectF(slotLeft + 8f, 96f, slotRight - 8f, pageH - 26f)
-                        c.drawBitmap(bmp, null, dstRect, null)
-                        bitmapsToRecycle += bmp
-                    }
-                }
-                doc.finishPage(page)
-                bitmapsToRecycle.forEach { b -> runCatching { b.recycle() } }
-            }
+            // فقط داده و جدول عددی؛ هیچ صفحهٔ تصویری در PDF نیست.
 
             outputFile.parentFile?.mkdirs()
             FileOutputStream(outputFile).use { out ->
@@ -1291,15 +1215,11 @@ function filterRows() {
             report.sqnScore,
         )
         lines += "----------------------------------------------------------------------------------------"
-        val tradeIds = report.trades.map { it.id }.toSet()
-        val snapshots = TradeSnapshotArchiveManager.records.value.filter { it.tradeId in tradeIds }
         report.trades.forEachIndexed { idx, t ->
             val fixedSl = t.initialStopLoss ?: t.stopLoss
-            val openSnap = snapshots.firstOrNull { it.tradeId == t.id && !it.isCloseSnapshot }
-            val closeSnap = snapshots.firstOrNull { it.tradeId == t.id && it.isCloseSnapshot }
             lines += String.format(
                 Locale.US,
-                "#%d | %s (%s) | %s | Entry: %.2f | Fixed SL: %.2f | TP: %.2f | Init R:R: 1:%.2f | PnL: %s | Archive: OPEN=%s CLOSE=%s",
+                "#%d | %s (%s) | %s | Entry: %.2f | Fixed SL: %.2f | TP: %.2f | Init R:R: 1:%.2f | PnL: %s",
                 t.tradeNumber.takeIf { it > 0 } ?: (idx + 1),
                 t.symbol,
                 t.interval.label,
@@ -1309,8 +1229,6 @@ function filterRows() {
                 t.takeProfit,
                 t.riskReward,
                 t.pnlUsd?.let { String.format(Locale.US, "%s$%.2f", if (it >= 0) "+" else "-", abs(it)) } ?: "OPEN",
-                openSnap?.localImagePath?.substringAfterLast('/') ?: "GENERATED",
-                closeSnap?.localImagePath?.substringAfterLast('/') ?: if (t.isOpen) "PENDING" else "GENERATED",
             )
         }
         val streamContent = buildString {
@@ -1461,162 +1379,6 @@ function filterRows() {
         saveBytesToPhoneStorage(context, localFile.name, format.mimeType, bytes)
     }
 
-    /**
-     * تولید و ذخیره مستقیم فایل PDF اختصاصی «آرشیو اسکرین‌شات تمام معاملات (باز و بسته)» با کیفیت بالا و حجم بهینه.
-     */
-    fun exportArchiveScreenshotsPdf(
-        context: Context,
-        trades: List<PaperTrade>,
-        nowMs: Long = System.currentTimeMillis(),
-    ): Result<Pair<File, String>> = runCatching {
-        if (trades.isNotEmpty()) {
-            runCatching {
-                TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
-                    context = context,
-                    trades = trades,
-                    maxTrades = 120,
-                    saveToPhoneGallery = false,
-                )
-            }
-        }
-        val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
-        val stamp = fileStampFmt.format(Instant.ofEpochMilli(nowMs))
-        val outFile = File(exportDir, "AurumEdge_Archive_Screenshots_$stamp.pdf")
-
-        val allArchiveRecs = TradeSnapshotArchiveManager.records.value.sortedBy { it.displayTradeNumber }
-        val tradeFallbackRecs = trades.sortedBy { it.displayTradeNumber }.flatMap { t ->
-            val existing = allArchiveRecs.filter { it.tradeId == t.id }
-            if (existing.isNotEmpty()) {
-                existing
-            } else {
-                buildList {
-                    add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = false))
-                    if (!t.isOpen) {
-                        add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = true))
-                    }
-                }
-            }
-        }
-        val mergedSnapshots = (tradeFallbackRecs + allArchiveRecs)
-            .distinctBy { "${it.tradeId}_${it.snapshotPhase}" }
-            .sortedWith(compareBy<ArchivedTradeSnapshotRecord> { it.displayTradeNumber }.thenBy { it.isCloseSnapshot })
-
-        val doc = PdfDocument()
-        try {
-            val pageW = 842
-            val pageH = 595
-            val bgPaint = Paint().apply { color = Color.rgb(11, 15, 23) }
-            val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(18, 25, 38) }
-            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(243, 198, 95)
-                style = Paint.Style.STROKE
-                strokeWidth = 1.2f
-            }
-            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(243, 198, 95)
-                textSize = 15f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            }
-            val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(56, 189, 248)
-                textSize = 10.5f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            }
-            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(235, 240, 248)
-                textSize = 9.5f
-            }
-            val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(160, 174, 192)
-                textSize = 8.8f
-            }
-
-            if (mergedSnapshots.isEmpty()) {
-                val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, 1).create()
-                val page = doc.startPage(pInfo)
-                val c = page.canvas
-                c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
-                c.drawRoundRect(RectF(28f, 28f, pageW - 28f, 120f), 12f, 12f, cardPaint)
-                c.drawText("AURUM EDGE — TRADE SNAPSHOT ARCHIVE PDF REPORT", 44f, 60f, titlePaint)
-                c.drawText("Generated: ${formatTimestamp(nowMs)} | No archived trade snapshots yet — open a trade to capture its Ichimoku snapshot.", 44f, 88f, textPaint)
-                doc.finishPage(page)
-            } else {
-                val chunks = mergedSnapshots.chunked(2)
-                chunks.forEachIndexed { pageIdx, pair ->
-                    val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, pageIdx + 1).create()
-                    val page = doc.startPage(pInfo)
-                    val c = page.canvas
-                    val bitmapsOnPage = mutableListOf<android.graphics.Bitmap>()
-                    c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
-                    c.drawText(
-                        "AURUM EDGE — ARCHIVE SCREENSHOTS PDF (${mergedSnapshots.size} Snapshots) · Page ${pageIdx + 1} of ${chunks.size} · Generated: ${formatTimestamp(nowMs)}",
-                        24f,
-                        26f,
-                        titlePaint,
-                    )
-                    pair.forEachIndexed { slotIdx, rec ->
-                        val slotLeft = if (slotIdx == 0) 20f else 426f
-                        val slotRight = if (slotIdx == 0) 416f else 822f
-                        val cardRect = RectF(slotLeft, 36f, slotRight, pageH - 16f)
-                        c.drawRoundRect(cardRect, 10f, 10f, cardPaint)
-                        c.drawRoundRect(cardRect, 10f, 10f, borderPaint)
-
-                        val phaseTag = if (rec.isCloseSnapshot) "CLOSED" else "OPENED"
-                        val clampedRr = rec.riskReward.coerceIn(1.50, 3.00)
-                        val pnlStr = if (rec.isCloseSnapshot && rec.realizedPnlUsd != null) {
-                            String.format(Locale.US, " | Net PnL: %+.2f$ (%+.2fR)", rec.realizedPnlUsd, (rec.realizedRMultiple ?: 0.0).coerceIn(-1.5, 3.0))
-                        } else {
-                            String.format(Locale.US, " | Fixed Risk: -$%.2f | Target: +$%.2f", rec.fixedRiskUsd, rec.expectedProfitUsd)
-                        }
-                        c.drawText(
-                            "Trade #${rec.displayTradeNumber} [$phaseTag] · ${rec.symbol} (${rec.timeframeLabel}) · ${rec.action}",
-                            slotLeft + 10f,
-                            54f,
-                            headerPaint,
-                        )
-                        c.drawText(
-                            "Entry: ${rec.entryPrice} | Structural SL: ${rec.stopLossPrice} | TP: ${rec.takeProfitPrice} | R:R 1:${String.format(Locale.US, "%.2f", clampedRr)}$pnlStr",
-                            slotLeft + 10f,
-                            69f,
-                            textPaint,
-                        )
-                        c.drawText(
-                            "Strategy: ${rec.strategyTitleFa} (${rec.strategyId}) | Badge: ${rec.strategyBadgeFa}",
-                            slotLeft + 10f,
-                            83f,
-                            subPaint,
-                        )
-
-                        val bmp = runCatching {
-                            TradeSnapshotArchiveManager.loadOrRenderSnapshotBitmap(rec)
-                        }.getOrNull()
-                        if (bmp != null && !bmp.isRecycled) {
-                            val dstRect = RectF(slotLeft + 8f, 92f, slotRight - 8f, pageH - 24f)
-                            c.drawBitmap(bmp, null, dstRect, null)
-                            bitmapsOnPage += bmp
-                        }
-                    }
-                    doc.finishPage(page)
-                    bitmapsOnPage.forEach { b -> runCatching { b.recycle() } }
-                }
-            }
-
-            FileOutputStream(outFile).use { out -> doc.writeTo(out) }
-        } catch (_: Throwable) {
-            val dummyReport = buildInstitutionalTearSheet(trades)
-            writePortablePdfFallback(dummyReport, outFile)
-        } finally {
-            runCatching { doc.close() }
-        }
-
-        val savedPath = saveBytesToPhoneStorage(
-            context = context,
-            fileName = outFile.name,
-            mimeType = JournalExportFormat.PDF_REPORT.mimeType,
-            bytes = outFile.readBytes(),
-        )
-        outFile to savedPath
-    }
 
     /**
      * تولید فایل PDF جامع «تمام دیتاهای هوش مصنوعی، شبکه عصبی خودآموز و رگرسیون ماتریسی پارامترها»
@@ -1648,6 +1410,55 @@ function filterRows() {
         outFile to savedPath
     }
 
+    /**
+     * رسم متن **شکل‌گرفته** (RTL درست) با برش در عرض ستون.
+     *
+     * چرا لازم شد؟ پیش‌ازاین همه‌چیز با `Canvas.drawText` کشیده می‌شد. آن API نه شکل‌دهی
+     * حروف فارسی را انجام می‌دهد (حروف جدا می‌افتند: «کف کیجون» → «کف کسیگدی») و نه
+     * متن بلند را می‌شکند؛ نتیجه، متن‌های به‌هم‌ریخته و عددهایی بود که روی ستون بعدی می‌افتادند
+     * (`1:2.11` خوانده می‌شد `1.2:11`). `StaticLayout` همان موتور متن اندروید است: شکل‌دهی،
+     * دوجهته (bidi) و `Ellipsize` را با هم انجام می‌دهد.
+     */
+    private fun drawTextFitted(
+        canvas: Canvas,
+        text: String,
+        x: Float,
+        y: Float,
+        size: Float,
+        color: Int,
+        bold: Boolean = false,
+        maxWidth: Float = Float.MAX_VALUE,
+        align: Paint.Align = Paint.Align.LEFT,
+    ) {
+        val tp = TextPaint(Paint.ANTI_ALIAS_FLAG)
+        tp.color = color
+        tp.textSize = size
+        tp.typeface = Typeface.create(Typeface.SANS_SERIF, if (bold) Typeface.BOLD else Typeface.NORMAL)
+        tp.textAlign = align
+        val width = max(8, maxWidth.toInt().takeIf { it != Int.MAX_VALUE } ?: 4096)
+        val b = StaticLayout.Builder.obtain(text, 0, text.length, tp, width)
+            .setMaxLines(1)
+            .setEllipsize(TextUtils.TruncateAt.END)
+            .setTextDirection(if (text.any { it in '\u0600'..'\u06FF' }) TextDirectionHeuristics.RTL else TextDirectionHeuristics.LTR)
+            .setIncludePad(false)
+            .build()
+        canvas.save()
+        canvas.translate(x, y)
+        b.draw(canvas)
+        canvas.restore()
+    }
+
+    /**
+     * گزارش جامع AI + شبکهٔ عصبی + رگرسیون پارامترها.
+     *
+     * اصول این نسخه (پس از ممیزی گزارش ۱۴۰۳/۰۸/۲۴):
+     *  • هر عددی که چاپ می‌شود، **محاسبه** شده است یا «—» است؛ هیچ t یا بازهٔ اطمینان دستی نیست.
+     *  • R² با سه رقم اعشار و می‌تواند منفی باشد؛ کنارش قضاوت صریح «اعمال شد / نشد» می‌آید.
+     *  • ستون‌ها عرض ثابت و برش دارند؛ متن فارسی با شکل‌دهی درست چاپ می‌شود.
+     *  • عنوان‌ها از تعداد واقعی ردیف‌ها ساخته می‌شوند (نه «۱۵ نماد» وقتی یک ردیف است).
+     *  • درس‌های معاملاتی شناسهٔ معامله، قیمت ورود/خروج/حد ضرر و R را نشان می‌دهند و
+     *    معاملات خوشه‌ای (چند ورود در یک دقیقه روی یک نماد) علامت می‌خورند.
+     */
     fun writeAiNeuralPdfDocument(
         neuralSummary: NeuralLearningStateSummary,
         lastAiVerdict: AiTradeVerdict?,
@@ -1659,199 +1470,274 @@ function filterRows() {
         try {
             val pageW = 842
             val pageH = 595
-            val bgPaint = Paint().apply { color = Color.rgb(10, 14, 22) }
-            val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(18, 25, 38) }
+            val bg = Color.rgb(10, 14, 22)
+            val card = Color.rgb(18, 25, 38)
+            val border = Color.rgb(65, 85, 118)
+            val gold = Color.rgb(243, 198, 95)
+            val cyan = Color.rgb(56, 189, 248)
+            val white = Color.rgb(232, 238, 246)
+            val muted = Color.rgb(156, 168, 186)
+            val red = Color.rgb(248, 113, 113)
+            val green = Color.rgb(74, 222, 128)
+
+            val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = card }
             val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(65, 85, 118)
-                style = Paint.Style.STROKE
-                strokeWidth = 1f
+                color = border; style = Paint.Style.STROKE; strokeWidth = 1f
             }
-            val goldTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(243, 198, 95)
-                textSize = 15.5f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            fun panel(c: Canvas, l: Float, t: Float, r: Float, b: Float) {
+                c.drawRoundRect(RectF(l, t, r, b), 8f, 8f, cardPaint)
+                c.drawRoundRect(RectF(l, t, r, b), 8f, 8f, borderPaint)
             }
-            val cyanHeaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(56, 189, 248)
-                textSize = 10f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            }
-            val cellPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(232, 238, 246)
-                textSize = 9f
-            }
-            val mutedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(156, 168, 186)
-                textSize = 8.5f
-            }
+            fun f2(v: Double): String = if (v.isFinite()) String.format(Locale.US, "%.2f", v) else "—"
+            fun f3(v: Double): String = if (v.isFinite()) String.format(Locale.US, "%.3f", v) else "—"
+
             val reg = neuralSummary.autoTunedParameters.latestRegressionReport
 
-            // ── Page 1: Executive Neural Brain Summary + Parameter Regression Matrix + Feature Slopes ──
+            // ── صفحهٔ ۱: خلاصهٔ مدل + رگرسیون پارامترها ──────────────────────────
             val p1 = doc.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, 1).create())
             val c1 = p1.canvas
-            c1.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
-            c1.drawRoundRect(RectF(22f, 18f, pageW - 22f, 68f), 10f, 10f, cardPaint)
-            c1.drawText("AURUM EDGE — FULL AI & SELF-LEARNING NEURAL NETWORK + PARAMETER REGRESSION REPORT", 36f, 40f, goldTitlePaint)
-            c1.drawText(
-                "Generated: ${formatTimestamp(nowMs)} | Arch: ${neuralSummary.architectureNameFa} | Gen #${neuralSummary.autoTunedParameters.tuningGeneration} | Learned Trades: ${neuralSummary.totalLearnedTrades} / ${neuralSummary.warmupTargetTrades} | R:R Locked: [1:1.50 .. 1:3.00]",
-                36f,
-                57f,
-                mutedPaint,
+            c1.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), Paint().apply { color = bg })
+            panel(c1, 22f, 16f, pageW - 22f, 64f)
+            drawTextFitted(c1, "AURUM EDGE — NEURAL SELF-LEARNING & PARAMETER REGRESSION", 34f, 26f, 15f, gold, bold = true, maxWidth = 780f)
+            drawTextFitted(
+                c1,
+                "ساخته: ${formatTimestamp(nowMs)} · معماری: ${neuralSummary.architectureNameFa} · نسل #${neuralSummary.autoTunedParameters.tuningGeneration} · " +
+                    "نمونهٔ آموخته: ${neuralSummary.totalLearnedTrades} از ${neuralSummary.warmupTargetTrades}",
+                34f, 46f, 9.5f, muted, maxWidth = 780f,
             )
 
-            // Regression KPI Row
-            val kpiRect = RectF(22f, 76f, pageW - 22f, 128f)
-            c1.drawRoundRect(kpiRect, 8f, 8f, cardPaint)
-            c1.drawRoundRect(kpiRect, 8f, 8f, borderPaint)
-            c1.drawText(
-                "Regression Method: ${reg.regressionMethodFa}   |   R² = ${String.format(Locale.US, "%.2f", reg.rSquared)} (Adj R² = ${String.format(Locale.US, "%.2f", reg.adjustedRSquared)})   |   Walk-Forward RMSE = ${String.format(Locale.US, "%.2f", reg.walkForwardRmse)}   |   Expected Lift: +${reg.expectedWinRateLiftPct}% WR, +${reg.expectedRLiftPerTrade}R/trade",
-                34f,
-                96f,
-                cyanHeaderPaint,
+            // KPI با آمارهٔ واقعی + قضاوت
+            panel(c1, 22f, 72f, pageW - 22f, 138f)
+            drawTextFitted(c1, "اعتبار آماری این برازش", 34f, 82f, 10f, cyan, bold = true, maxWidth = 300f)
+            drawTextFitted(
+                c1,
+                "n = ${reg.samplesCount} · p = ۱۶ · R² = ${f3(reg.rSquared)} · Adj R² = ${f3(reg.adjustedRSquared)} · " +
+                    "RMSE = ${f2(reg.walkForwardRmse)}R · پارامترهای اعمال‌شده: ${reg.parametersApplied} از ${reg.parameterRows.size}",
+                34f, 96f, 9f, white, maxWidth = 780f,
             )
-            c1.drawText(
-                "${reg.optimalStopLossCorridorFa}   |   ${reg.optimalRrCorridorFa}",
-                34f,
-                115f,
-                cellPaint,
+            drawTextFitted(
+                c1,
+                reg.fitQualityVerdictFa.ifBlank { "—" },
+                34f, 110f, 9f,
+                if (reg.parametersApplied > 0) green else red,
+                maxWidth = 780f,
+            )
+            drawTextFitted(
+                c1,
+                "روش: ${reg.regressionMethodFa} · λ = ${f2(reg.ridgeLambda)} · δ = ${f2(reg.huberDelta)} · " +
+                    "لیفت ادعایی: ${f2(reg.expectedWinRateLiftPct)}٪ نرخ برد / ${f2(reg.expectedRLiftPerTrade)}R",
+                34f, 124f, 8.5f, muted, maxWidth = 780f,
             )
 
-            // 10 Regressed Structural Parameters Table
-            c1.drawText("1. World-Class Parameter Regression Table (Ridge L2 + Huber Robust IRLS + Empirical Bayes):", 24f, 148f, goldTitlePaint)
-            var y1 = 166f
-            c1.drawText("Parameter Key / Title", 26f, y1, cyanHeaderPaint)
-            c1.drawText("Prior", 295f, y1, cyanHeaderPaint)
-            c1.drawText("Regressed", 350f, y1, cyanHeaderPaint)
-            c1.drawText("Slope β", 425f, y1, cyanHeaderPaint)
-            c1.drawText("t-Stat", 485f, y1, cyanHeaderPaint)
-            c1.drawText("95% Confidence Corridor", 540f, y1, cyanHeaderPaint)
-            c1.drawText("Unit", 700f, y1, cyanHeaderPaint)
-            y1 += 15f
+            // جدول ۱۰ پارامتر
+            drawTextFitted(c1, "۱) پارامترهای ساختاری — مقدار، خطای معیار، بازهٔ ۹۵٪ و وضعیت اعمال", 24f, 154f, 11f, gold, bold = true, maxWidth = 790f)
+            val cols = floatArrayOf(26f, 214f, 264f, 322f, 366f, 404f, 566f, 640f)
+            val heads = arrayOf("پارامتر", "پیشین", "رگرسیون", "β", "t", "بازهٔ ۹۵٪", "واحد", "اعمال")
+            heads.forEachIndexed { i, h ->
+                val w = (if (i == heads.size - 1) 660f else cols[i + 1]) - cols[i] - 6f
+                drawTextFitted(c1, h, cols[i], 170f, 8.5f, cyan, bold = true, maxWidth = w)
+            }
+            var y = 184f
             reg.parameterRows.forEach { row ->
-                c1.drawText("${row.paramKey} (${row.paramTitleFa.take(28)})", 26f, y1, cellPaint)
-                c1.drawText(String.format(Locale.US, "%.2f", row.priorValue), 295f, y1, cellPaint)
-                c1.drawText(String.format(Locale.US, "%.2f", row.regressedValue), 350f, y1, cyanHeaderPaint)
-                c1.drawText(String.format(Locale.US, "%+.2f", row.slopeBeta), 425f, y1, cellPaint)
-                c1.drawText(String.format(Locale.US, "%+.2f", row.tStat), 485f, y1, cellPaint)
-                c1.drawText(row.confidenceIntervalLabel, 540f, y1, cellPaint)
-                c1.drawText(row.unitLabel, 700f, y1, mutedPaint)
-                y1 += 15f
+                val rowColor = if (row.applied) white else muted
+                drawTextFitted(c1, row.paramTitleFa.take(40), cols[0], y, 7.6f, rowColor, maxWidth = 182f)
+                drawTextFitted(c1, f2(row.priorValue), cols[1], y, 7.6f, muted, maxWidth = 44f)
+                drawTextFitted(c1, f2(row.regressedValue), cols[2], y, 7.6f, if (row.applied) green else white, maxWidth = 52f)
+                drawTextFitted(c1, if (row.slopeBeta.isFinite()) String.format(Locale.US, "%+.3f", row.slopeBeta) else "—", cols[3], y, 7.6f, white, maxWidth = 36f)
+                drawTextFitted(
+                    c1,
+                    if (row.tStat.isFinite() && row.tStat > -900) String.format(Locale.US, "%+.2f", row.tStat) else "—",
+                    cols[4], y, 7.6f,
+                    if (abs(row.tStat) >= 1.96) green else muted,
+                    maxWidth = 32f,
+                )
+                drawTextFitted(c1, row.confidenceIntervalLabel, cols[5], y, 7.6f, white, maxWidth = 152f)
+                drawTextFitted(c1, row.unitLabel, cols[6], y, 7.6f, muted, maxWidth = 66f)
+                drawTextFitted(c1, if (row.applied) "بله" else "خیر — پیشین", cols[7], y, 7.2f, if (row.applied) green else red, maxWidth = 88f)
+                y += 13.5f
+            }
+            // دلیل اعمال‌نشدن‌ها، فشرده
+            val blocked = reg.parameterRows.filter { !it.applied }.map { "${it.paramKey}: ${it.significanceNoteFa}" }
+            if (blocked.isNotEmpty()) {
+                drawTextFitted(c1, "دلیل اعمال‌نشدن: " + blocked.distinctBy { it.substringAfter(':') }.joinToString(" · ") { it.substringAfter(':') }, 26f, y + 2f, 7.4f, red, maxWidth = 790f)
+                y += 14f
             }
 
-            // 16 Neural Features Attention & Regression Slopes (2 columns x 8 rows)
-            c1.drawText("2. 16-Feature Self-Attention Weights & Huber-Ridge Regression Slopes:", 24f, 336f, goldTitlePaint)
-            val slopes = reg.featureSlopes
-            slopes.forEachIndexed { idx, fs ->
+            // ویژگی‌ها: دو ستون
+            y = max(y + 12f, 340f)
+            drawTextFitted(c1, "۲) وزن‌های توجه و ضرایب رگرسیونِ ۱۶ ویژگی (t فقط اگر محاسبه‌شدنی باشد)", 24f, y, 11f, gold, bold = true, maxWidth = 790f)
+            y += 14f
+            reg.featureSlopes.forEachIndexed { idx, fs ->
+                if (idx == 8) y -= 8 * 17f
                 val col = idx / 8
-                val rowIdx = idx % 8
-                val xBase = if (col == 0) 26f else 432f
-                val fy = 356f + rowIdx * 26f
-                c1.drawRoundRect(RectF(xBase, fy - 12f, xBase + 388f, fy + 10f), 5f, 5f, cardPaint)
-                c1.drawText(
-                    "#${idx + 1} ${fs.featureTitleFa.take(26)} | β_R=${String.format(Locale.US, "%+.3f", fs.huberBetaR)} | β_Win=${String.format(Locale.US, "%+.3f", fs.ridgeBetaWin)} | Imp=${String.format(Locale.US, "%.1f%%", fs.importancePct)} | t=${String.format(Locale.US, "%+.1f", fs.tStat)}",
-                    xBase + 8f,
-                    fy + 2f,
-                    cellPaint,
+                val xBase = if (col == 0) 26f else 424f
+                val rowY = y + (idx % 8) * 17f
+                val tTxt = if (fs.tStat.isFinite()) String.format(Locale.US, "%+.2f", fs.tStat) else "—"
+                drawTextFitted(
+                    c1,
+                    "#${idx + 1} ${fs.featureTitleFa.take(22)} · βR ${String.format(Locale.US, "%+.3f", fs.huberBetaR)} · " +
+                        "βW ${String.format(Locale.US, "%+.3f", fs.ridgeBetaWin)} · ${String.format(Locale.US, "%.1f", fs.importancePct)}٪ · t $tTxt",
+                    xBase, rowY, 7.6f,
+                    if (fs.tStat.isFinite() && abs(fs.tStat) >= 1.96) white else muted,
+                    maxWidth = 392f,
                 )
             }
             doc.finishPage(p1)
 
-            // ── Page 2: All 16 Per-Strategy Neural Tuning Profiles + Live 15-Symbol Market Intelligence ──
+            // ── صفحهٔ ۲: پروفایل استراتژی‌ها (با عملکرد واقعی) + بازار ──────────────
             val p2 = doc.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, 2).create())
             val c2 = p2.canvas
-            c2.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
-            c2.drawText("3. Per-Strategy Neural Tuning Profiles (All 16 Strategies — R:R Locked in [1:1.50 .. 1:3.00]):", 24f, 30f, goldTitlePaint)
+            c2.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), Paint().apply { color = bg })
 
-            var y2 = 50f
-            c2.drawText("Strategy ID", 26f, y2, cyanHeaderPaint)
-            c2.drawText("Gen", 230f, y2, cyanHeaderPaint)
-            c2.drawText("Min R:R", 275f, y2, cyanHeaderPaint)
-            c2.drawText("SL Buffer", 340f, y2, cyanHeaderPaint)
-            c2.drawText("Max Kijun", 415f, y2, cyanHeaderPaint)
-            c2.drawText("Min ER14", 490f, y2, cyanHeaderPaint)
-            c2.drawText("Max Wick", 560f, y2, cyanHeaderPaint)
-            c2.drawText("Sniper Dist", 630f, y2, cyanHeaderPaint)
-            c2.drawText("Neural Gate", 710f, y2, cyanHeaderPaint)
-            y2 += 15f
-
-            val profiles = neuralSummary.autoTunedParameters.perStrategyProfiles.values.toList()
-            profiles.take(16).forEach { prof ->
-                c2.drawText(prof.strategyId.take(28), 26f, y2, cellPaint)
-                c2.drawText("#${prof.tuningGeneration}", 230f, y2, cellPaint)
-                c2.drawText(String.format(Locale.US, "1:%.2f", prof.minRiskReward.coerceIn(1.5, 3.0)), 275f, y2, cellPaint)
-                c2.drawText(String.format(Locale.US, "%.2f ATR", prof.slBufferAtr), 340f, y2, cellPaint)
-                c2.drawText(String.format(Locale.US, "%.2f ATR", prof.maxKijunExtensionAtr), 415f, y2, cellPaint)
-                c2.drawText(String.format(Locale.US, "%.0f%%", prof.minEfficiencyRatio * 100.0), 490f, y2, cellPaint)
-                c2.drawText(String.format(Locale.US, "%.0f%%", prof.maxAdverseWickRatio * 100.0), 560f, y2, cellPaint)
-                c2.drawText(String.format(Locale.US, "%.2f ATR", prof.minSniperDistanceAtr), 630f, y2, cellPaint)
-                c2.drawText(String.format(Locale.US, "%.1f%%", prof.neuralWinProbGatePct), 710f, y2, cyanHeaderPaint)
-                y2 += 14.5f
+            // عملکرد هر استراتژی از خودِ معاملات — همان چیزی که ممیزی «شاهد عملکرد» می‌خواست
+            val byStrategy = trades.filter { !it.isOpen && it.pnlUsd != null }.groupBy { it.strategyId.ifBlank { "UNKNOWN" } }
+            fun perf(sid: String): String {
+                val list = byStrategy[sid] ?: return "بدون معاملهٔ بسته"
+                val wins = list.filter { (it.pnlUsd ?: 0.0) > 0.0 }
+                val gross = wins.sumOf { it.pnlUsd ?: 0.0 }
+                val loss = abs(list.filter { (it.pnlUsd ?: 0.0) < 0.0 }.sumOf { it.pnlUsd ?: 0.0 })
+                val pf = if (loss > 1e-9) gross / loss else if (gross > 0.0) 99.9 else 0.0
+                val avgR = list.mapNotNull { it.rMultiple }.average().takeIf { !it.isNaN() } ?: 0.0
+                return "${list.size} معامله · برد ${String.format(Locale.US, "%.1f", wins.size * 100.0 / list.size)}٪ · PF ${String.format(Locale.US, "%.2f", pf)} · ${String.format(Locale.US, "%+.2f", avgR)}R"
             }
 
-            // Live 15-Symbol Market Intelligence Table
-            y2 += 12f
-            c2.drawText("4. Live 15-Symbol Market Intelligence & Causal Event Attribution:", 24f, y2, goldTitlePaint)
-            y2 += 18f
-            c2.drawText("Symbol", 26f, y2, cyanHeaderPaint)
-            c2.drawText("TF", 105f, y2, cyanHeaderPaint)
-            c2.drawText("Confidence", 155f, y2, cyanHeaderPaint)
-            c2.drawText("News Bias", 230f, y2, cyanHeaderPaint)
-            c2.drawText("Regime / Trend State", 310f, y2, cyanHeaderPaint)
-            c2.drawText("Primary Root Cause & Tactical Action", 480f, y2, cyanHeaderPaint)
+            val profiles = neuralSummary.autoTunedParameters.perStrategyProfiles.values.toList()
+            drawTextFitted(c2, "۳) پروفایل تیونینگ هر استراتژی (${profiles.size} مدل فعال) + عملکرد واقعی همان مدل", 24f, 28f, 11f, gold, bold = true, maxWidth = 790f)
+            val pcols = floatArrayOf(26f, 196f, 240f, 296f, 356f, 420f, 486f, 556f)
+            arrayOf("استراتژی", "نسل", "R:R کف", "بافر SL", "سقف کیجون", "ER14 کف", "شدو سقف", "گیت").forEachIndexed { i, h ->
+                val w = (if (i == 7) 620f else pcols[i + 1]) - pcols[i] - 6f
+                drawTextFitted(c2, h, pcols[i], 44f, 8.5f, cyan, bold = true, maxWidth = w)
+            }
+            var y2 = 58f
+            profiles.take(12).forEach { prof ->
+                drawTextFitted(c2, prof.strategyId, pcols[0], y2, 7.4f, white, maxWidth = 166f)
+                drawTextFitted(c2, "#${prof.tuningGeneration}", pcols[1], y2, 7.4f, muted, maxWidth = 38f)
+                drawTextFitted(c2, String.format(Locale.US, "1:%.2f", prof.minRiskReward), pcols[2], y2, 7.4f, white, maxWidth = 50f)
+                drawTextFitted(c2, String.format(Locale.US, "%.2f", prof.slBufferAtr), pcols[3], y2, 7.4f, white, maxWidth = 54f)
+                drawTextFitted(c2, String.format(Locale.US, "%.2f", prof.maxKijunExtensionAtr), pcols[4], y2, 7.4f, white, maxWidth = 58f)
+                drawTextFitted(c2, String.format(Locale.US, "%.0f%%", prof.minEfficiencyRatio * 100.0), pcols[5], y2, 7.4f, white, maxWidth = 60f)
+                drawTextFitted(c2, String.format(Locale.US, "%.0f%%", prof.maxAdverseWickRatio * 100.0), pcols[6], y2, 7.4f, white, maxWidth = 64f)
+                drawTextFitted(c2, String.format(Locale.US, "%.1f%%", prof.neuralWinProbGatePct), pcols[7], y2, 7.4f, cyan, maxWidth = 60f)
+                drawTextFitted(c2, "عملکرد: ${perf(prof.strategyId)}", 26f, y2 + 9f, 7f, muted, maxWidth = 790f)
+                y2 += 22f
+            }
+            if (profiles.size > 12) {
+                drawTextFitted(c2, "… و ${profiles.size - 12} مدل دیگر (برای دیدن همه، فایل CSV ژورنال را بگیرید)", 26f, y2, 7.4f, muted, maxWidth = 790f)
+                y2 += 14f
+            }
+
+            // بازار زنده — عنوان از تعداد واقعی
+            val live = neuralSummary.liveMarketAttributions
+            y2 += 10f
+            drawTextFitted(
+                c2,
+                "۴) هوش بازار: ${live.size} نماد ارزیابی‌شده در این گزارش" +
+                    if (live.size < V1Universe.allSymbols.size) " (از ${V1Universe.allSymbols.size} نماد فعال برنامه — بقیه در این اجرا ارزیابی نشدند)" else "",
+                24f, y2, 11f, gold, bold = true, maxWidth = 790f,
+            )
+            y2 += 16f
+            arrayOf("نماد", "TF", "اطمینان", "اخبار", "رژیم", "علت و اقدام").forEachIndexed { i, h ->
+                val xs = floatArrayOf(26f, 96f, 140f, 210f, 268f, 420f)
+                drawTextFitted(c2, h, xs[i], y2, 8.5f, cyan, bold = true, maxWidth = (if (i == 5) 400f else 70f))
+            }
             y2 += 14f
-            neuralSummary.liveMarketAttributions.take(15).forEach { m ->
-                c2.drawText(m.symbol, 26f, y2, cellPaint)
-                c2.drawText(m.timeframeLabel, 105f, y2, cellPaint)
-                c2.drawText(String.format(Locale.US, "%.1f%%", m.causalConfidencePct), 155f, y2, cyanHeaderPaint)
-                c2.drawText(String.format(Locale.US, "%+.2f", m.newsSentimentScore), 230f, y2, cellPaint)
-                c2.drawText(m.marketRegimeStateFa.take(24), 310f, y2, cellPaint)
-                c2.drawText("${m.primaryCauseBadgeFa.take(22)} | ${m.recommendedTacticalActionFa.take(28)}", 480f, y2, mutedPaint)
+            live.take(11).forEach { m ->
+                val xs = floatArrayOf(26f, 96f, 140f, 210f, 268f, 420f)
+                drawTextFitted(c2, m.symbol, xs[0], y2, 7.6f, white, maxWidth = 66f)
+                drawTextFitted(c2, m.timeframeLabel, xs[1], y2, 7.6f, white, maxWidth = 40f)
+                drawTextFitted(c2, String.format(Locale.US, "%.1f%%", m.causalConfidencePct), xs[2], y2, 7.6f, cyan, maxWidth = 62f)
+                drawTextFitted(c2, String.format(Locale.US, "%+.2f", m.newsSentimentScore), xs[3], y2, 7.6f, white, maxWidth = 52f)
+                drawTextFitted(c2, m.marketRegimeStateFa, xs[4], y2, 7.6f, white, maxWidth = 146f)
+                drawTextFitted(c2, "${m.primaryCauseBadgeFa} — ${m.recommendedTacticalActionFa}", xs[5], y2, 7.4f, muted, maxWidth = 396f)
                 y2 += 14f
             }
             doc.finishPage(p2)
 
-            // ── Page 3: AI Gate Yes/No Audit Decisions & Recent Learned Trade Lessons ──
+            // ── صفحهٔ ۳: گیت + درس‌ها ────────────────────────────────────────────
             val p3 = doc.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, 3).create())
             val c3 = p3.canvas
-            c3.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
-            c3.drawText("5. AvalAI Single-Question Yes/No Gate Decision & Experience Replay Trade Lessons:", 24f, 30f, goldTitlePaint)
-
-            var y3 = 52f
-            c3.drawText("AvalAI Single-Question Yes/No Filter Status:", 26f, y3, cyanHeaderPaint)
-            y3 += 16f
+            c3.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), Paint().apply { color = bg })
+            drawTextFitted(c3, "۵) گیت تصمیم و درس‌های معاملاتی (Experience Replay)", 24f, 28f, 11f, gold, bold = true, maxWidth = 790f)
+            var y3 = 48f
             if (lastAiVerdict == null) {
-                c3.drawText("AvalAI Key Active & Ready (Single Question: Should I trade right now with these conditions or not? -> Yes/No).", 26f, y3, mutedPaint)
-                y3 += 18f
+                drawTextFitted(c3, "گیت Yes/No تا این لحظه تصمیمی ثبت نکرده است (کلید فعال نشده یا هنوز فرصتی نبوده).", 26f, y3, 9f, muted, maxWidth = 780f)
+                y3 += 16f
             } else {
-                val dec = if (lastAiVerdict.approved) "YES (APPROVED)" else "NO (BLOCKED)"
-                c3.drawText(
-                    "${formatTimestamp(lastAiVerdict.checkedAt)} | ${lastAiVerdict.symbol} | ${lastAiVerdict.action} | $dec | Summary: ${lastAiVerdict.summaryFa.take(48)}",
-                    26f,
-                    y3,
-                    cellPaint,
+                val dec = if (lastAiVerdict.approved) "YES — مجاز" else "NO — مسدود"
+                drawTextFitted(
+                    c3,
+                    "${formatTimestamp(lastAiVerdict.checkedAt)} · ${lastAiVerdict.symbol} · ${lastAiVerdict.action} · $dec · ${lastAiVerdict.summaryFa}",
+                    26f, y3, 8.6f, if (lastAiVerdict.approved) green else red, maxWidth = 780f,
                 )
-                y3 += 18f
-            }
-
-            y3 += 10f
-            c3.drawText("Structural Stop-Loss Diagnostics & Regression Insights:", 26f, y3, cyanHeaderPaint)
-            y3 += 16f
-            reg.regressionDiagnosticNotesFa.forEach { note ->
-                c3.drawText("• ${note.take(115)}", 26f, y3, cellPaint)
                 y3 += 16f
             }
+
+            reg.regressionDiagnosticNotesFa.take(4).forEach { note ->
+                drawTextFitted(c3, "• $note", 26f, y3, 8f, white, maxWidth = 780f)
+                y3 += 13f
+            }
             y3 += 8f
-            c3.drawText("Recent Learned Trade Lessons (Experience Replay Buffer):", 26f, y3, cyanHeaderPaint)
-            y3 += 16f
-            neuralSummary.recentLessons.take(12).forEach { lesson ->
-                val outTag = if (lesson.won) "WIN" else "LOSS"
-                c3.drawText(
-                    "${formatTimestamp(lesson.timestampMs)} | ${lesson.symbol} (${lesson.timeframeLabel}) | $outTag (${String.format(Locale.US, "%+.2fR", lesson.achievedR.coerceIn(-1.5, 3.0))}) | ${lesson.lessonLearnedFa.take(65)}",
-                    26f,
-                    y3,
-                    cellPaint,
+
+            // درس‌ها با شناسه و قیمت‌ها + تشخیص خوشه
+            val lessons = neuralSummary.recentLessons.take(9)
+            drawTextFitted(c3, "درس‌های ثبت‌شده (${lessons.size} ردیف آخر):", 26f, y3, 9.5f, cyan, bold = true, maxWidth = 400f)
+            y3 += 14f
+            // ⚠️ تفکیک «معاملهٔ زنده» از «بازپخش بک‌تست»: ۱۲ ضرر پشت‌سرهم روی یک نماد که در
+            // ۵ دقیقهٔ دیوارساعتی ثبت شده، اگر `origin=BACKTEST` باشد یعنی بک‌تست سریع اجرا شده
+            // و هیچ ربطی به ۱۲ ورود واقعی در ۵ دقیقه ندارد. گزارش قبلی این را نمی‌گفت و خواننده
+            // آن را «معامله‌گری بیش‌ازحد» می‌خواند.
+            val byClosedForOrigin = trades.associateBy { it.id }
+            val liveLessons = lessons.filter { l ->
+                (byClosedForOrigin[l.tradeId]?.origin ?: PaperTrade.ORIGIN_LIVE) == PaperTrade.ORIGIN_LIVE
+            }
+            val backtestLessons = lessons.size - liveLessons.size
+            if (backtestLessons > 0) {
+                drawTextFitted(
+                    c3,
+                    "از ${lessons.size} ردیف بالا، $backtestLessons ردیف از **بازپخش بک‌تست** است؛ زمان ثبتشان زمان اجرای بک‌تست است، نه زمان ورود در بازار.",
+                    26f, y3, 8f, muted, maxWidth = 780f,
                 )
-                y3 += 15f
+                y3 += 13f
+            }
+            val clusterWindowMs = 5 * 60_000L
+            val clusters = liveLessons
+                .groupBy { it.symbol to (it.timestampMs / clusterWindowMs) }
+                .filter { it.value.size >= 3 }
+            clusters.forEach { (key, group) ->
+                drawTextFitted(
+                    c3,
+                    "⚠️ ${group.size} معامله روی ${key.first} در یک بازهٔ ۵ دقیقه‌ای — یا ورود پشت‌سرهم بدون کول‌داون است یا ثبت تکراری. " +
+                        "جمع ${String.format(Locale.US, "%+.2f", group.sumOf { it.achievedR })}R",
+                    26f, y3, 8.2f, red, maxWidth = 780f,
+                )
+                y3 += 13f
+            }
+            val byClosed = byClosedForOrigin
+            lessons.forEach { lesson ->
+                val trade = byClosed[lesson.tradeId]
+                val originTag = when (trade?.origin) {
+                    null -> "منبع نامشخص"
+                    PaperTrade.ORIGIN_LIVE -> "زنده"
+                    else -> "بک‌تست"
+                }
+                val priceTxt = if (trade != null) {
+                    "ورود ${f2(trade.entry)} → خروج ${f2(trade.exitPrice ?: trade.entry)} · SL ${f2(trade.initialStopLoss ?: trade.stopLoss)} · TP ${f2(trade.takeProfit)}"
+                } else {
+                    "قیمت‌ها در حافظهٔ این اجرا نیست"
+                }
+                drawTextFitted(
+                    c3,
+                    "${lesson.tradeId.take(22)} · $originTag · ${lesson.symbol} ${lesson.timeframeLabel} · ${formatTimestamp(lesson.timestampMs)} · " +
+                        "${if (lesson.won) "برد" else "ضرر"} ${String.format(Locale.US, "%+.2f", lesson.achievedR)}R · $priceTxt",
+                    26f, y3, 7.6f, if (lesson.won) green else white, maxWidth = 780f,
+                )
+                y3 += 12f
+                drawTextFitted(c3, lesson.lessonLearnedFa, 34f, y3, 7.2f, muted, maxWidth = 770f)
+                y3 += 13f
+                if (y3 > 560f) return@forEach
+            }
+            if (lessons.isEmpty()) {
+                drawTextFitted(c3, "هنوز معاملهٔ بسته‌ای به حافظهٔ یادگیری نرسیده است.", 26f, y3, 8.5f, muted, maxWidth = 780f)
             }
             doc.finishPage(p3)
 

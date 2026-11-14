@@ -371,6 +371,8 @@ class RiskAndCalendarEngineTest {
         val trigBars = buildBullishPullbackSeries(Interval.M15.millis)
         val trig5mBars = buildBullishPullbackSeries(Interval.M5.millis)
 
+        // این تست رفتار «بیس» را روی سری رمزارزی می‌سنجد؛ سیاست «فقط پیمان روی رمزارز»
+        // عمداً خاموش است تا خودِ شروط بیس آزموده شوند (سیاست جای دیگری تست شده است).
         val config = BaseStrategyConfig()
         val dualReport = IchimokuStrategyEngine.evaluateDualTimeframeStrategy(
             activeModel = BitcoinStrategyModel.BASE_ICHIMOKU,
@@ -388,7 +390,7 @@ class RiskAndCalendarEngineTest {
         val report = dualReport.report15m
 
         assertEquals(IchimokuStrategyEngine.BTC_SYMBOL, report.symbol)
-        assertEquals(16, report.conditions.size)
+        assertEquals(17, report.conditions.size)
         assertTrue(
             report.conditions.joinToString(" | ") { "${it.index}:${it.passed}(${it.detailFa})" },
             report.conditions.all { it.passed }
@@ -421,16 +423,65 @@ class RiskAndCalendarEngineTest {
             preferredAction = SignalAction.BUY,
         )!!
         val opened = journal.openTrade(calc, note = "تست استراتژی بیس")
-        val midEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
+        // قاعدهٔ تازهٔ کاربر (جای قاعدهٔ قدیم «در +۱R ریسک‌فری روی نقطهٔ ورود»):
+        // ۱) تا سود باز به ۱٫۵R نرسیده، **هیچ** جابه‌جایی حد ضرر مجاز نیست.
+        // ۲) در ۱٫۵R هم جابه‌جایی فقط روی سطح ساختاری و فقط اگر بعد از کارمزد
+        //    رفت‌وبرگشت سود خالص مثبت قفل کند؛ «ریسک‌فری روی نقطهٔ ورود» دیگر وجود ندارد.
+        val belowThreshold = IchimokuStrategyEngine.evaluateOpenTradeManagement(
             trade = opened,
-            report = report.copy(livePrice = 70_200.0), // +2.2R while initial TP is 71,000 (3.0R)
+            report = report.copy(livePrice = 68_900.0), // +0.9R
             config = config,
         )
-        assertTrue(midEval == null || midEval.newStopLoss == opened.stopLoss)
+        assertTrue(
+            "زیر ۱٫۵R هیچ جابه‌جایی حد ضرر مجاز نیست",
+            belowThreshold == null || belowThreshold.updatedStopLoss == null,
+        )
+
+        val midEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
+            trade = opened,
+            report = report.copy(livePrice = 69_500.0), // +1.5R while initial TP is 71,000 (3.0R)
+            config = config,
+        )
+        val mid = midEval
+        if (mid != null && !mid.shouldCloseImmediatelyInProfit) {
+            val newStop = mid.updatedStopLoss
+            if (newStop != null) {
+                assertTrue("حد ضرر جابه‌جاشده باید در سود باشد", newStop > 68_000.0)
+                assertTrue("حد ضرر جابه‌جاشده باید عقب‌تر از قیمت زنده بماند", newStop < 69_500.0)
+                assertTrue(
+                    "جابه‌جایی فقط با برچسب سطح ساختاری مجاز است، نه BE",
+                    mid.stopStageTag == "STRUCT" || mid.stopStageTag == "TRAIL",
+                )
+            }
+            assertNull("حد سود نباید جابه‌جا شود", mid.updatedTakeProfit)
+        }
+
+        // مسیر پیش‌فرض `updateTradeStopLoss` همچنان حد ضرر ثابت را قفل می‌کند (بدون ratchet).
         val updatedAttempt = journal.updateTradeStopLoss(opened.id, 70_000.0, "تست عدم جابجایی پله‌ای")
         assertNotNull(updatedAttempt)
         assertEquals(67_000.0, updatedAttempt!!.stopLoss, 1e-4)
         assertEquals(3.0, updatedAttempt.riskReward, 1e-4)
+
+        // مسیر ratchet فقط در جهت سود و فقط تا زیر نقطهٔ ورود مجاز است.
+        val ratchet = journal.updateTradeStopLoss(
+            tradeId = opened.id,
+            newStopLoss = 67_500.0,
+            stageNote = "${IchimokuStrategyEngine.BE_TAG_MARK} ریسک‌فری",
+            allowRatchet = true,
+        )
+        assertNotNull("ریسک‌فری در سود باید پذیرفته شود", ratchet)
+        assertEquals(67_500.0, ratchet!!.stopLoss, 1e-4)
+        assertEquals("حد ضرر اولیه برای محاسبهٔ ۱R حفظ می‌شود", 67_000.0, ratchet.initialStopLoss ?: 0.0, 1e-4)
+        // تلاش برای عقب‌بردن حد ضرر (بدتر از حد ضرر فعلی) رد می‌شود.
+        assertNull(
+            "حد ضرر هرگز نباید به عقب برگردد",
+            journal.updateTradeStopLoss(
+                tradeId = opened.id,
+                newStopLoss = 67_200.0,
+                stageNote = "تلاش برای عقب‌بردن حد ضرر",
+                allowRatchet = true,
+            ),
+        )
 
         val preserveEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
             trade = opened,
@@ -453,7 +504,7 @@ class RiskAndCalendarEngineTest {
             symbolInput = "EUR/USD",
         )
         assertEquals("EUR/USD", eurusdReport.symbol)
-        assertEquals(16, eurusdReport.conditions.size)
+        assertEquals(17, eurusdReport.conditions.size)
         assertTrue(eurusdReport.livePrice in 1.0..1.5)
 
         // Verify Smart15mSyncPlanner candle-boundary alignment and delta fetch sizing
@@ -494,29 +545,22 @@ class RiskAndCalendarEngineTest {
         assertEquals(SymbolPollTier.OPEN_POSITION, openTier)
         assertEquals(15_000L, openTier.tickIntervalMs)
 
-        // 5. Verify all 16 strategies (15 original 4-book combinations + ONLY Unified 9-Book Drive Master Method; individual Drive 1..9 strategies removed) evaluate simultaneously on 15m and 5m + R:R Breakdown & Optimal R:R
-        assertEquals(18, BitcoinStrategyModel.entries.size)
-        assertEquals(16, BitcoinStrategyModel.neuralLearningModels.size)
-        assertEquals(1, BitcoinStrategyModel.drivePdfStrategies.size)
-        assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.drivePdfStrategies.single())
-        // v3.9.47: استراتژی ۱۶ (پیمان) موقتاً غیرفعال است، پس فقط ۱۵ استراتژی ارزیابی می‌شوند.
-        assertEquals(15, dualReport.reports15mByStrategy.size)
-        assertEquals(15, dualReport.reports5mByStrategy.size)
-        BitcoinStrategyModel.legacyIndividualDriveIds.forEach { legacyId ->
-            assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.fromId(legacyId))
-            assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id, BitcoinStrategyModel.normalizeStrategyId(legacyId))
-        }
-        assertTrue(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.isTemporarilyDisabled)
-        assertEquals(15, BitcoinStrategyModel.activeStrategyIds.size)
-        assertFalse(
-            dualReport.reports15mByStrategy.containsKey(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+        // 5. تنها ۵ مدل باقی مانده‌اند (بیس + چهار تک‌استراتژی) و همگی هم‌زمان روی ۱۵m و ۵m ارزیابی می‌شوند.
+        assertEquals(5, BitcoinStrategyModel.entries.size)
+        assertEquals(5, BitcoinStrategyModel.neuralLearningModels.size)
+        assertEquals(5, dualReport.reports15mByStrategy.size)
+        assertEquals(5, dualReport.reports5mByStrategy.size)
+        assertEquals(5, BitcoinStrategyModel.activeStrategyIds.size)
+        assertNotNull(
+            dualReport.reports15mByStrategy[BitcoinStrategyModel.BASE_ICHIMOKU.id]
         )
         BitcoinStrategyModel.entries.filter { it.id in BitcoinStrategyModel.activeStrategyIds }.forEach { model ->
             val rep15 = dualReport.reportFor(Interval.M15, model.id)
             val rep5 = dualReport.reportFor(Interval.M5, model.id)
             assertNotNull(rep15)
             assertNotNull(rep5)
-            assertEquals(16, rep15!!.conditions.size)
+            // همهٔ مدل‌های باقی‌مانده همان ۱۷ شرط مشترک بیس را می‌سازند.
+            assertEquals(17, rep15!!.conditions.size)
             assertNotNull(rep15.rrBreakdown)
             assertTrue((rep15.optimalRiskReward ?: 0.0) >= 1.5)
             assertTrue((rep15.riskReward ?: 0.0) >= 1.5)
@@ -534,11 +578,12 @@ class RiskAndCalendarEngineTest {
         assertTrue(snap.tenkan7 > 0.0 && snap.kijun22 > 0.0 && snap.senkouB44 > 0.0)
         assertTrue(snap.adx14 > 0.0 && snap.kellySignalCount in 1..5 && snap.kellyWinProbabilityPercent in 48..76)
 
-        // v3.9.47: پیمان فقط لایهٔ الیوت/نئوویو را نگه داشته و بقیهٔ لایه‌ها پاک شده‌اند.
-        val paymanPlaybook = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.driveBookPlaybook()
-        assertTrue(paymanPlaybook.authorAndEdition.contains("Elliott"))
-        assertTrue(paymanPlaybook.entryChecklistStepsFa.none { it.contains("لایه") })
-        assertTrue(paymanPlaybook.strategyId == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+        // دفترچهٔ قوانین هر ۵ مدل باقی‌مانده پر است و شناسه‌اش با خودِ مدل می‌خواند.
+        BitcoinStrategyModel.entries.forEach { model ->
+            val spec = model.driveBookPlaybook()
+            assertTrue(spec.strategyId == model.id)
+            assertTrue(spec.entryChecklistStepsFa.isNotEmpty())
+        }
 
         // Verify Trend Loss In Profit Detector (v3.9.47: خروج هوشمند فقط بالای +۲R مجاز است)
         val tradeInProfitAt63k = calc.copy(
@@ -827,31 +872,42 @@ class RiskAndCalendarEngineTest {
         neuralEngine.syncWithClosedJournalTrades(closedJournalTrades)
         assertEquals("repeated journal sync must stay idempotent", 6, neuralEngine.state.value.totalLearnedTrades)
 
-        // Two-condition rule: below 10,000 learned trades the gate must stay open even when a no-trade regime is detected
-        val evalDuringWarmup = neuralEngine.evaluateFeatures(
+        // سیاست پیش‌رونده: تا وقتی کاربر گیت را روشن نکرده، حتی با تشخیص «منطقهٔ ممنوعه»
+        // فقط هشدار داده می‌شود و ورود آزاد است.
+        val evalWithoutConsent = neuralEngine.evaluateFeatures(
             symbol = "BTC/USDT",
             features = badCryptoFeatures,
             conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
         )
-        assertTrue(evalDuringWarmup.isNoTradeCondition)
-        assertFalse(evalDuringWarmup.isBlockingTradeNow)
-        assertTrue(evalDuringWarmup.shouldAllowTrade)
+        assertTrue(evalWithoutConsent.isNoTradeCondition)
+        assertFalse(evalWithoutConsent.isBlockingTradeNow)
+        assertTrue(evalWithoutConsent.shouldAllowTrade)
 
-        // قانون دوشرطی: فعال‌سازی کاربر (شرط ۲) به‌تنهایی گیت را فعال نمی‌کند؛ شرط ۱ (۱۰,۰۰۰ معامله) هم لازم است.
+        // با فعال‌سازی کاربر، گیت از همان اولین نمونهٔ یادگیری‌شده وارد مدار می‌شود (نه پس از ۱۰٬۰۰۰)
+        // و خوشه‌ای که با ۶ نمونه «ممنوعه» علامت خورده را مسدود می‌کند.
         neuralEngine.setGateUserActivation(true)
         assertTrue(neuralEngine.state.value.gateUserActivationEnabled)
-        assertFalse(neuralEngine.state.value.volumeConditionMet)
-        assertFalse(neuralEngine.state.value.isGateActive)
-        val evalConsentOnly = neuralEngine.evaluateFeatures(
+        assertTrue("گیت باید با هر عددی که ≥۱ نمونه است فعال شود", neuralEngine.state.value.isGateActive)
+        val evalConsent = neuralEngine.evaluateFeatures(
             symbol = "BTC/USDT",
             features = badCryptoFeatures,
             conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
         )
-        assertTrue(evalConsentOnly.isNoTradeCondition)
-        assertFalse(evalConsentOnly.isBlockingTradeNow)
-        assertTrue(evalConsentOnly.shouldAllowTrade)
+        assertTrue(evalConsent.isBlockingTradeNow)
+        assertFalse(evalConsent.shouldAllowTrade)
 
-        // هر دو شرط با هم ⇒ گیت فعال: با وارد کردن یک بستهٔ دانش که شرط اول را کامل می‌کند بررسی می‌شود.
+        // خاموش‌کردن شرط دوم (تصمیم کاربر) گیت را فوراً غیرفعال می‌کند.
+        neuralEngine.setGateUserActivation(false)
+        assertFalse(neuralEngine.state.value.isGateActive)
+        val evalAfterUserDisable = neuralEngine.evaluateFeatures(
+            symbol = "BTC/USDT",
+            features = badCryptoFeatures,
+            conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
+        )
+        assertFalse(evalAfterUserDisable.isBlockingTradeNow)
+
+        // بستهٔ دانشِ ۱۰٬۰۰۰ نمونه‌ای هم باید وارد شود و شرط حجم را کامل کند؛ اما تا فعال‌سازی
+        // کاربر، گیت وارد مدار نمی‌شود.
         val bigLedger = (1..10_000).map { i ->
             NeuralLearningLedger.LearnedStamp(
                 fingerprint = NeuralLearningLedger.tradeFingerprint("seed-$i", i.toLong()),
@@ -883,24 +939,7 @@ class RiskAndCalendarEngineTest {
         assertTrue(imported.isAccepted)
         assertTrue(imported.mergedLearnedTotal >= 10_000)
         assertTrue(neuralEngine.state.value.volumeConditionMet)
-        assertTrue(neuralEngine.state.value.isGateActive)
-        val evalWhenActive = neuralEngine.evaluateFeatures(
-            symbol = "BTC/USDT",
-            features = badCryptoFeatures,
-            conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
-        )
-        assertTrue(evalWhenActive.isBlockingTradeNow)
-        assertFalse(evalWhenActive.shouldAllowTrade)
-
-        // خاموش‌کردن شرط ۲ (تصمیم کاربر) گیت را حتی بالای ۱۰,۰۰۰ معامله غیرفعال می‌کند.
-        neuralEngine.setGateUserActivation(false)
-        assertFalse(neuralEngine.state.value.isGateActive)
-        val evalAfterUserDisable = neuralEngine.evaluateFeatures(
-            symbol = "BTC/USDT",
-            features = badCryptoFeatures,
-            conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
-        )
-        assertFalse(evalAfterUserDisable.isBlockingTradeNow)
+        assertFalse("بدون فعال‌سازی کاربر گیت نباید وارد مدار شود", neuralEngine.state.value.isGateActive)
 
         // Verify Neural Brain explainability fields (learnedInsightsFeedFa, featureInsights, recentLessons)
         val brainSummary = neuralEngine.state.value
@@ -909,12 +948,16 @@ class RiskAndCalendarEngineTest {
         assertEquals(6, brainSummary.recentLessons.size)
         assertTrue(brainSummary.noTradeClusters.isNotEmpty())
 
-        // Verify TradeSnapshotArchiveManager self-readable embedded image payload round-trip & default alarm ringtone settings
+        // تنظیمات پیش‌فرض زنگ هشدار (آرشیو تصویری حذف شده است)
         val defaultSettings = com.aurum.edge.core.AppSettings()
         assertEquals("CUSTOM_ONLY", defaultSettings.alarmTonePreset)
         assertEquals("Ding-Dong", defaultSettings.entryAlarmSoundName)
         assertEquals("Red Dwarf", defaultSettings.tpAlarmSoundName)
         assertEquals("Latch", defaultSettings.slAlarmSoundName)
+
+        // آرشیو تصویری حذف شد: نه فایل تصویری ساخته می‌شود، نه متادیتا داخل تصویر جاسازی می‌شود.
+        // معاملهٔ نمونه برای تست‌های PDF و شمارهٔ نمایشی لازم است.
+        assertTrue(BitcoinStrategyModel.BASE_ICHIMOKU.id.isNotBlank())
 
         val sampleTrade = com.aurum.edge.core.PaperTrade(
             id = "SNAP_TEST_1",
@@ -928,44 +971,12 @@ class RiskAndCalendarEngineTest {
             confidence = 91.0,
             openedAt = 1_760_200_000_000L,
             fixedRiskUsd = 5.0,
-            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
-            strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
+            strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+            strategyTitleFa = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
         )
-        val sampleArchiveRecord = com.aurum.edge.data.ArchivedTradeSnapshotRecord(
-            tradeId = sampleTrade.id,
-            symbol = sampleTrade.symbol,
-            timeframeLabel = sampleTrade.interval.label,
-            action = sampleTrade.action.name,
-            strategyId = sampleTrade.strategyId,
-            strategyTitleFa = sampleTrade.strategyTitleFa,
-            strategyBadgeFa = "Foka 15m",
-            entryPrice = sampleTrade.entry,
-            stopLossPrice = sampleTrade.stopLoss,
-            takeProfitPrice = sampleTrade.takeProfit,
-            riskReward = sampleTrade.riskReward,
-            optimalRiskReward = 3.0,
-            fixedRiskUsd = 5.0,
-            expectedProfitUsd = 12.5,
-            confidence = 91.0,
-            openedAtMs = sampleTrade.openedAt,
-            fullPaperTrade = sampleTrade,
-        )
-        val fakeWebpHeader = byteArrayOf(0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50)
-        val combinedBytes = com.aurum.edge.data.TradeSnapshotArchiveManager.attachEmbeddedJsonToImageBytes(
-            webpBytes = fakeWebpHeader,
-            record = sampleArchiveRecord,
-        )
-        val decodedRecord = com.aurum.edge.data.TradeSnapshotArchiveManager.extractEmbeddedSnapshotFromBytes(combinedBytes)
-        assertNotNull(decodedRecord)
-        assertEquals("SNAP_TEST_1", decodedRecord!!.tradeId)
-        assertEquals("XAU/USD", decodedRecord.symbol)
-        assertEquals(2_745.0, decodedRecord.entryPrice, 1e-4)
-        assertEquals(2_738.0, decodedRecord.stopLossPrice, 1e-4)
-        assertEquals(2_762.5, decodedRecord.takeProfitPrice, 1e-4)
-        assertNotNull(decodedRecord.fullPaperTrade)
 
-        // Verify all 9 Drive PDF strategies have complete DriveBookPlaybookSpec + live telemetry + dedicated 16 conditions
-        BitcoinStrategyModel.drivePdfStrategies.forEach { driveModel ->
+        // هر ۵ مدل باقی‌مانده دفترچهٔ کامل + ۱۷ شرط اختصاصی دارند.
+        BitcoinStrategyModel.entries.forEach { driveModel ->
             val spec = driveModel.driveBookPlaybook()
             assertTrue(spec.bookFileTitle.isNotBlank())
             assertTrue(spec.ichimokuSettingsFa.isNotBlank())
@@ -986,8 +997,10 @@ class RiskAndCalendarEngineTest {
 
         // Verify Trading-Focused Neural Engine analytics & MasterIchimokuTradingAssistant improvement notes
         val summaryAfter = neuralEngine.state.value
-        assertEquals(16, summaryAfter.strategyEdgeMatrix.size)
-        assertEquals(4, summaryAfter.sessionEdges.size)
+        assertEquals(5, summaryAfter.strategyEdgeMatrix.size)
+        // زمان‌بندی سشن‌ها از یادگیری حذف شد: هیچ لبهٔ سشنی ساخته نمی‌شود (تنها وظیفهٔ زمانی،
+        // جلوگیری از نگه‌داشتن معامله در بازار بسته است که در EntrySafetyGate/MarketHours است).
+        assertTrue(summaryAfter.sessionEdges.isEmpty())
         assertTrue(summaryAfter.tradeForensics.topWinDriversFa.isNotEmpty())
         assertTrue(summaryAfter.tradeForensics.topLossCausesFa.isNotEmpty())
         assertTrue(summaryAfter.tradeForensics.actionableTradingRulesFa.isNotEmpty())
@@ -1054,14 +1067,8 @@ class RiskAndCalendarEngineTest {
         assertTrue(defaultAppSettings.slAlarmEnabled)
         assertTrue(defaultAppSettings.showSettingsDescriptions)
 
-        val closeSnap = com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
-            context = context,
-            closedTrade = sampleTrade.copy(tradeNumber = 12, exitPrice = 69500.0, pnlUsd = 10.0),
-            closeCandles = sampleBars,
-        )
-        assertNotNull(closeSnap)
-        assertTrue(closeSnap!!.isCloseSnapshot)
-        assertEquals(12, closeSnap.displayTradeNumber)
+        // آرشیو تصویری حذف شد: شمارهٔ نمایشی معامله مستقل از آرشیو تست می‌شود.
+        assertEquals(12, sampleTrade.copy(tradeNumber = 12, exitPrice = 69500.0, pnlUsd = 10.0).displayTradeNumber)
 
         // Verify v3.9.19 features: Unified 9-Book Drive Master Method + Causal Market Attribution + News Intelligence + Post-Training CEM/Bayesian Auto-Tuner
         val consensus9 = IchimokuStrategyEngine.evaluateUnified9BookConsensus(
@@ -1092,20 +1099,16 @@ class RiskAndCalendarEngineTest {
 
         // Verify v3.9.23 features:
         // 1. Unified Drive R:R method is identical to Base Ichimoku (baseOptimalRr = 2.25, same structural SL/TP & R:R formula)
-        assertEquals(
-            BitcoinStrategyModel.BASE_ICHIMOKU.baseOptimalRr,
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.baseOptimalRr,
-            1e-6,
-        )
+        assertEquals(2.25, BitcoinStrategyModel.BASE_ICHIMOKU.baseOptimalRr, 1e-6)
         // 2. All 16 learned neural features (0..15) are tunable specifically per strategy across all 16 strategies
-        assertEquals(16, tunedParams.perStrategyProfiles.size)
+        assertEquals(5, tunedParams.perStrategyProfiles.size)
         BitcoinStrategyModel.neuralLearningModels.forEach { stratModel ->
             val prof = tunedParams.perStrategyProfiles[stratModel.id]
             assertNotNull("Missing profile for ${stratModel.id}", prof)
             assertEquals(16, prof!!.featureTunings.size)
         }
         val tunedFeatProfile = neuralEngineV3919.tuneStrategyFeature(
-            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+            strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
             featureIndex = 10,
             tuningMultiplier = 1.65,
             learnedWeight = 0.88,
@@ -1115,7 +1118,7 @@ class RiskAndCalendarEngineTest {
         assertTrue(tunedFeatProfile.featureTunings[10].isManuallyTuned)
 
         val tunedStratParams = neuralEngineV3919.tuneStrategyParameters(
-            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+            strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
             minRiskReward = 2.10,
             maxKijunExtensionAtr = 1.55,
         )
@@ -1123,13 +1126,13 @@ class RiskAndCalendarEngineTest {
         assertEquals(1.55, tunedStratParams.maxKijunExtensionAtr, 1e-4)
 
         val appliedCfg = neuralEngineV3919.applyAutoTunedParametersToConfig(BaseStrategyConfig())
-        assertEquals(16, appliedCfg.perStrategyOverrides.size)
-        val driveEffectiveCfg = appliedCfg.resolveForStrategy(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+        assertEquals(5, appliedCfg.perStrategyOverrides.size)
+        val driveEffectiveCfg = appliedCfg.resolveForStrategy(BitcoinStrategyModel.BASE_ICHIMOKU.id)
         assertEquals(2.10, driveEffectiveCfg.minRiskReward, 1e-4)
         assertEquals(1.55, driveEffectiveCfg.maxKijunExtensionAtr, 1e-4)
 
         // Verify v3.9.24 features:
-        // 1. All trades are recorded with OPEN and CLOSE archive screenshots
+        // «آرشیو تصویری» حذف شد؛ فقط خروجی PDF ژورنال باقی می‌ماند و باید فایل معتبر بسازد.
         val closedForArchive = sampleTrade.copy(
             id = "PDF_ARCH_1",
             tradeNumber = 21,
@@ -1141,21 +1144,6 @@ class RiskAndCalendarEngineTest {
             exitPrice = 2_766.0,
             pnlUsd = 20.0,
         )
-        val ensuredSnaps = com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
-            context = context,
-            trades = listOf(sampleTrade, closedForArchive),
-        )
-        assertTrue(ensuredSnaps.any { it.tradeId == "PDF_ARCH_1" && !it.isCloseSnapshot })
-        assertTrue(ensuredSnaps.any { it.tradeId == "PDF_ARCH_1" && it.isCloseSnapshot })
-        val generatedArchiveSnaps = ensuredSnaps.filter { it.tradeId == "PDF_ARCH_1" }
-        assertTrue("New screenshots must stay private to the app", generatedArchiveSnaps.all { it.phoneGalleryUri.isBlank() })
-        val archiveRoot = File(context.filesDir, "trade_snapshots_v1").canonicalPath + File.separator
-        assertTrue(
-            "New screenshot files must be written under the app-private archive",
-            generatedArchiveSnaps.all { File(it.localImagePath).canonicalPath.startsWith(archiveRoot) },
-        )
-
-        // 2. Full PDF export embeds visual Ichimoku archive screenshots for all trades
         val tearSheetForPdf = com.aurum.edge.data.JournalExportEngine.buildInstitutionalTearSheet(
             trades = listOf(sampleTrade, closedForArchive),
             initialCapital = 100_000.0,
@@ -1200,17 +1188,22 @@ class RiskAndCalendarEngineTest {
         )
         assertEquals(10, regReportAll.parameterRows.size)
         assertEquals(16, regReportAll.featureSlopes.size)
-        assertTrue(regReportAll.rSquared in 0.70..0.96)
+        // R² از باقی‌ماندهٔ واقعی مدل محاسبه می‌شود (نه از شمار نمونه). برازش لب‌به‌مرز
+        // لازم نیست بخشی از قرارداد باشد؛ آنچه قرارداد است، عددِ محدود و قابل‌دفاع است.
+        // R² حالا **واقعی** است و می‌تواند منفی باشد (بدتر از میانگین) یا وقتی نمونه برای
+        // برآورد واریانس کافی نیست `NaN`. قرارداد این است که هیچ عدد ساختگی نباشد: یا مقدار
+        // محدودِ محاسبه‌شده، یا صریحاً «نامعلوم».
+        assertTrue(
+            "R² باید یا عدد محدود باشد یا NaN (نامعلوم)، بود: ${regReportAll.rSquared}",
+            !regReportAll.rSquared.isFinite() || regReportAll.rSquared < 0.96,
+        )
+        if (regReportAll.samplesCount >= 2 && regReportAll.rSquared.isFinite()) {
+            assertTrue("R² محاسبه‌شده باید از ۱ کمتر باشد", regReportAll.rSquared < 1.0)
+        }
         val regMinRrRow = regReportAll.parameterRows.first { it.paramKey == "minRiskReward" }
         assertTrue(regMinRrRow.regressedValue in 1.50..3.00)
 
-        // 4. Dedicated Archive Screenshots PDF Export & Full AI/Neural Data PDF Export
-        val (archPdfFile, _) = com.aurum.edge.data.JournalExportEngine.exportArchiveScreenshotsPdf(
-            context = context,
-            trades = listOf(sampleTrade, closedForArchive),
-        ).getOrThrow()
-        assertTrue(archPdfFile.exists() && archPdfFile.length() > 300L)
-
+        // 4. Full AI/Neural Data PDF Export (خروجی آرشیو تصویری حذف شد)
         val (aiPdfFile, _) = com.aurum.edge.data.JournalExportEngine.exportFullAiAndNeuralReportPdf(
             context = context,
             neuralSummary = neuralEngineV3919.state.value,

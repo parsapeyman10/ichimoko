@@ -276,25 +276,32 @@ object LiveQuoteFetcher {
                     "5m" -> "5min"
                     else -> "15min"
                 }
+                // ⚠️ ترتیب عوض شد: قبلاً اولین منبع Yahoo (`BTC-USD`) بود، یعنی چارتِ
+                // برنامه از یک نرخ ترکیبی USD می‌آمد در حالی که کاربر آن را با
+                // `BINANCE:BTCUSDT` تریدینگ‌ویو مقایسه می‌کرد — دو بازار متفاوت با
+                // شدو/حجم متفاوت. حالا اول همان صرافی‌ای که نماد تریدینگ‌ویو نشان می‌دهد.
                 listOf(
-                    { fetchYahooGapCandles("$base-USD", intervalCode, gapMs, sinceMillis, "query1") },
-                    { fetchYahooGapCandles("$base-USD", intervalCode, gapMs, sinceMillis, "query2") },
-                    { fetchKucoinCandles("$base-USDT", kucoinType, sinceMillis, nowMillis) },
                     { fetchBinanceKlines("${base}USDT", intervalCode, sinceMillis, nowMillis) },
                     { fetchOkxCandles("$base-USDT", intervalCode, sinceMillis) },
                     { fetchGateCandles("${base}_USDT", intervalCode, sinceMillis, nowMillis) },
+                    { fetchKucoinCandles("$base-USDT", kucoinType, sinceMillis, nowMillis) },
+                    { fetchYahooGapCandles("$base-USD", intervalCode, gapMs, sinceMillis, "query1") },
+                    { fetchYahooGapCandles("$base-USD", intervalCode, gapMs, sinceMillis, "query2") },
                 )
             }
             "XAU/USD" -> listOf(
-                { fetchYahooGapCandles("GC=F", intervalCode, gapMs, sinceMillis, "query1") },
-                { fetchYahooGapCandles("GC=F", intervalCode, gapMs, sinceMillis, "query2") },
+                // `GC=F` طلای آتی COMEX است، نه XAUUSD اسپاتِ OANDA؛ اختلاف قیمت و
+                // ساعات معاملات متفاوت، چارت را با تریدینگ‌ویو ناهمخوان می‌کرد.
                 { fetchYahooGapCandles("XAUUSD=X", intervalCode, gapMs, sinceMillis, "query1") },
+                { fetchYahooGapCandles("XAUUSD=X", intervalCode, gapMs, sinceMillis, "query2") },
+                { fetchYahooGapCandles("GC=F", intervalCode, gapMs, sinceMillis, "query1") },
                 { fetchYahooGapCandles("PAXG-USD", intervalCode, gapMs, sinceMillis, "query1") },
             )
             "XAG/USD" -> listOf(
-                { fetchYahooGapCandles("SI=F", intervalCode, gapMs, sinceMillis, "query1") },
-                { fetchYahooGapCandles("SI=F", intervalCode, gapMs, sinceMillis, "query2") },
+                // مثل طلا: اول اسپات، بعد آتی COMEX (قبلاً برعکس بود).
                 { fetchYahooGapCandles("XAGUSD=X", intervalCode, gapMs, sinceMillis, "query1") },
+                { fetchYahooGapCandles("XAGUSD=X", intervalCode, gapMs, sinceMillis, "query2") },
+                { fetchYahooGapCandles("SI=F", intervalCode, gapMs, sinceMillis, "query1") },
             )
             "DOW" -> listOf(
                 { fetchYahooGapCandles("%5EDJI", intervalCode, gapMs, sinceMillis, "query1") },
