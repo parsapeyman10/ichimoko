@@ -733,6 +733,23 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                             lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
                             continue
                         }
+                        // 🧠 ضریب حجم از «عمق یادگیری»: همان حالت (فاز × سشن × نوسان × دالان هدف)
+                        // اگر با شواهد کافی بازنده بوده باشد، این ورود انجام نمی‌شود؛ اگر ضعیف
+                        // باشد، ریسک همان معامله نصف می‌شود. با کمتر از ۱۲ نمونه، ضریب ۱ است.
+                        val depthMultiplier = neuralDepthMultiplier(armedReport, tick, cfg)
+                        if (depthMultiplier <= 0.0) {
+                            lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
+                            val blockKey = "$fireKey|${armedReport.triggerBarTime}|depth"
+                            if (rejectedPlanKeys.add(blockKey)) {
+                                _toast.value = "⛔ این حالت (فاز/سشن/نوسان/هدف) در ژورنال با شواهد کافی بازنده بوده است"
+                            }
+                            continue
+                        }
+                        val baseBudgetUsd = if (cfg.useFixedDollarRisk) {
+                            cfg.fixedRiskUsd
+                        } else {
+                            cfg.accountBalance * cfg.riskPercent / 100.0
+                        }
                         val calc = RiskAndCalendarEngine.calculatePosition(
                             symbolInput = symbol,
                             accountBalance = cfg.accountBalance,
@@ -741,7 +758,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                             stopLoss = guarded.stopLoss,
                             takeProfit = guarded.takeProfit,
                             preferredAction = armedReport.action,
-                            fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                            fixedRiskUsdOverride = baseBudgetUsd * depthMultiplier,
                             triggerInterval = armedReport.triggerInterval,
                             referenceAtr14 = armedReport.triggerSnapshot?.atr14 ?: 0.0,
                         )
@@ -819,6 +836,61 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             }
             onLoaded?.invoke(tick)
         }
+    }
+
+    // ───────────────────── عمق یادگیری عصبی (ضریب حجم هر حالت) ─────────────────────
+
+    private var depthCacheKey: String = ""
+    private var depthCacheReport: com.aurum.edge.core.NeuralDepthReport? = null
+
+    /**
+     * گزارش عمق یادگیری برای ژورنال فعلی، با کش.
+     *
+     * کلید کش عمداً «تعداد معامله + موجودی + شمارهٔ آخرین بسته‌شدن» است: تا وقتی ژورنال عوض
+     * نشده، محاسبه تکرار نمی‌شود (این تابع در مسیر تیک زنده صدا زده می‌شود).
+     */
+    private fun neuralDepthReportFor(cfg: com.aurum.edge.core.AppSettings): com.aurum.edge.core.NeuralDepthReport? {
+        val list = trades.value
+        val key = list.size.toString() + "|" + list.lastOrNull()?.closedAt.orZeroText() + "|" + cfg.accountBalance
+        if (key == depthCacheKey) return depthCacheReport
+        val report = runCatching {
+            com.aurum.edge.core.NeuralDepthAudit.fromTrades(
+                trades = list,
+                targets = com.aurum.edge.core.NeuralDepthTargets.from(
+                    com.aurum.edge.core.CapitalPolicy.from(cfg),
+                ),
+            )
+        }.getOrNull()
+        depthCacheKey = key
+        depthCacheReport = report
+        return report
+    }
+
+    private fun Long?.orZeroText(): String = (this ?: 0L).toString()
+
+    /**
+     * ضریب حجم همین حالت: ۱ = بدون تغییر، ۰٫۵ = نصف ریسک، ۰ = ورود ممنوع.
+     * با کمتر از ۱۲ معاملهٔ بستهٔ دارای ریسک، همیشه ۱ برمی‌گردد (هیچ قضاوتی بدون شواهد).
+     */
+    private fun neuralDepthMultiplier(
+        report: com.aurum.edge.core.StrategyEvaluationReport,
+        tick: com.aurum.edge.domain.PriceTick,
+        cfg: com.aurum.edge.core.AppSettings,
+    ): Double {
+        val closedWithRisk = trades.value.count {
+            !it.isOpen && it.pnlUsd != null && it.fixedRiskUsd.isFinite() && it.fixedRiskUsd > 0.0
+        }
+        if (closedWithRisk < com.aurum.edge.core.NeuralDepthAudit.MIN_EVIDENCE_WEIGHTED.toInt()) return 1.0
+        val depth = neuralDepthReportFor(cfg) ?: return 1.0
+        val atr = report.triggerSnapshot?.atr14 ?: 0.0
+        val atrPct = if (tick.price > 0.0 && atr > 0.0) atr / tick.price * 100.0 else null
+        val multiplier = depth.sizeMultiplierFor(
+            phase = report.trendPhase.name,
+            session = com.aurum.edge.core.NeuralDepthAudit.sessionCodeOf(tick.at),
+            vol = com.aurum.edge.core.NeuralDepthAudit.volBandOf(atrPct),
+            rr = com.aurum.edge.core.NeuralDepthAudit.rrBandOf(report.optimalRiskReward),
+        )
+        return multiplier.coerceIn(0.0, 1.0)
     }
 
     fun saveRiskAndCapitalSettings(
