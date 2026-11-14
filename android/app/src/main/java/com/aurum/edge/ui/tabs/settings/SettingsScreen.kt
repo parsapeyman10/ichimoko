@@ -68,7 +68,7 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private val FIXED_RISK_USD_PRESETS = listOf(5.0, 10.0, 25.0, 50.0, 100.0)
+private val FIXED_RISK_USD_PRESETS = listOf(0.5, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0)
 
 @Composable
 fun SettingsScreen(
@@ -372,10 +372,19 @@ fun SettingsScreen(
             }
 
             1 -> {
-                // تنظیمات موجودی ۱۰۰,۰۰۰ دلار و ریسک ثابت ۵ دلار در هر معامله
+                // اعداد عنوان از خود تنظیمات خوانده می‌شوند؛ قبلاً «۱۰۰,۰۰۰$ و ۵$» دستی نوشته شده
+                // بود و اگر کاربر مقدار دیگری می‌گذاشت، عنوان دروغ می‌گفت.
+                val activeRiskUsd = if (settings.useFixedDollarRisk) {
+                    settings.fixedRiskUsd
+                } else {
+                    settings.accountBalance * settings.riskPercent / 100.0
+                }
                 SectionCard(
-                    title = "💰 تنظیمات موجودی (۱۰۰,۰۰۰$) و ریسک ثابت دلاری (۵$)",
-                    subtitle = descOrNull("هر باخت = -$${String.format(Locale.US, "%.2f", settings.fixedRiskUsd)} · هر برد = +$${String.format(Locale.US, "%.2f", settings.fixedRiskUsd)} × R:R"),
+                    title = "💰 سرمایه و ریسک هر معامله (" + String.format(Locale.US, "%.2f", activeRiskUsd) + "$)",
+                    subtitle = descOrNull(
+                        "هر باخت = -$" + String.format(Locale.US, "%.2f", activeRiskUsd) +
+                            " · هر برد = +$" + String.format(Locale.US, "%.2f", activeRiskUsd) + " × R:R",
+                    ),
                     initiallyExpanded = false,
                 ) {
                     Row(
@@ -389,13 +398,71 @@ fun SettingsScreen(
                             modifier = Modifier.weight(1f),
                         )
                         StatTile(
-                            label = "ریسک ثابت هر معامله",
-                            value = "-$${settings.fixedRiskUsd.toInt()} باخت / +$${settings.fixedRiskUsd.toInt()}×R:R برد",
+                            label = "ریسک هر معامله (حالت فعال)",
+                            // قبلاً toInt() بود و ریسک ۰٫۶۰ دلاری «۰$» نمایش داده می‌شد.
+                            value = "-$" + String.format(Locale.US, "%.2f", activeRiskUsd) +
+                                " باخت / +$" + String.format(Locale.US, "%.2f", activeRiskUsd) + "×R:R برد",
                             valueColor = AurumColors.Cyan,
                             modifier = Modifier.weight(1f),
                         )
                     }
 
+                    Text(
+                        text = if (settings.useFixedDollarRisk) {
+                            "حالت فعال: ریسک ثابت دلاری (" + String.format(Locale.US, "$%.2f", settings.fixedRiskUsd) +
+                                "). درصد ریسک (" + String.format(Locale.US, "%.2f", settings.riskPercent) +
+                                "%) در این حالت نادیده گرفته می‌شود و همین مبلغ ثابت ملاک است."
+                        } else {
+                            "حالت فعال: درصدی از موجودی (" + String.format(Locale.US, "%.2f", settings.riskPercent) +
+                                "% × " + String.format(Locale.US, "$%.2f", settings.accountBalance) + " = " +
+                                String.format(Locale.US, "$%.2f", activeRiskUsd) + ")."
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "مبنای ریسک: مبلغ ثابت دلاری",
+                                color = AurumColors.TextPrimary,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                if (settings.useFixedDollarRisk) {
+                                    "روشن: هر معامله دقیقاً همین مبلغ را ریسک می‌کند، مستقل از موجودی."
+                                } else {
+                                    "خاموش: ریسک = درصد موجودی (پایین قابل تنظیم است)."
+                                },
+                                color = AurumColors.TextMuted,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                        Switch(
+                            checked = settings.useFixedDollarRisk,
+                            onCheckedChange = { enabled ->
+                                viewModel.saveRiskAndCapitalSettings(
+                                    accountBalance = settings.accountBalance,
+                                    initialCapital = settings.initialCapital,
+                                    riskPercent = settings.riskPercent,
+                                    dailyLossLimitPercent = settings.dailyLossLimitPercent,
+                                    maxDrawdownLimitPercent = settings.maxDrawdownLimitPercent,
+                                    targetCapital = settings.targetCapital,
+                                    useFixedDollarRisk = enabled,
+                                    fixedRiskUsd = settings.fixedRiskUsd,
+                                )
+                            },
+                        )
+                    }
                     AnimatedVisibility(visible = showDesc) {
                         Text(
                             text = "انتخاب سریع مبلغ ریسک ثابت (ضرر در SL) برای هر معامله:",
@@ -433,7 +500,11 @@ fun SettingsScreen(
                                     .padding(horizontal = 12.dp, vertical = 6.dp),
                             ) {
                                 Text(
-                                    text = "$${usd.toInt()} در هر معامله",
+                                    text = "$" + if (usd % 1.0 == 0.0) {
+                                        String.format(Locale.US, "%.0f", usd)
+                                    } else {
+                                        String.format(Locale.US, "%.2f", usd)
+                                    } + " در هر معامله",
                                     color = if (selected) AurumColors.Gold else AurumColors.TextPrimary,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
