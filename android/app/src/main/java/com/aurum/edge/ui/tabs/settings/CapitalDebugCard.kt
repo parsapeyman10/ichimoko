@@ -126,8 +126,7 @@ internal fun CapitalDebugCard(
         ?.severity
 
     SectionCard(
-        title = "🧪 دیباگ مدیریت سرمایه (از تنظیمات تا دلار واقعی)",
-        subtitle = "همان موتور محاسبهٔ ریسک را قدم‌به‌قدم اجرا می‌کند و ناورداها را چک می‌کند؛ هر عدد قابل بازرسی است.",
+        title = "🧪 دیباگ مدیریت سرمایه",
         initiallyExpanded = false,
         trailing = {
             val pillText = when {

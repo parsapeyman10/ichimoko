@@ -118,6 +118,9 @@ fun NeuralBrainScreen(
             .padding(bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // 🧠 عمق یادگیری: شبکهٔ ۱۸۰حالتی (فاز × سشن × نوسان × دالان R) از معامله‌های واقعی
+        NeuralDepthCard(trades = trades, settings = settings)
+
         // ── نوار خروجی فوری PDF تمام دیتاهای هوش مصنوعی و رگرسیون پارامترها ──
         Column(
             modifier = Modifier

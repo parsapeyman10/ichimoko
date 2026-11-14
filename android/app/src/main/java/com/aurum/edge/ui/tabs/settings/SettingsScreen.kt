@@ -92,8 +92,9 @@ fun SettingsScreen(
     var showAddModelForm by rememberSaveable { mutableStateOf(false) }
     var pendingRingtoneTarget by remember { mutableStateOf<TradeAlarmKind?>(null) }
 
-    val showDesc = settings.showSettingsDescriptions
-    fun descOrNull(text: String): String? = if (showDesc) text else null
+    // درخواست کاربر: هیچ متن توضیحی در اپ نباشد. مسیر قدیمی («نمایش/مخفی توضیحات») بسته شد.
+    val showDesc = false
+    fun descOrNull(text: String): String? = null
 
     val ringtoneLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
@@ -224,24 +225,6 @@ fun SettingsScreen(
                         modifier = Modifier.clickable { subTab = idx },
                     )
                 }
-            }
-            Spacer(Modifier.width(6.dp))
-            // آپشن کمرنگ مخفی / غیرمخفی کردن نوشته‌های توضیحی تنظیمات (پیش‌فرض: غیرمخفی)
-            Box(
-                modifier = Modifier
-                    .alpha(if (showDesc) 0.72f else 0.48f)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(AurumColors.SurfaceAlt)
-                    .border(0.8.dp, AurumColors.Line, RoundedCornerShape(999.dp))
-                    .clickable { viewModel.setShowSettingsDescriptions(!showDesc) }
-                    .padding(horizontal = 9.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    text = if (showDesc) "👁 توضیحات: آشکار" else "🙈 توضیحات: مخفی",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (showDesc) AurumColors.TextSecondary else AurumColors.TextMuted,
-                    fontSize = 10.sp,
-                )
             }
         }
 
@@ -409,25 +392,10 @@ fun SettingsScreen(
                         )
                     }
 
-                    Text(
-                        text = if (settings.useFixedDollarRisk) {
-                            "حالت فعال: ریسک ثابت دلاری (" + String.format(Locale.US, "$%.2f", settings.fixedRiskUsd) +
-                                "). درصد ریسک (" + String.format(Locale.US, "%.2f", settings.riskPercent) +
-                                "%) در این حالت نادیده گرفته می‌شود و همین مبلغ ثابت ملاک است."
-                        } else {
-                            "حالت فعال: درصدی از موجودی (" + String.format(Locale.US, "%.2f", settings.riskPercent) +
-                                "% × " + String.format(Locale.US, "$%.2f", settings.accountBalance) + " = " +
-                                String.format(Locale.US, "$%.2f", activeRiskUsd) + ")."
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextMuted,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
                     // دامنهٔ دلاری هدف، از همان مبلغ ریسک: ۱٫۵R تا ۳R
                     Text(
-                        text = "هدف هر معامله: از " +
-                            String.format(Locale.US, "$%.2f", activeRiskUsd * 1.5) + " (۱٫۵R) تا " +
-                            String.format(Locale.US, "$%.2f", activeRiskUsd * 3.0) + " (۳R) — سود خالص بعد از کارمزد",
+                        text = "۱٫۵R → " + String.format(Locale.US, "$%.2f", activeRiskUsd * 1.5) +
+                            "  ·  ۳R → " + String.format(Locale.US, "$%.2f", activeRiskUsd * 3.0),
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.Green,
                         fontWeight = FontWeight.Bold,
