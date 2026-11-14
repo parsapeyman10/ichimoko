@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Static contract checks for the native-15m TradingView source.
+
+TradingView's compiler is not available in this workspace.  These checks are
+not a substitute for a Pine Editor compile; they guard the scope that is easy
+to regress locally: one native timeframe, no MTF access, Main-Core gates, and
+one frozen SL/TP lifecycle.
+"""
+
+from __future__ import annotations
+
+import re
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+SOURCE = ROOT / "strategies" / "tradingview" / "BASE_ICHIMOKU_Main_Core_Native_15m.pine"
+
+
+def without_line_comments(source: str) -> str:
+    return "\n".join(line.split("//", 1)[0] for line in source.splitlines())
+
+
+class MainCoreNative15StaticContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.source = SOURCE.read_text(encoding="utf-8")
+        cls.code = without_line_comments(cls.source)
+
+    def test_is_a_native_15m_strategy(self) -> None:
+        self.assertIn('strategy("BASE Main-Core native 15m | Trend Origin"', self.code)
+        self.assertIn("timeframe.isminutes and timeframe.multiplier == 15", self.code)
+        self.assertIn("process_orders_on_close=false", self.code)
+
+    def test_has_no_multitimeframe_or_resampling_access(self) -> None:
+        forbidden = ("request.security", "request.security_lower_tf", "request.economic", "ticker.modify", "timeframe.change")
+        for token in forbidden:
+            self.assertNotIn(token, self.code, token)
+        self.assertNotIn('input.timeframe(', self.code)
+        self.assertNotIn('timeframe.period', self.code)
+
+    def test_contains_all_native_main_core_condition_slots(self) -> None:
+        for number in range(1, 18):
+            self.assertRegex(self.code, rf"\bc{number}\s*=")
+        for token in (
+            "chikouBullishOpen15",
+            "recentKatanaRelease15",
+            "cClampWarning15",
+            "nativeSPointLong15",
+            "distanceToSniperAtr15",
+            "executionCost15",
+        ):
+            self.assertIn(token, self.code)
+
+    def test_uses_main_trigger_families_not_the_old_twenty_bar_breakout(self) -> None:
+        for trigger in ("triggerGenesis", "triggerPullback", "triggerBreakout", "triggerContinuation"):
+            self.assertIn(trigger, self.code)
+        self.assertNotIn("priorHigh15", self.code)
+        self.assertNotIn("priorLow15", self.code)
+
+    def test_preserves_single_lifecycle_and_frozen_bracket(self) -> None:
+        for token in (
+            'strategy.entry("BASE Main Long"',
+            'strategy.entry("BASE Main Short"',
+            'strategy.exit("BASE Main Long exit"',
+            'strategy.exit("BASE Main Short exit"',
+            "pendingStopPrice := stopPrice15",
+            "pendingTargetPrice := targetPrice15",
+            "longTrendEntryArmed := false",
+            "shortTrendEntryArmed := false",
+        ):
+            self.assertIn(token, self.code)
+        self.assertNotRegex(self.code, r"bars_held|bar_index\s*-\s*lockedSignalBar\s*>?=\s*20")
+
+    def test_only_sl_tp_lines_and_no_entry_markers(self) -> None:
+        self.assertEqual(self.code.count("line.new("), 4)
+        self.assertNotIn("plotshape(", self.code)
+        self.assertNotIn("strategy.close_all", self.code)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

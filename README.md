@@ -28,8 +28,8 @@
 [`BASE_ICHIMOKU_15m_Light_Audit.lipi`](strategies/gocharting/BASE_ICHIMOKU_15m_Light_Audit.lipi)،
 تمام محاسبات را فقط از کندل‌های native 15m انجام می‌دهد و هیچ داده یا محاسبهٔ 30m/1H ندارد. فقط خطوط واقعی SL قرمز و TP سبز را روی چارت نشان می‌دهد؛ خط Entry، indicator و label محاسباتی ندارد و R:R نیز پیش از quantity توسط کاربر تعیین می‌شود. این strategy فقط بک‌تست/شبیه‌سازی است و سفارش واقعی ارسال نمی‌کند.
 
-## TradingView Pine Script v5 — native 15m
+## TradingView Pine Script v5 — `BASE Main-Core native 15m`
 
-نسخهٔ Pine Script v5 همین strategy برای TradingView در
-[`strategies/tradingview/README_BASE_ICHIMOKU_15M_LIGHT_AUDIT_FA.md`](strategies/tradingview/README_BASE_ICHIMOKU_15M_LIGHT_AUDIT_FA.md)
-قرار دارد. این نسخه مستقل از Lipi است، اما منطق native 15m، فاصلهٔ خطوط Ichimoku، Smart Trend Exit، lifecycle تک‌معامله‌ای و SL/TP آن را منتقل می‌کند. فقط برای Strategy Tester/بک‌تست است و به صرافی سفارش واقعی نمی‌فرستد.
+نسخهٔ Pine Script v5 برای TradingView در
+[`strategies/tradingview/README_BASE_ICHIMOKU_MAIN_CORE_NATIVE_15M_FA.md`](strategies/tradingview/README_BASE_ICHIMOKU_MAIN_CORE_NATIVE_15M_FA.md)
+قرار دارد. این strategy مستقل از Lipi، هستهٔ قابل‌انتقال `BASE_ICHIMOKU` را فقط از کندل‌های native 15m محاسبه می‌کند: Kumo/TK/Sanyaku، آیندهٔ Kumo، Chikou، Kijun/C-Clamp، SSB flat، ER14، candle/volume، Hosoda guard، Sniper pocket، R:R و execution economics. نسخهٔ دقیق Main چهارلایه نیست و هیچ داده یا منطق 1H/4H، `request.security` یا resampling ندارد. فقط برای Strategy Tester/بک‌تست است و به صرافی سفارش واقعی نمی‌فرستد.
