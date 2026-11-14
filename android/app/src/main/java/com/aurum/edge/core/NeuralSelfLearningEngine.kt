@@ -250,6 +250,14 @@ data class NeuralRegressedParameterRow(
     val confidenceIntervalLabel: String,
     val unitLabel: String,
     val impactVerdictFa: String,
+    /**
+     * آیا این مقدار رگرسیون‌شده واقعاً **اعمال** شده است؟
+     * فقط وقتی `true` است که نمونه کافی (≥۳۰)، R² > ۰٫۰۲ و |t| ≥ ۱٫۹۶ باشد؛ وگرنه مقدار
+     * پیشین دست‌نخورده می‌ماند و گزارش هم همان را نشان می‌دهد.
+     */
+    val applied: Boolean = false,
+    /** دلیل اعمال‌شدن یا اعمال‌نشدن — تا گزارش «چرا» را هم بگوید. */
+    val significanceNoteFa: String = "",
 )
 
 @Serializable
@@ -281,6 +289,12 @@ data class NeuralParameterRegressionReport(
     val optimalRrCorridorFa: String = "بازه قفل‌شده و رگرسیون‌شده R:R: [1:1.50 .. 1:3.00] (حداقل ۱.۵ و حداکثر ۳.۰)",
     val parameterRows: List<NeuralRegressedParameterRow> = emptyList(),
     val featureSlopes: List<NeuralFeatureRegressionSlope> = emptyList(),
+    /** چند پارامتر واقعاً از Prior تغییر کرد (بقیه معنادار نبودند و دست‌نخورده ماندند). */
+    val parametersApplied: Int = 0,
+    /** چند ویژگی از ۱۶ ویژگی ضریب معنادار (|t| ≥ ۱٫۹۶) داشت. */
+    val significantFeatures: Int = 0,
+    /** قضاوت یک‌خطی دربارهٔ اعتبار آماری همین برازش. */
+    val fitQualityVerdictFa: String = "هنوز برازشی اجرا نشده است",
     val regressionDiagnosticNotesFa: List<String> = emptyList(),
     val computedAtMs: Long = 0L,
 )
@@ -796,7 +810,8 @@ class NeuralSelfLearningEngine(
             val count = samples.size
             val wins = samples.filter { it.won }
             val losses = samples.filter { !it.won }
-            val wr = if (count > 0) (wins.size.toDouble() / count.toDouble()) * 100.0 else 64.0
+            // پیش‌ازاین بدون هیچ نمونه‌ای، نرخ برد ۶۴٪ «ساختگی» گزارش می‌شد. حالا صفر است.
+            val wr = if (count > 0) (wins.size.toDouble() / count.toDouble()) * 100.0 else 0.0
             val grossProfitR = wins.sumOf { it.achievedR.coerceAtLeast(0.1) }
             val grossLossR = losses.sumOf { abs(it.achievedR).coerceAtLeast(0.1) }
             val pf = when {
@@ -3426,7 +3441,11 @@ class NeuralSelfLearningEngine(
                 minSniperDistanceAtr = round(regMinSniper * 100.0) / 100.0,
                 neuralWinProbGatePct = round(regGatePct * 10.0) / 10.0,
                 featureTunings = newFeats,
-                tuningSummaryFa = "رگرسیون Ridge L2 + Huber IRLS (R²=${String.format(Locale.US, "%.2f", report.rSquared)} · λ=$safeLambda): R:R∈[1:${regMinRr}..1:3.00] · استاپ=${regSlBuf}ATR · کیجون≤${regKijunExt}ATR.",
+                tuningSummaryFa = if (report.parametersApplied == 0) {
+                    "رگرسیون اجرا شد ولی هیچ پارامتری معنادار نبود (${report.fitQualityVerdictFa}) — تنظیمات دست‌نخورده ماند."
+                } else {
+                    "رگرسیون Ridge L2 + Huber IRLS (R²=${String.format(Locale.US, "%.3f", report.rSquared)} · λ=$safeLambda · ${report.parametersApplied} پارامتر معنادار): R:R∈[1:${regMinRr}..1:3.00] · استاپ=${regSlBuf}ATR · کیجون≤${regKijunExt}ATR."
+                },
             )
         }
 
@@ -3443,10 +3462,105 @@ class NeuralSelfLearningEngine(
             neuralWinProbGatePct = round(regGatePct * 10.0) / 10.0,
             perStrategyProfiles = updatedProfiles,
             latestRegressionReport = report,
-            tuningSummaryFa = "رگرسیون ماتریسی Ridge L2 + Huber IRLS (R²=${String.format(Locale.US, "%.2f", report.rSquared)} · RMSE=${String.format(Locale.US, "%.2f", report.walkForwardRmse)}): پارامترهای حد ضرر ساختاری و R:R در بازه [1:1.50 .. 1:3.00] کالیبره شدند.",
+            tuningSummaryFa = if (report.parametersApplied == 0) {
+                "رگرسیون ماتریسی اجرا شد و هیچ پارامتری معنادار نبود (${report.fitQualityVerdictFa})."
+            } else {
+                "رگرسیون ماتریسی Ridge L2 + Huber IRLS (R²=${String.format(Locale.US, "%.3f", report.rSquared)} · RMSE=${String.format(Locale.US, "%.2f", report.walkForwardRmse)} · ${report.parametersApplied} از ۱۰ پارامتر معنادار): پارامترهای حد ضرر و R:R کالیبره شدند."
+            },
         )
         persistState(persistedState.copy(autoTunedParameters = nextAuto))
         return report
+    }
+
+    /** خروجی آمارهٔ برازش Ridge وزن‌دار: خطای معیار هر ضریب + شاخص‌های نکویی برازش. */
+    private class WeightedFitStats(
+        val se: DoubleArray,
+        val sigmaSquared: Double,
+        val effectiveSamples: Double,
+    )
+
+    /**
+     * خطای معیار **واقعی** ضرایب رگرسیون Ridge وزن‌دار.
+     *
+     * `XᵀWX + λI` ساخته و معکوس می‌شود؛ سپس `Cov(β) = σ̂² (XᵀWX + λI)⁻¹` و
+     * `σ̂² = Σwᵢrᵢ² / (Σwᵢ − p)`. اگر نمونه از درجهٔ آزادی کمتر باشد، `NaN` برمی‌گردد
+     * تا گزارش به‌جای عدد ساختگی، «—» چاپ کند.
+     */
+    private fun weightedRidgeFitStats(
+        samples: List<ReplayExperienceSample>,
+        beta: DoubleArray,
+        ridgeLambda: Double,
+        huberDelta: Double,
+    ): WeightedFitStats {
+        val n = samples.size
+        val p = INPUT_DIM
+        val nan = WeightedFitStats(DoubleArray(p) { Double.NaN }, Double.NaN, 0.0)
+        if (n < p + 2) return nan
+
+        // وزن‌های Huber روی باقی‌ماندهٔ مدل نهایی
+        val weights = DoubleArray(n) { i ->
+            val smp = samples[i]
+            var pred = 0.45
+            for (j in 0 until p) pred += smp.features.getOrElse(j) { 0.0 } * beta[j]
+            val res = abs(smp.achievedR.coerceIn(-1.0, 3.0) - pred)
+            if (res <= huberDelta) 1.0 else huberDelta / (res + 1e-6)
+        }
+
+        val xtwx = Array(p) { DoubleArray(p) }
+        for (j in 0 until p) {
+            for (k in j until p) {
+                var acc = 0.0
+                for (i in 0 until n) {
+                    val xi = samples[i].features
+                    acc += weights[i] * xi.getOrElse(j) { 0.0 } * xi.getOrElse(k) { 0.0 }
+                }
+                if (j == k) acc += ridgeLambda * 4.0
+                xtwx[j][k] = acc
+                xtwx[k][j] = acc
+            }
+        }
+
+        val wSum = weights.sum()
+        var sseW = 0.0
+        for (i in 0 until n) {
+            val smp = samples[i]
+            var pred = 0.45
+            for (j in 0 until p) pred += smp.features.getOrElse(j) { 0.0 } * beta[j]
+            val r = smp.achievedR.coerceIn(-1.0, 3.0) - pred
+            sseW += weights[i] * r * r
+        }
+        // σ̂² با درجهٔ آزادی مؤثر (تعداد وزن‌ها منهای تعداد پارامترها و یک عرض از مبدأ)
+        val dofEff = wSum - p - 1.0
+        if (dofEff <= 0.0) return nan
+        val sigma2 = sseW / dofEff
+
+        val inv = invertMatrix(xtwx) ?: return nan
+        val se = DoubleArray(p) { j ->
+            val v = sigma2 * inv[j][j]
+            if (v.isFinite() && v > 0.0) sqrt(v) else Double.NaN
+        }
+        return WeightedFitStats(se, sigma2, wSum)
+    }
+
+    /** معکوس ماتریس با حذف گاوسی — `null` اگر تکین باشد. */
+    private fun invertMatrix(m: Array<DoubleArray>): Array<DoubleArray>? {
+        val n = m.size
+        val a = Array(n) { i -> DoubleArray(2 * n) { j -> if (j < n) m[i][j] else if (j - n == i) 1.0 else 0.0 } }
+        for (col in 0 until n) {
+            var pivot = col
+            for (r in col + 1 until n) if (abs(a[r][col]) > abs(a[pivot][col])) pivot = r
+            if (abs(a[pivot][col]) < 1e-12) return null
+            if (pivot != col) { val tmp = a[pivot]; a[pivot] = a[col]; a[col] = tmp }
+            val div = a[col][col]
+            for (j in 0 until 2 * n) a[col][j] /= div
+            for (r in 0 until n) {
+                if (r == col) continue
+                val f = a[r][col]
+                if (f == 0.0) continue
+                for (j in 0 until 2 * n) a[r][j] -= f * a[col][j]
+            }
+        }
+        return Array(n) { i -> DoubleArray(n) { j -> a[i][j + n] } }
     }
 
     private fun computeParameterRegressionInternal(
@@ -3461,11 +3575,13 @@ class NeuralSelfLearningEngine(
         val modelOrNull = if (isAll) null else BitcoinStrategyModel.fromId(normId)
         val stratTitleFa = modelOrNull?.titleFa ?: "تمام مدل‌های فعال (رگرسیون ماتریسی جامع)"
 
+        // ⚠️ پیش‌ازاین اگر یک استراتژی نمونه نداشت، بی‌صدا نمونه‌های **همهٔ** استراتژی‌ها
+        // جای آن می‌نشست؛ نتیجه این بود که هر پروفایل شبیه هم و «قالب‌گونه» می‌شد.
+        // حالا نمونهٔ هر استراتژی فقط مال خودش است؛ اگر نداشته باشد، گزارش «بدون نمونه» می‌گوید.
         val filteredSamples = if (isAll) {
             cur.replayBuffer
         } else {
             cur.replayBuffer.filter { BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == normId }
-                .ifEmpty { cur.replayBuffer }
         }
         val nSamples = filteredSamples.size
 
@@ -3523,14 +3639,25 @@ class NeuralSelfLearningEngine(
             }
         }
 
+        // ── آمارهٔ برازش واقعی (نه عدد ثابت) ─────────────────────────────────
+        // پیش‌ازاین خطای معیار هر ضریب با یک فرمول ساختگی `0.06/sqrt(n+8)` ساخته می‌شد و
+        // t-stat چند ردیف پارامتر هم عددهای دستی (۴٫۶۵، ۳٫۹۲، −۴٫۸۵ …) بودند. نتیجه: گزارشی
+        // که «t=−145» نشان می‌داد ولی R² صفر بود. اکنون خطای معیار از کوواریانس واقعیِ
+        // برازش Ridge وزن‌دار (Huber) می‌آید:
+        //   Cov(β) = σ̂² · (XᵀWX + λI)⁻¹ ,  σ̂² = Σwᵢrᵢ² / (Σwᵢ − p)
+        val fit = weightedRidgeFitStats(filteredSamples, betaR, ridgeLambda, huberDelta)
+        val seBeta = fit.se
+
         val absSum = betaR.sumOf { abs(it) }.coerceAtLeast(1e-6)
         val featureSlopes = (0 until INPUT_DIM).map { idx ->
             val (titleFa, _) = featureTitleFa(idx)
             val bR = round(betaR[idx] * 1000.0) / 1000.0
             val bW = round(betaWin[idx] * 1000.0) / 1000.0
             val imp = round(((abs(betaR[idx]) / absSum) * 100.0) * 10.0) / 10.0
-            val se = round((0.06 / sqrt((nSamples + 8).toDouble())) * 1000.0) / 1000.0
-            val tStat = round((bR / se.coerceAtLeast(0.005)) * 100.0) / 100.0
+            // خطای معیار واقعی؛ اگر نمونه برای برآورد واریانس کافی نباشد `NaN` می‌ماند
+            // تا در گزارش «—» چاپ شود، نه یک t ساختگی.
+            val se = seBeta[idx]
+            val tStat = if (se.isFinite() && se > 1e-9) round((betaR[idx] / se) * 100.0) / 100.0 else Double.NaN
             NeuralFeatureRegressionSlope(
                 featureIndex = idx,
                 featureTitleFa = titleFa,
@@ -3559,129 +3686,6 @@ class NeuralSelfLearningEngine(
         val regMaxWick = round((0.46 - wickPenalty * 0.12).coerceIn(0.34, 0.44) * 100.0) / 100.0
         val regSniperDist = round((0.68 - sniperSlope * 0.14).coerceIn(0.48, 0.72) * 100.0) / 100.0
 
-        val paramRows = listOf(
-            NeuralRegressedParameterRow(
-                paramKey = "optimalRiskRewardTarget",
-                paramTitleFa = "۱. هدف بهینه R:R (قفل در بازه ۱.۵ تا ۳.۰)",
-                priorValue = baseOptRr,
-                regressedValue = regOptRr,
-                slopeBeta = round(betaR[14] * 100.0) / 100.0,
-                stdError = 0.04,
-                tStat = 4.65,
-                confidenceIntervalLabel = "[1:${String.format(Locale.US, "%.2f", (regOptRr - 0.15).coerceAtLeast(1.50))} .. 1:${String.format(Locale.US, "%.2f", (regOptRr + 0.15).coerceAtMost(3.00))}]",
-                unitLabel = "R:R",
-                impactVerdictFa = "🎯 سقف ۳.۰ و کف ۱.۵ قفل شد؛ بیشترین نرخ برخورد به TP در موج N/V هوسودا",
-            ),
-            NeuralRegressedParameterRow(
-                paramKey = "minRiskReward",
-                paramTitleFa = "۲. حداقل R:R مجاز ورود (کف مطلق ≥ ۱.۵۰)",
-                priorValue = 1.50,
-                regressedValue = regMinRr,
-                slopeBeta = 0.31,
-                stdError = 0.03,
-                tStat = 3.92,
-                confidenceIntervalLabel = "[1:1.50 .. 1:${String.format(Locale.US, "%.2f", regMinRr + 0.12)}]",
-                unitLabel = "R:R",
-                impactVerdictFa = "🛡️ حذف معاملات کم‌بازده زیر ۱:۱.۵ و تضمین امید ریاضی مثبت",
-            ),
-            NeuralRegressedParameterRow(
-                paramKey = "slBufferAtr",
-                paramTitleFa = "۳. بافر محافظ ضد استاپ‌هانت پشت سنگر ساختاری",
-                priorValue = 0.25,
-                regressedValue = regSlBuf,
-                slopeBeta = round(-betaR[13] * 100.0) / 100.0,
-                stdError = 0.02,
-                tStat = 4.18,
-                confidenceIntervalLabel = "[${String.format(Locale.US, "%.2f", regSlBuf - 0.03)} .. ${String.format(Locale.US, "%.2f", regSlBuf + 0.03)} ATR]",
-                unitLabel = "ATR",
-                impactVerdictFa = "🛡️ قرارگیری دقیق پشت فرکتال ۵ کندلی + کیجون۲۶ برای مصونیت از شدوی مارکت‌میکر",
-            ),
-            NeuralRegressedParameterRow(
-                paramKey = "maxSlDistanceAtr",
-                paramTitleFa = "۴. سقف مجاز فاصله حد ضرر (حذف استاپ‌های خیلی دور و بی‌خاصیت)",
-                priorValue = 2.50,
-                regressedValue = regMaxSlAtr,
-                slopeBeta = -0.44,
-                stdError = 0.05,
-                tStat = -4.85,
-                confidenceIntervalLabel = "[1.60 .. ${String.format(Locale.US, "%.2f", regMaxSlAtr)} ATR]",
-                unitLabel = "ATR",
-                impactVerdictFa = "⚡ جلوگیری از دور شدن بیش‌ازحد ۱R و دور شدن غیرواقعی تارگت TP",
-            ),
-            NeuralRegressedParameterRow(
-                paramKey = "minSlDistanceAtr",
-                paramTitleFa = "۵. کف فاصله ایمن حد ضرر ساختاری (ضد نویز لحظه‌ای)",
-                priorValue = 0.80,
-                regressedValue = regMinSlAtr,
-                slopeBeta = 0.29,
-                stdError = 0.03,
-                tStat = 3.74,
-                confidenceIntervalLabel = "[0.80 .. ${String.format(Locale.US, "%.2f", regMinSlAtr + 0.08)} ATR]",
-                unitLabel = "ATR",
-                impactVerdictFa = "🔒 جلوگیری از استاپ خوردن در نوسان عادی ۱ کندل اول پس از ورود",
-            ),
-            NeuralRegressedParameterRow(
-                paramKey = "maxKijunExtensionAtr",
-                paramTitleFa = "۶. سقف کشیدگی از کیجون‌سن (فیلتر ضد C-Clamp)",
-                priorValue = 1.75,
-                regressedValue = regKijunExt,
-                slopeBeta = round(betaR[12] * 100.0) / 100.0,
-                stdError = 0.04,
-                tStat = -4.52,
-                confidenceIntervalLabel = "[1.40 .. ${String.format(Locale.US, "%.2f", regKijunExt + 0.08)} ATR]",
-                unitLabel = "ATR",
-                impactVerdictFa = "🧲 جلوگیری از خرید در سقف و فروش در کف دور از تعادل کیجون",
-            ),
-            NeuralRegressedParameterRow(
-                paramKey = "minEfficiencyRatio",
-                paramTitleFa = "۷. کف کارایی جهت‌دار روند کافمن (ER14)",
-                priorValue = 0.20,
-                regressedValue = regMinEr,
-                slopeBeta = round(betaR[10] * 100.0) / 100.0,
-                stdError = 0.02,
-                tStat = 5.12,
-                confidenceIntervalLabel = "[${(regMinEr * 100 - 2).toInt()}% .. ${(regMinEr * 100 + 3).toInt()}%]",
-                unitLabel = "ER",
-                impactVerdictFa = "📈 فیلتر کامل بازار رِنج و ورود صرفاً در روندهای با خلوص حرکتی بالا",
-            ),
-            NeuralRegressedParameterRow(
-                paramKey = "maxAdverseWickRatio",
-                paramTitleFa = "۸. سقف نسبت شدوی مخالف کندل ماشه",
-                priorValue = 0.45,
-                regressedValue = regMaxWick,
-                slopeBeta = round(betaR[13] * 100.0) / 100.0,
-                stdError = 0.02,
-                tStat = -4.35,
-                confidenceIntervalLabel = "[32% .. ${(regMaxWick * 100).toInt()}%]",
-                unitLabel = "Wick%",
-                impactVerdictFa = "🕯️ حذف کندل‌های پین‌بار معکوس و فیک‌بریک‌اوت‌های نقدینگی",
-            ),
-            NeuralRegressedParameterRow(
-                paramKey = "minSniperDistanceAtr",
-                paramTitleFa = "۹. شعاع مجاز نقطه‌زنی اسنایپر از تنکان/کیجون",
-                priorValue = 0.65,
-                regressedValue = regSniperDist,
-                slopeBeta = round(betaR[15] * 100.0) / 100.0,
-                stdError = 0.03,
-                tStat = 4.40,
-                confidenceIntervalLabel = "[0.45 .. ${String.format(Locale.US, "%.2f", regSniperDist)} ATR]",
-                unitLabel = "ATR",
-                impactVerdictFa = "🎯 ورود میلی‌متری در پولبک تنکان و کاهش ریسک اولیه معامله",
-            ),
-            NeuralRegressedParameterRow(
-                paramKey = "minVolumeRatio20",
-                paramTitleFa = "۱۰. کف نسبت حجم کندل ماشه به میانگین ۲۰ دوره",
-                priorValue = 0.60,
-                regressedValue = regMinVol,
-                slopeBeta = 0.27,
-                stdError = 0.03,
-                tStat = 3.60,
-                confidenceIntervalLabel = "[0.58x .. ${String.format(Locale.US, "%.2fx", regMinVol + 0.08)}]",
-                unitLabel = "Vol×",
-                impactVerdictFa = "📊 تایید حضور سفارشات نهادی در لحظه شکست یا پولبک",
-            ),
-        )
-
         // ── معیارهای برازش: اندازه‌گیری روی همان داده، نه عدد ثابت ──────────────
         // پیش از این R² = ۰٫۸۴ و RMSE = ۰٫۳۱ بود؛ هیچ‌کدام محاسبه نمی‌شدند و فقط به `nSamples`
         // وابسته بودند. اکنون باقی‌ماندهٔ واقعی (SSE/SST) روی پیش‌بینی مدل محاسبه می‌شود.
@@ -3694,16 +3698,15 @@ class NeuralSelfLearningEngine(
         val meanTarget = if (targets.isNotEmpty()) targets.average() else 0.0
         val sse = targets.indices.sumOf { i -> (targets[i] - fittedPreds[i]) * (targets[i] - fittedPreds[i]) }
         val sst = targets.sumOf { t -> (t - meanTarget) * (t - meanTarget) }
-        val r2 = if (nSamples >= 2 && sst > 1e-9) {
-            round((1.0 - sse / sst).coerceIn(0.0, 0.99) * 100.0) / 100.0
-        } else {
-            0.0
-        }
-        val adjR2 = if (nSamples > INPUT_DIM + 1) {
+        // R² واقعی: پیش‌ازاین با `coerceIn(0.0, 0.99)` منفی‌ها به صفر چسبانده می‌شد و
+        // گزارش «R²=0.00» می‌داد در حالی که عدد واقعی منفی بود — یعنی بدتر از میانگین.
+        val r2Raw = if (nSamples >= 2 && sst > 1e-9) 1.0 - sse / sst else Double.NaN
+        val r2 = if (r2Raw.isFinite()) round(r2Raw * 1000.0) / 1000.0 else Double.NaN
+        val adjR2 = if (nSamples > INPUT_DIM + 1 && r2.isFinite()) {
             val dof = nSamples - INPUT_DIM - 1
-            round((1.0 - (1.0 - r2) * (nSamples - 1).toDouble() / dof).coerceIn(0.0, 0.99) * 100.0) / 100.0
+            round((1.0 - (1.0 - r2) * (nSamples - 1).toDouble() / dof) * 1000.0) / 1000.0
         } else {
-            0.0
+            Double.NaN
         }
         val rmse = if (nSamples >= 2) {
             round(sqrt(sse / nSamples) * 100.0) / 100.0
@@ -3716,10 +3719,138 @@ class NeuralSelfLearningEngine(
             0.0
         }
 
+        // ── ده پارامتر ساختاری: عدد، خطای معیار و بازهٔ اطمینان همه محاسبه‌شده ─────
+        // حساسیت هر پارامتر به ضریب ویژگی‌اش (`∂param/∂β`) از همان فرمول کالیبراسیون
+        // می‌آید؛ خطای معیار پارامتر = |حساسیت| × SE(β) و بازهٔ ۹۵٪ = مقدار ± ۱٫۹۶×SE.
+        // گزارش فقط وقتی پارامتر را «اعمال‌شده» می‌داند که برازش معنا داشته باشد:
+        //   نمونهٔ کافی (≥۳۰) · R² > ۰٫۰۲ · |t| ≥ ۱٫۹۶.
+        // وگرنه مقدار Prior می‌ماند و دلیلش در گزارش نوشته می‌شود.
+        val modelTrustworthy = nSamples >= 30 && r2 > 0.02
+        fun paramRow(
+            key: String,
+            titleFa: String,
+            prior: Double,
+            value: Double,
+            betaIndex: Int,
+            sensitivity: Double,
+            unit: String,
+            fmt: (Double) -> String,
+            corridorLow: Double,
+            corridorHigh: Double,
+            verdictFa: String,
+        ): NeuralRegressedParameterRow {
+            val rawSe = seBeta[betaIndex]
+            val seParam = if (rawSe.isFinite() && rawSe > 0.0) abs(sensitivity) * rawSe else Double.NaN
+            val t = if (rawSe.isFinite() && rawSe > 1e-9) round((betaR[betaIndex] / rawSe) * 100.0) / 100.0 else Double.NaN
+            val significant = t.isFinite() && abs(t) >= 1.96
+            val applied = modelTrustworthy && significant
+            val finalValue = if (applied) value else prior
+            val ciLow = if (seParam.isFinite()) (finalValue - 1.96 * seParam).coerceIn(corridorLow, corridorHigh) else Double.NaN
+            val ciHigh = if (seParam.isFinite()) (finalValue + 1.96 * seParam).coerceIn(corridorLow, corridorHigh) else Double.NaN
+            val ciLabel = if (seParam.isFinite()) "[${fmt(ciLow)} .. ${fmt(ciHigh)}]" else "[n کم است]"
+            val note = when {
+                nSamples < 30 -> "نمونه کافی نیست ($nSamples < ۳۰) — مقدار پیشین حفظ شد"
+                r2 <= 0.02 -> "R² = ${String.format(Locale.US, "%.3f", r2)} ≤ ۰٫۰۲ — برازش قدرت توضیح‌دهی ندارد"
+                !significant -> "|t| = ${if (t.isFinite()) String.format(Locale.US, "%.2f", abs(t)) else "—"} < ۱٫۹۶ — ضریب معنادار نیست"
+                else -> "معنادار (|t| = ${String.format(Locale.US, "%.2f", abs(t))}) و اعمال شد"
+            }
+            return NeuralRegressedParameterRow(
+                paramKey = key,
+                paramTitleFa = titleFa,
+                priorValue = prior,
+                regressedValue = finalValue,
+                slopeBeta = round(betaR[betaIndex] * 1000.0) / 1000.0,
+                stdError = if (seParam.isFinite()) round(seParam * 1000.0) / 1000.0 else -1.0,
+                tStat = if (t.isFinite()) t else -999.0,
+                confidenceIntervalLabel = ciLabel,
+                unitLabel = unit,
+                impactVerdictFa = verdictFa,
+                applied = applied,
+                significanceNoteFa = note,
+            )
+        }
+
+        val paramRows = listOf(
+            paramRow(
+                "optimalRiskRewardTarget", "۱. هدف بهینه R:R (قفل در بازه ۱.۵ تا ۳.۰)",
+                prior = baseOptRr, value = regOptRr, betaIndex = 10, sensitivity = 0.25,
+                unit = "R:R", fmt = { String.format(Locale.US, "1:%.2f", it) },
+                corridorLow = 1.50, corridorHigh = 3.00,
+                verdictFa = "🎯 سقف ۳.۰ و کف ۱.۵ قفل است؛ هدف از خلوص حرکت (ER14) کالیبره می‌شود",
+            ),
+            paramRow(
+                "minRiskReward", "۲. حداقل R:R مجاز ورود (کف مطلق ≥ ۱.۵۰)",
+                prior = 1.50, value = regMinRr, betaIndex = 10, sensitivity = 0.22,
+                unit = "R:R", fmt = { String.format(Locale.US, "1:%.2f", it) },
+                corridorLow = 1.50, corridorHigh = 3.00,
+                verdictFa = "🛡️ حذف معاملات کم‌بازده زیر ۱:۱.۵",
+            ),
+            paramRow(
+                "slBufferAtr", "۳. بافر محافظ ضد استاپ‌هانت پشت سنگر ساختاری",
+                prior = 0.25, value = regSlBuf, betaIndex = 13, sensitivity = 0.12,
+                unit = "ATR", fmt = { String.format(Locale.US, "%.2f ATR", it) },
+                corridorLow = 0.18, corridorHigh = 0.45,
+                verdictFa = "🛡️ فاصله از فرکتال ۵ کندلی + کیجون۲۶",
+            ),
+            paramRow(
+                "maxSlDistanceAtr", "۴. سقف مجاز فاصله حد ضرر",
+                prior = 2.50, value = regMaxSlAtr, betaIndex = 12, sensitivity = 0.22,
+                unit = "ATR", fmt = { String.format(Locale.US, "%.2f ATR", it) },
+                corridorLow = 1.60, corridorHigh = 2.50,
+                verdictFa = "⚡ جلوگیری از دور شدن بیش‌ازحد ۱R",
+            ),
+            paramRow(
+                "minSlDistanceAtr", "۵. کف فاصله ایمن حد ضرر ساختاری",
+                prior = 0.80, value = regMinSlAtr, betaIndex = 13, sensitivity = 0.14,
+                unit = "ATR", fmt = { String.format(Locale.US, "%.2f ATR", it) },
+                corridorLow = 0.75, corridorHigh = 1.20,
+                verdictFa = "🔒 جلوگیری از استاپ خوردن در نوسان عادی",
+            ),
+            paramRow(
+                "maxKijunExtensionAtr", "۶. سقف کشیدگی از کیجون‌سن (فیلتر C-Clamp)",
+                prior = 1.75, value = regKijunExt, betaIndex = 12, sensitivity = 0.28,
+                unit = "ATR", fmt = { String.format(Locale.US, "%.2f ATR", it) },
+                corridorLow = 1.30, corridorHigh = 2.20,
+                verdictFa = "🧲 جلوگیری از خرید در سقف دور از تعادل کیجون",
+            ),
+            paramRow(
+                "minEfficiencyRatio", "۷. کف کارایی جهت‌دار روند کافمن (ER14)",
+                prior = 0.20, value = regMinEr, betaIndex = 10, sensitivity = 0.08,
+                unit = "ER", fmt = { String.format(Locale.US, "%.3f", it) },
+                corridorLow = 0.14, corridorHigh = 0.45,
+                verdictFa = "📈 فیلتر بازار رِنج",
+            ),
+            paramRow(
+                "maxAdverseWickRatio", "۸. سقف نسبت شدوی مخالف کندل ماشه",
+                prior = 0.45, value = regMaxWick, betaIndex = 13, sensitivity = 0.12,
+                unit = "Wick%", fmt = { String.format(Locale.US, "%.3f", it) },
+                corridorLow = 0.28, corridorHigh = 0.55,
+                verdictFa = "🕯️ حذف پین‌بار معکوس و فیک‌بریک‌اوت",
+            ),
+            paramRow(
+                "minSniperDistanceAtr", "۹. شعاع مجاز نقطه‌زنی اسنایپر",
+                prior = 0.65, value = regSniperDist, betaIndex = 15, sensitivity = 0.14,
+                unit = "ATR", fmt = { String.format(Locale.US, "%.2f ATR", it) },
+                corridorLow = 0.40, corridorHigh = 0.90,
+                verdictFa = "🎯 ورود میلی‌متری در پولبک تنکان",
+            ),
+            paramRow(
+                "minVolumeRatio20", "۱۰. کف نسبت حجم کندل ماشه به میانگین ۲۰ دوره",
+                prior = 0.60, value = regMinVol, betaIndex = 10, sensitivity = 0.10,
+                unit = "Vol×", fmt = { String.format(Locale.US, "%.2fx", it) },
+                corridorLow = 0.40, corridorHigh = 1.15,
+                verdictFa = "📊 تایید حضور سفارشات نهادی",
+            ),
+        )
+        val appliedCount = paramRows.count { it.applied }
+        val appliedMap = paramRows.associate { it.paramKey to String.format(Locale.US, "%.2f", it.regressedValue) }
+
         val notes = listOf(
             "🔬 علت بی‌فایده بودن برخی حد ضررهای قبلی: در روش قبلی یا کف درصدی مصنوعی (مثلاً ۰.۸۵٪ در کریپتو معادل ۵ برابر ATR) استاپ را در فضای خالی و بسیار دور قرار می‌داد که باعث می‌شد تارگت ۱.۵R تا ۳R به فاصله ۱۰ برابر ATR پرتاب شده و هرگز تاچ نشود، و یا صرفاً زیر شدوی ۱ کندل اخیر بدون فرکتال ۵ کندلی قرار می‌گرفت و شکار شدو می‌شد.",
-            "🛡️ متود روز دنیا برای بهترین محل حد ضرر (Multi-Anchor Structural Invalidation + Liquidity-Sweep Shield): اکنون حد ضرر دقیقاً پشت «هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون‌سن ۲۶/۳۰ + لبه کومو» به‌علاوه بافر تطبیقی ضد استاپ‌هانت ($regSlBuf ATR) و محصور در دالان طلایی [$regMinSlAtr ATR .. $regMaxSlAtr ATR] قرار می‌گیرد.",
-            "🎯 قفل سخت‌گیرانه بازه R:R در [1:1.50 .. 1:3.00]: بر اساس رگرسیون Huber-Ridge، نسبت R:R هیچ معامله‌ای کمتر از ۱.۵ و بیشتر از ۳.۰ نخواهد بود (بهترین نقطه تعادل نرخ برد و سود خالص روی 1:$regOptRr).",
+            "🛡️ متود روز دنیا برای بهترین محل حد ضرر (Multi-Anchor Structural Invalidation + Liquidity-Sweep Shield): اکنون حد ضرر دقیقاً پشت «هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون‌سن ۲۶/۳۰ + لبه کومو» به‌علاوه بافر تطبیقی ضد استاپ‌هانت (${appliedMap["slBufferAtr"]} ATR) و محصور در دالان [${appliedMap["minSlDistanceAtr"]} ATR .. ${appliedMap["maxSlDistanceAtr"]} ATR] قرار می‌گیرد.",
+            "🎯 قفل سخت‌گیرانه بازه R:R در [1:1.50 .. 1:3.00]: نسبت R:R هیچ معامله‌ای کمتر از ۱.۵ و بیشتر از ۳.۰ نخواهد بود.",
+            "🧪 آماره‌ها محاسبه می‌شوند، نه نوشته: خطای معیار از Cov(β)=σ̂²(XᵀWX+λI)⁻¹ و σ̂² بر درجهٔ آزادی مؤثر. از ۱۰ پارامتر، $appliedCount مورد معنادار و اعمال شد؛ بقیه با مقدار پیشین ماندند.",
+            "🚫 پارامتری که |t| < ۱٫۹۶ یا R² ≤ ۰٫۰۲ دارد اعمال نمی‌شود: روی دادهٔ نویزی، تغییر پارامتر به‌جای یادگیری، سردرگمی است.",
         )
 
         return NeuralParameterRegressionReport(
@@ -3742,10 +3873,20 @@ class NeuralSelfLearningEngine(
             expectedRLiftPerTrade = if (nSamples >= 30 && r2 > 0.20 && meanTarget > 0.0) {
                 round(r2 * 0.49 * 100.0) / 100.0
             } else 0.0,
-            optimalStopLossCorridorFa = "بازه بهینه حد ضرر ساختاری: [$regMinSlAtr ATR .. $regMaxSlAtr ATR] پشت فرکتال ۵ کندلی + کیجون۲۶ + بافر $regSlBuf ATR",
-            optimalRrCorridorFa = "بازه قفل‌شده R:R: [1:1.50 .. 1:3.00] · نقطه بهینه رگرسیون: 1:$regOptRr",
+            // این دو متن از **مقادیر نهایی** (اعمال‌شده یا پیشین) ساخته می‌شوند، نه از خروجی خام
+            // رگرسیون؛ وگرنه گزارش یک عدد می‌نوشت و موتور عدد دیگری اجرا می‌کرد.
+            optimalStopLossCorridorFa = "دالان حد ضرر: [${appliedMap["minSlDistanceAtr"]} ATR .. ${appliedMap["maxSlDistanceAtr"]} ATR] · بافر ${appliedMap["slBufferAtr"]} ATR پشت فرکتال ۵ کندلی + کیجون۲۶",
+            optimalRrCorridorFa = "همین حالا اجرا می‌شود: کف R:R = 1:${appliedMap["minRiskReward"]} · هدف = 1:${appliedMap["optimalRiskRewardTarget"]} (سقف قفل‌شده 1:3.00)",
             parameterRows = paramRows,
             featureSlopes = featureSlopes,
+            parametersApplied = appliedCount,
+            significantFeatures = featureSlopes.count { it.tStat.isFinite() && abs(it.tStat) >= 1.96 },
+            fitQualityVerdictFa = when {
+                nSamples < 30 -> "نمونه کافی نیست ($nSamples < ۳۰) — هیچ پارامتری اعمال نشد"
+                !r2.isFinite() -> "هدف تنوع ندارد (SST≈۰) — رگرسیون بی‌معناست"
+                r2 <= 0.02 -> "R² = ${String.format(Locale.US, "%.3f", r2)} — مدل قدرت توضیح‌دهی ندارد؛ پارامترها اعمال نشدند"
+                else -> "R² = ${String.format(Locale.US, "%.3f", r2)} — مدل ضعیف ولی معنادار؛ فقط ضرایب با |t| ≥ ۱٫۹۶ اعمال شدند"
+            },
             regressionDiagnosticNotesFa = notes,
             computedAtMs = nowMs,
         )
