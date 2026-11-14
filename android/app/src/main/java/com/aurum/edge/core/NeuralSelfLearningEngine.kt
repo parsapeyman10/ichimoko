@@ -2664,8 +2664,6 @@ class NeuralSelfLearningEngine(
         report: StrategyEvaluationReport? = null,
         featuresOverride: DoubleArray? = null,
         conditionKeyOverride: String? = null,
-        /** توضیح شرط وقتی ویژگی‌ها از بیرون می‌آیند (بدون بازخوانی دوبارهٔ کندل‌ها). */
-        conditionDescFaOverride: String? = null,
     ) {
         if (trade.isOpen || trade.pnlUsd == null) return
         learnFromClosedTradeInternal(
@@ -2722,6 +2720,8 @@ class NeuralSelfLearningEngine(
         persistImmediately: Boolean,
         featuresOverride: DoubleArray? = null,
         conditionKeyOverride: String? = null,
+        /** توضیح شرط وقتی ویژگی‌ها از بیرون می‌آیند (بدون بازخوانی دوبارهٔ کندل‌ها). */
+        conditionDescFaOverride: String? = null,
     ) {
         if (!BitcoinStrategyModel.fromId(trade.strategyId).neuralLearningEnabled) return
         val pnl = trade.pnlUsd ?: return
