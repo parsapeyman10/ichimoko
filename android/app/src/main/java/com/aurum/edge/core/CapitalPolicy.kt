@@ -173,7 +173,8 @@ data class CapitalPolicy(
                 "ریسک $" + money(fixedRisk) + " بیش از نیمی از موجودی ($" + money(maxFixedRisk) +
                     ") بود؛ به $" + money(maxFixedRisk) + " محدود شد.",
             )
-            fixedRisk = round(maxFixedRisk * 100.0) / 100.0
+            // پایین‌گرد: سقف هرگز نباید با رُند کردن یک صدم بالا برود.
+            fixedRisk = kotlin.math.floor(maxFixedRisk * 100.0) / 100.0
         }
 
         var daily = dailyLossLimitPercent
@@ -253,7 +254,7 @@ data class CapitalPolicy(
             }
         }
 
-        if (riskPct > 5.0) {
+        if (riskPct >= 5.0) {
             out += CapitalFinding(
                 "risk_above_five_pct",
                 CapitalSeverity.DANGER,
