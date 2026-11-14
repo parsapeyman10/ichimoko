@@ -1,115 +1,104 @@
 @echo off
 setlocal EnableExtensions
-title Aurum Edge - Native Windows x64 Build
 
-rem Optional first argument: Qt MSVC2022 64-bit directory.
-rem Example: build_windows.bat "C:\Qt\6.8.3\msvc2022_64"
+title Aurum Edge - Python Windows Build
+rem Builds the pure-Python desktop application. No Qt, CMake, Ninja, or Visual Studio is used.
 set "SCRIPT_DIR=%~dp0"
-for %%I in ("%SCRIPT_DIR%..") do set "REPO_DIR=%%~fI"
-set "BUILD_DIR=%SCRIPT_DIR%build-local"
-set "QT_PATH="
-if not "%~1"=="" (
-    set "QT_PATH=%~f1"
+set "VENV_DIR=%SCRIPT_DIR%.build-venv"
+set "WORK_DIR=%SCRIPT_DIR%build-local"
+set "DIST_DIR=%SCRIPT_DIR%dist-local"
+set "SPEC_DIR=%SCRIPT_DIR%spec-local"
+set "APP_FILE=%SCRIPT_DIR%aurum_edge.py"
+set "CORE_FILE=%SCRIPT_DIR%aurum_core.py"
+set "TEST_FILE=%SCRIPT_DIR%test_aurum_core.py"
+
+if not exist "%APP_FILE%" (
+    echo [ERROR] Application source was not found: %APP_FILE%
+    goto :failed
+)
+if not exist "%CORE_FILE%" (
+    echo [ERROR] Python core was not found: %CORE_FILE%
+    goto :failed
+)
+if not exist "%TEST_FILE%" (
+    echo [ERROR] Core tests were not found: %TEST_FILE%
+    goto :failed
+)
+
+set "PYTHON_CMD="
+where py >nul 2>&1
+if not errorlevel 1 (
+    set "PYTHON_CMD=py -3"
 ) else (
-    rem Auto-detect installed Qt 6.x MSVC2022 64-bit kits on the usual drives.
-    for /d %%V in (C:\Qt\6.* D:\Qt\6.*) do (
-        if exist "%%V\msvc2022_64\lib\cmake\Qt6\Qt6Config.cmake" set "QT_PATH=%%V\msvc2022_64"
-    )
+    where python >nul 2>&1
+    if not errorlevel 1 set "PYTHON_CMD=python"
 )
-
-rem Qt Maintenance Tool installs CMake/Ninja outside PATH by default.
-for /d %%T in (C:\Qt\Tools\CMake_64 D:\Qt\Tools\CMake_64) do (
-    if exist "%%T\bin\cmake.exe" set "PATH=%%T\bin;%PATH%"
-)
-for /d %%T in (C:\Qt\Tools\Ninja D:\Qt\Tools\Ninja) do (
-    if exist "%%T\ninja.exe" set "PATH=%%T;%PATH%"
-)
-
-echo.
-echo === Aurum Edge native Windows x64 ===
-echo Repository: %REPO_DIR%
-echo Qt:         %QT_PATH%
-echo Build:      %BUILD_DIR%
-echo.
-
-if not defined QT_PATH (
-    echo [ERROR] No Qt 6.x MSVC2022 64-bit kit was auto-detected.
-    echo Open Qt Maintenance Tool and install:
-    echo   Qt 6.8.3 ^> MSVC 2022 64-bit
-    echo   Qt 6.8.3 ^> Additional Libraries ^> Qt Quick / Qt Quick Controls 2
-    echo   Developer and Designer Tools ^> CMake and Ninja
-    echo If Qt is installed elsewhere, pass its kit path as the first argument.
-    goto :failed
-)
-if not exist "%QT_PATH%\lib\cmake\Qt6\Qt6Config.cmake" (
-    echo [ERROR] Qt6 MSVC2022 64-bit was not found at:
-    echo         %QT_PATH%
-    echo Pass the actual kit directory as the first argument, for example:
-    echo   %~nx0 "D:\Qt\6.8.3\msvc2022_64"
+if not defined PYTHON_CMD (
+    echo [ERROR] Python 3.11 or newer was not found.
+    echo Install Python from python.org and select "Add Python to PATH".
     goto :failed
 )
 
-where cmake >nul 2>&1
+%PYTHON_CMD% -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
 if errorlevel 1 (
-    echo [ERROR] cmake is not available in PATH. Install CMake 3.28 or newer.
+    echo [ERROR] Python 3.11 or newer is required.
+    %PYTHON_CMD% --version
     goto :failed
 )
-where ninja >nul 2>&1
+
+echo.
+echo === Aurum Edge Python desktop build ===
+echo Source: %SCRIPT_DIR%
+echo Runtime: Python standard library + Tkinter
+echo.
+
+if not exist "%VENV_DIR%\Scripts\python.exe" (
+    echo === Creating local build virtual environment ===
+    %PYTHON_CMD% -m venv "%VENV_DIR%"
+    if errorlevel 1 goto :failed
+)
+call "%VENV_DIR%\Scripts\activate.bat"
+if errorlevel 1 goto :failed
+
+python -c "import tkinter; print('Tkinter is available.')"
 if errorlevel 1 (
-    echo [ERROR] ninja is not available in PATH. Install Ninja and reopen Command Prompt.
+    echo [ERROR] Tkinter is unavailable in this Python installation.
+    echo Install the standard Windows Python distribution from python.org.
     goto :failed
 )
 
-set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-if not exist "%VSWHERE%" (
-    echo [ERROR] Visual Studio Installer/vswhere was not found.
-    goto :failed
-)
-set "VS_PATH="
-for /f "usebackq tokens=*" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
-    set "VS_PATH=%%I"
-)
-if not defined VS_PATH (
-    echo [ERROR] Visual Studio 2022 C++ x64 tools were not found.
-    echo Install "Desktop development with C++" in Visual Studio Installer.
-    goto :failed
-)
-
-call "%VS_PATH%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+echo === Running deterministic Python core tests ===
+python "%TEST_FILE%"
 if errorlevel 1 goto :failed
 
-echo.
-echo === Configure ===
-cmake -S "%SCRIPT_DIR%." -B "%BUILD_DIR%" -G Ninja ^
-  -DCMAKE_BUILD_TYPE=Release ^
-  -DCMAKE_PREFIX_PATH="%QT_PATH%" ^
-  -DAURUM_BUILD_TESTS=ON
+echo === Installing only the local packaging dependency ===
+python -m pip install --upgrade pip
+if errorlevel 1 goto :failed
+python -m pip install --upgrade "pyinstaller>=6.0,<7.0"
 if errorlevel 1 goto :failed
 
-echo.
-echo === Build ===
-cmake --build "%BUILD_DIR%" --config Release
-if errorlevel 1 goto :failed
-
-echo.
-echo === Core tests ===
-ctest --test-dir "%BUILD_DIR%" -C Release --output-on-failure
+echo === Packaging one-file Windows application ===
+python -m PyInstaller --noconfirm --clean --onefile --windowed ^
+  --name "Aurum_Edge_Windows" ^
+  --paths "%SCRIPT_DIR%" ^
+  --distpath "%DIST_DIR%" ^
+  --workpath "%WORK_DIR%" ^
+  --specpath "%SPEC_DIR%" ^
+  "%APP_FILE%"
 if errorlevel 1 goto :failed
 
 echo.
 echo === SUCCESS ===
-echo Executable: %BUILD_DIR%\aurum_edge.exe
+echo Executable created locally at:
+echo %DIST_DIR%\Aurum_Edge_Windows.exe
 echo.
-echo This build directory is for running on this PC.
-echo For a portable folder/installer, Qt DLL deployment is also required.
-echo.
+echo The app is a historical-analysis and paper-journal tool. It never sends live orders.
 pause
 exit /b 0
 
 :failed
 echo.
 echo === BUILD FAILED ===
-echo Review the error above, fix the prerequisite, and run this file again.
-echo.
+echo Read the error above, correct the prerequisite, and run this BAT again.
 pause
 exit /b 1

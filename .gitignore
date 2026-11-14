@@ -4,8 +4,11 @@ android/build/
 android/app/build/
 android/local.properties
 
-# Native Windows local build output
+# Windows Python local build output
+windows/.build-venv/
 windows/build*/
+windows/dist-local/
+windows/spec-local/
 android/.idea/
 *.apk
 *.keystore

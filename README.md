@@ -7,12 +7,13 @@
 3. **ژورنال و ریسک (`JournalRiskScreen`)** — مدیریت سرمایه و سقف ضرر روزانه/کلی، ماشین‌حساب خودکار حجم/لات و نسبت R:R، ثبت معامله با رصد خودکار قیمت لحظه‌ای برای برخورد به TP/SL، و تقویم ماهانهٔ سود و زیان بر اساس روز
 4. **بروزرسانی (`UpdateScreen`)** — بررسی، دانلود و نصب مستقیم نسخه‌های جدید APK از داخل برنامه
 
-## نرم‌افزار بک‌تست ویندوزی — Python خالص، native 15m
+## اپلیکیشن ویندوز Aurum Edge — Python خالص
 
-برای برنامهٔ desktop جدید Windows که فقط با **Python + Tkinter** اجرا می‌شود و وابستگی به Qt، Android یا API صرافی ندارد، به
-[`tools/windows_backtest_app/README_FA.md`](tools/windows_backtest_app/README_FA.md) بروید.
-این deliverable فقط CSV پانزده‌دقیقه‌ای را به‌صورت native بررسی می‌کند، ورود next-open، SL-first، SL/TP و Smart Trend Exit دارد و هیچ time-stop 20 کندلی یا دادهٔ 30m/1H ندارد. برای ساخت محلی فایل EXE در Windows، روی
-[`build_windows_backtest_app.bat`](tools/windows_backtest_app/build_windows_backtest_app.bat) دوبارکلیک کنید. این ابزار فقط بک‌تست تاریخی است و سفارش واقعی ارسال نمی‌کند.
+نسخهٔ desktop اصلی ویندوز در [`windows/README.md`](windows/README.md) کاملاً با **Python + Tkinter** پیاده‌سازی شده است؛ هیچ فایل C++، Qt، CMake، Ninja یا Visual Studio در این deliverable وجود ندارد. برنامه CSV/چارت، بک‌تست Ichimoku baseline، ژورنال SQLite، تقویم، ریسک، NeoWave، Neural Lab، quote عمومیِ صرفاً مشاهده‌ای و بررسی دستی Release را ارائه می‌دهد. برای ساخت EXE محلی در Windows، فایل [`windows/build_windows.bat`](windows/build_windows.bat) را اجرا کنید. این برنامه historical-analysis و paper-journal است و سفارش واقعی نمی‌فرستد.
+
+## ابزار مستقل بک‌تست native 15m — Python خالص
+
+ابزار تخصصی CSV پانزده‌دقیقه‌ای در [`tools/windows_backtest_app/README_FA.md`](tools/windows_backtest_app/README_FA.md) قرار دارد. این ابزار next-open، SL-first، SL/TP و Smart Trend Exit را روی دادهٔ native 15m بررسی می‌کند و هیچ time-stop 20 کندلی یا دادهٔ 30m/1H ندارد. برای ساخت EXE آن، [`build_windows_backtest_app.bat`](tools/windows_backtest_app/build_windows_backtest_app.bat) را اجرا کنید. این ابزار نیز فقط بک‌تست تاریخی است و سفارش واقعی ارسال نمی‌کند.
 
 ## شبیه‌ساز مستقل BASE_ICHIMOKU چهارگانه (قدیمی‌تر)
 

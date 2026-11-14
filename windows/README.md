@@ -1,74 +1,66 @@
-# Aurum Edge — Native Windows x64
+# Aurum Edge — Windows Desktop (Python)
 
-نسخهٔ مستقل ویندوز با **C++23 و Qt6**؛ APK، Emulator یا .NET استفاده نمی‌شود.
+نسخهٔ Windows اکنون کاملاً با **Python 3.11+ و Tkinter** ساخته می‌شود. پیاده‌سازی قبلی C++/Qt، CMake، Ninja و Visual Studio از این deliverable حذف شده‌اند.
 
-## وضعیت این برش
+## قابلیت‌های برنامه
 
-- [x] Core مستقل از Qt با C++23
-- [x] Memory-mapped Dukascopy CSV و اعتبارسنجی داده
-- [x] کندل‌های بسته و Resample بدون Look-Ahead
-- [x] Ichimoku rolling با پیچیدگی O(n)
-- [x] Backtest واقعی baseline با Fee، Slippage، Risk، Ruin و Equity DD
-- [x] چارت Native و رابط RTL
-- [x] Worker Thread برای CSV/Backtest
-- [x] ژورنال SQLite واقعی
-- [x] تست Core و Windows CI
-- [ ] پورت کامل Peyman/NeoWave/Neural/Live Feed/Export/Updater
+- بارگذاری و ممیزی CSV کندلی یا bid/ask با پاک‌سازی timestamp تکراری و OHLC نامعتبر
+- چارت candle داخلی با Tkinter، آرشیو CSV/JSON و بدون وابستگی به مرورگر
+- بک‌تست deterministic `Ichimoku 8/24/72 TK-cross baseline` با ورود کندل بعدی، Fee، Slippage، SL-first و Trend Runner
+- ماشین‌حساب ریسک، حجم، margin، liquidation تقریبی و TradePlanGuard
+- ژورنال SQLite محلی، تقویم ماهانه و خروجی CSV/JSON/PDF ساده
+- تحلیل NeoWave مبتنی بر pivotهای ATR و گزارش Neural Lab جدا از خروجی بک‌تست
+- دریافت اختیاری quote عمومی و بررسی دستی GitHub Release؛ هیچ API key، اتصال حساب، route سفارش یا نصب خودکار ندارد
 
-مدل فعلی عمداً `Ichimoku 8/24/72 TK-cross baseline` نام دارد و **ادعای برابری با Peyman یا سودآوری ندارد**.
+> این برنامه ابزار تحلیل تاریخی و Paper Trading است؛ توصیهٔ سرمایه‌گذاری، تضمین سود یا ارسال سفارش واقعی نیست.
 
-## نیازمندی‌ها
+## اجرای مستقیم source
 
-- Windows 10/11 x64
-- Visual Studio 2022 با Desktop development with C++
-- CMake 3.28+
-- Ninja
-- Qt 6.8+ با `MSVC2022_64`
+Windows 10/11 و Python 3.11 یا جدیدتر از [python.org](https://www.python.org/downloads/windows/) لازم است. هنگام نصب Python گزینهٔ **Add Python to PATH** را فعال کنید.
 
-## Build با فایل آماده
+روی این فایل دوبارکلیک کنید:
 
-اگر Qt نصب نیست، ابتدا `windows\install_qt.bat` را اجرا کنید. این فایل Installer رسمی Qt را دانلود می‌کند، Qt 6.8.3 MSVC2022 64-bit و CMake/Ninja را انتخاب می‌کند و پس از نصب Build را شروع می‌کند. در پنجرهٔ نصب باید با حساب رایگان Qt وارد شوید و مجوزها را بررسی کنید. مسیر نصب پیش‌فرض `C:\Qt` است؛ برای مسیر دیگر `windows\install_qt.bat "D:\Qt"` را اجرا کنید. در صورت خطای DNS، اسکریپت آینهٔ UC Berkeley را امتحان می‌کند و امضای Authenticode را پیش از اجرا بررسی می‌کند. می‌توانید Installer رسمی را نیز با نام `qt-online-installer-windows-x64-online.exe` کنار Batch قرار دهید تا بدون دانلود استفاده شود.
+```text
+windows\run_windows.bat
+```
 
-روی ویندوز فایل `windows\build_windows.bat` را اجرا کنید. این فایل Visual Studio 2022، Kitهای Qt در درایوهای C/D و ابزارهای CMake/Ninja نصب‌شده توسط Qt را پیدا می‌کند، پروژه را در حالت Release می‌سازد و تست‌های Core را اجرا می‌کند. در Qt Maintenance Tool باید **MSVC 2022 64-bit** و **CMake/Ninja** نصب باشند. اگر Qt در مسیر غیرمعمول نصب است:
+Tkinter همراه نصب رسمی Python ویندوز است و برای اجرای source نیازی به `pip install` نیست.
+
+## ساخت EXE با BAT
+
+برای ساخت فایل اجرایی Windows فقط این فایل را اجرا کنید:
+
+```text
+windows\build_windows.bat
+```
+
+Batch به‌ترتیب زیر عمل می‌کند:
+
+1. Python 3.11+ و Tkinter را بررسی می‌کند؛
+2. تست‌های deterministic core را اجرا می‌کند؛
+3. یک virtual environment محلی `.build-venv` می‌سازد؛
+4. فقط `PyInstaller` را در همان محیط نصب می‌کند؛
+5. برنامه را به EXE تک‌فایلی تبدیل می‌کند.
+
+خروجی محلی در این مسیر است:
+
+```text
+windows\dist-local\Aurum_Edge_Windows.exe
+```
+
+فولدرهای build و فایل EXE توسط `.gitignore` نادیده گرفته می‌شوند و نباید commit شوند.
+
+## اجرای تست‌ها
+
+از ریشهٔ repository:
 
 ```bat
-windows\build_windows.bat "D:\Qt\6.8.3\msvc2022_64"
+python windows\test_aurum_core.py
 ```
 
-خروجی در `windows\build-local\aurum_edge.exe` قرار می‌گیرد. این فایل Build و Test انجام می‌دهد و Installer تولید نمی‌کند.
+## محدودیت‌های مدل
 
-## Build دستی
-
-```powershell
-git clone https://github.com/parsapeyman10/ichimoko.git
-cd ichimoko
-cmake -S windows -B windows/build -G Ninja `
-  -DCMAKE_BUILD_TYPE=Release `
-  -DCMAKE_PREFIX_PATH="C:\Qt\6.8.3\msvc2022_64"
-cmake --build windows/build --config Release
-ctest --test-dir windows/build -C Release --output-on-failure
-.\windows\build\aurum_edge.exe
-```
-
-### ساخت Installer
-
-```powershell
-cpack --config windows/build/CPackConfig.cmake -C Release
-```
-
-`windeployqt` DLLها و QML runtime را در پوشهٔ Install قرار می‌دهد. مسیر NSIS باید نصب باشد.
-
-## تنظیم سرعت
-
-- پیش‌فرض Release روی تمام CPUهای x64 سازگار است.
-- `AURUM_NATIVE_TUNE=ON` فقط برای Build اختصاصی روی همان کامپیوتر است و نباید در Installer عمومی استفاده شود.
-- AVX2/SIMD در مرحلهٔ بعد با Runtime Dispatch اضافه می‌شود؛ هیچ CPU خاصی پیش‌فرض اجباری نیست.
-- مصرف تمام هسته‌ها فقط در Batch Backtest/Training موازی است؛ GUI و اتصال شبکه بی‌جهت Thread اشغال نمی‌کنند.
-
-## آزمون Core بدون Qt
-
-```bash
-g++ -std=c++23 -O2 -Iwindows/src \
-  windows/src/core/*.cpp windows/tests/CoreTests.cpp \
-  -o /tmp/aurum-core-tests && /tmp/aurum-core-tests
-```
+- مسیر tick واقعی داخل کندل وجود ندارد؛ در برخورد هم‌زمان SL و TP، SL برای محافظه‌کاری مقدم است.
+- quote عمومی ممکن است با قیمت قابل اجرا اختلاف داشته باشد.
+- Neural Lab فقط گزارش آموزشی deterministic و in-sample است؛ پارامترهای بک‌تست را تغییر نمی‌دهد و OOS یا سودآوری را تضمین نمی‌کند.
+- PDF خروجی یک گزارش متنی ساده با فونت استاندارد PDF است تا برنامه در زمان اجرا dependency خارجی نداشته باشد.
