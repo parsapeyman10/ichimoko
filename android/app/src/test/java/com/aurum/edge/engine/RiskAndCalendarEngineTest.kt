@@ -469,7 +469,12 @@ class RiskAndCalendarEngineTest {
         val updatedAttempt = journal.updateTradeStopLoss(opened.id, 70_000.0, "تست عدم جابجایی پله‌ای")
         assertNotNull(updatedAttempt)
         assertEquals(67_000.0, updatedAttempt!!.stopLoss, 1e-4)
-        assertEquals(3.0, updatedAttempt.riskReward, 1e-4)
+        // هدف قیمتی ۳R است (۷۱٬۰۰۰) ولی کارمزد بیت‌کوین ۱۲٫۵٪ ریسک را می‌خورد،
+        // پس R **خالص** این پلن ۲٫۵ است و همان در ژورنال ذخیره/نمایش داده می‌شود.
+        val grossRr = kotlin.math.abs(updatedAttempt.takeProfit - updatedAttempt.entry) /
+            kotlin.math.abs(updatedAttempt.entry - (updatedAttempt.initialStopLoss ?: updatedAttempt.stopLoss))
+        assertEquals(3.0, grossRr, 1e-4)
+        assertEquals(2.5, updatedAttempt.riskReward, 1e-4)
 
         // مسیر ratchet فقط در جهت سود و فقط تا زیر نقطهٔ ورود مجاز است.
         val ratchet = journal.updateTradeStopLoss(

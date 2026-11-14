@@ -71,7 +71,9 @@ class RiskDollarTargetTest {
         val r = calc("XAU/USD", 2_600.0, 7.8, 7.8 * 2.0)
         // ۲R ⇒ خالص حدود ۱۰ دلار (نه ۱۰ منهای کارمزد).
         assertEquals("سود خالص ۲R", 10.0, r.netProfitAtTpUsd, 0.05)
-        assertEquals("R خالص", 2.0, r.netRiskReward, 0.02)
+        // با پایین‌گرد کردن حجم به گام ۰٫۰۱ اونس، زیان خالص ۴٫۹۵ دلار می‌شود نه ۵٫۰۰، پس R خالص
+        // یک درصد بالاتر از ۲ می‌افتد؛ همین «ناهم‌ترازی گام» است، نه خطای محاسبه.
+        assertEquals("R خالص", 2.0, r.netRiskReward, 0.05)
     }
 
     @Test
