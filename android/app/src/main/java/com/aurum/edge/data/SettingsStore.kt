@@ -195,7 +195,9 @@ class SettingsStore(context: Context) {
             .takeIf { it.isFinite() && it >= 10.0 } ?: 100_000.0,
         targetCapital = prefs.getFloat(KEY_TARGET_CAPITAL, 100_000f).toDouble()
             .takeIf { it.isFinite() && it >= 100.0 } ?: 100_000.0,
-        useFixedDollarRisk = prefs.getBoolean(KEY_USE_FIXED_DOLLAR_RISK, true),
+        // ریسک هر معامله همیشه «مبلغ ثابت دلاری» است. کلید درصدی فقط به‌عنوان مقدار ذخیره‌شده
+        // نگه داشته می‌شود و هرگز مبلغ ثابت را کوچک نمی‌کند (خواستهٔ صریح کاربر: دقیقاً $5).
+        useFixedDollarRisk = true,
         fixedRiskUsd = prefs.getFloat(KEY_FIXED_RISK_USD, 5.0f).toDouble()
             .takeIf { it.isFinite() && it >= 0.5 } ?: 5.0,
         dailyLossLimitPercent = prefs.getFloat(KEY_DAILY_LOSS_LIMIT, 100.0f).toDouble()
@@ -474,10 +476,33 @@ class SettingsStore(context: Context) {
     }
 
     /**
+     * مهاجرت یک‌بارهٔ «قانون دلار دقیق».
+     *
+     * اگر مبلغ ریسک ثابت ذخیره‌شده کمتر از یک دلار باشد (نتیجهٔ حالت درصدی یا یک مقدار
+     * جامانده از نسخه‌های قدیمی)، همان مبلغی که کاربر صریحاً خواسته — `$5.00` — بازگردانده
+     * می‌شود، تا معاملهٔ بعدی با زیان چند سنتی باز نشود. مقدارهای یک دلار و بالاتر دست‌نخورده
+     * می‌مانند. این مهاجرت فقط یک‌بار اجرا می‌شود.
+     */
+    @Synchronized
+    private fun applyExactDollarRiskMigration() {
+        if (prefs.getBoolean(KEY_EXACT_DOLLAR_V3986, false)) return
+        val stored = prefs.getFloat(KEY_FIXED_RISK_USD, 5.0f).toDouble()
+        val needsRestore = !stored.isFinite() || stored < 1.0
+        val editor = prefs.edit()
+        if (needsRestore) editor.putFloat(KEY_FIXED_RISK_USD, 5.0f)
+        editor.putBoolean(KEY_EXACT_DOLLAR_V3986, true).commit()
+        if (needsRestore) {
+            val fresh = read()
+            _settings.value = fresh.copy(fixedRiskUsd = 5.0, useFixedDollarRisk = true)
+        }
+    }
+
+    /**
      * مهاجرت یک‌باره موجودی حساب به ۱۰۰,۰۰۰ دلار و تنظیم کلید پیش‌فرض AvalAI در زمان اجرای برنامه روی دستگاه کاربر
      */
     fun ensureBalance100kMigrated() {
         runCatching { applyRiskBrakeMigration() }
+        runCatching { applyExactDollarRiskMigration() }
         val cur = read()
         val needsBalanceUpgrade = !prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false) && cur.accountBalance < 50_000.0
         val needsKeyPreload = cur.newsAiApiKey.isBlank()
@@ -587,6 +612,7 @@ class SettingsStore(context: Context) {
         private const val KEY_TARGET_CAPITAL = "target_capital_usd"
         private const val KEY_USE_FIXED_DOLLAR_RISK = "use_fixed_dollar_risk"
         private const val KEY_FIXED_RISK_USD = "fixed_risk_usd"
+        private const val KEY_EXACT_DOLLAR_V3986 = "exact_dollar_risk_v3986"
         private const val KEY_BALANCE_100K_MIGRATED_V3903 = "balance_100k_migrated_v3903"
         private const val KEY_ALL_15_COMBOS_MIGRATED_V3908 = "all_15_combos_migrated_v3908"
         private const val KEY_BASE_STRATEGY_CONFIG_JSON = "btc_base_strategy_config_json"

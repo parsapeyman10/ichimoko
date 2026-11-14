@@ -385,6 +385,15 @@ object RiskAndCalendarEngine {
         )
     }
 
+    /**
+     * مبلغ ریسک ثابت دلاری که همهٔ مسیرهای ورود باید به موتور بدهند.
+     *
+     * کلید «درصد موجودی» دیگر اجازه ندارد این مبلغ را کوچک کند؛ تنها وقتی هیچ مبلغ ثابت
+     * معتبری تنظیم نشده باشد `null` برمی‌گردد و موتور به درصد موجودی برمی‌گردد.
+     */
+    fun fixedRiskUsdOrNull(configuredUsd: Double): Double? =
+        if (configuredUsd.isFinite() && configuredUsd > 0.0) configuredUsd else null
+
     const val MIN_REQUIRED_RISK_REWARD: Double = 1.5
     const val MAX_ALLOWED_RISK_REWARD: Double = 3.0
     const val TREND_RUNNER_THRESHOLD_R: Double = 2.85

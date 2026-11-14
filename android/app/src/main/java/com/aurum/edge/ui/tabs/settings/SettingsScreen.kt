@@ -422,29 +422,17 @@ fun SettingsScreen(
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                if (settings.useFixedDollarRisk) {
-                                    "روشن: هر معامله دقیقاً همین مبلغ را ریسک می‌کند، مستقل از موجودی."
-                                } else {
-                                    "خاموش: ریسک = درصد موجودی (پایین قابل تنظیم است)."
-                                },
+                                "-$" + String.format(Locale.US, "%.2f", activeRiskUsd) + " باخت · +" +
+                                    String.format(Locale.US, "%.2f", activeRiskUsd) + "$×R:R برد",
                                 color = AurumColors.TextMuted,
                                 style = MaterialTheme.typography.labelSmall,
                             )
                         }
-                        Switch(
-                            checked = settings.useFixedDollarRisk,
-                            onCheckedChange = { enabled ->
-                                viewModel.saveRiskAndCapitalSettings(
-                                    accountBalance = settings.accountBalance,
-                                    initialCapital = settings.initialCapital,
-                                    riskPercent = settings.riskPercent,
-                                    dailyLossLimitPercent = settings.dailyLossLimitPercent,
-                                    maxDrawdownLimitPercent = settings.maxDrawdownLimitPercent,
-                                    targetCapital = settings.targetCapital,
-                                    useFixedDollarRisk = enabled,
-                                    fixedRiskUsd = settings.fixedRiskUsd,
-                                )
-                            },
+                        Text(
+                            text = String.format(Locale.US, "$%.2f", activeRiskUsd),
+                            color = AurumColors.Cyan,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
                         )
                     }
                     AnimatedVisibility(visible = showDesc) {

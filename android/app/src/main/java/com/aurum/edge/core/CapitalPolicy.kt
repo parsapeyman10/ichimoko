@@ -54,9 +54,20 @@ data class CapitalPolicy(
     val maxOpenTrades: Int = 0,
     val maxOpenTradesPerSymbol: Int = 0,
 ) {
-    /** مبلغ ریسک هر معامله (حالت فعال). همین یک عدد ملاک است. */
+    /**
+     * مبلغ ریسک هر معامله. همین یک عدد ملاک است و **همیشه** «مبلغ ثابت دلاری» است.
+     *
+     * چرا درصد نمی‌تواند آن را کوچک کند؟ چون خواستهٔ صریح کاربر این است که زیان هر معامله
+     * دقیقاً همان مبلغی باشد که خودش تعیین کرده (پیش‌فرض `$5.00`)؛ در غیر این صورت روی حساب
+     * کوچک، همان تنظیم «$5» بی‌صدا به چند سنت تبدیل می‌شد و کاربر عدد دیگری روی معامله
+     * می‌دید. درصد موجودی فقط زمانی به کار می‌رود که هیچ مبلغ ثابت معتبری تنظیم نشده باشد.
+     */
     val riskBudgetUsd: Double
-        get() = if (useFixedDollarRisk) fixedRiskUsd else accountBalance * (riskPercent / 100.0)
+        get() = if (fixedRiskUsd.isFinite() && fixedRiskUsd > 0.0) {
+            fixedRiskUsd
+        } else {
+            accountBalance * (riskPercent / 100.0)
+        }
 
     /** ریسک هر معامله به‌صورت درصد موجودی — برای هشدار «بیش از ۲٪». */
     val riskBudgetPctOfEquity: Double

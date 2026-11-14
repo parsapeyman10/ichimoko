@@ -743,7 +743,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                             stopLoss = guarded.stopLoss,
                             takeProfit = guarded.takeProfit,
                             preferredAction = armedReport.action,
-                            fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                            fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(cfg.fixedRiskUsd),
                             triggerInterval = armedReport.triggerInterval,
                             referenceAtr14 = armedReport.triggerSnapshot?.atr14 ?: 0.0,
                         )
@@ -2294,7 +2294,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                 stopLoss = guarded.stopLoss,
                                 takeProfit = guarded.takeProfit,
                                 preferredAction = report.action,
-                                fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                                fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(cfg.fixedRiskUsd),
                                 triggerInterval = report.triggerInterval,
                                 referenceAtr14 = report.triggerSnapshot?.atr14 ?: 0.0,
                             )

@@ -539,7 +539,7 @@ fun JournalRiskScreen(
                     liveTick = liveTicks[activeSymbol],
                     accountBalance = settings.accountBalance,
                     riskPercent = settings.riskPercent,
-                    fixedRiskUsdOverride = if (settings.useFixedDollarRisk) settings.fixedRiskUsd else null,
+                    fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(settings.fixedRiskUsd),
                     riskLimits = riskLimits,
                     avalAiEnabled = settings.avalAiEnabled,
                     aiChecking = aiChecking,
