@@ -1456,6 +1456,30 @@ fun NeuralBrainScreen(
                         color = AurumColors.Cyan,
                         fontWeight = FontWeight.Bold,
                     )
+                } else {
+                    // بعد از بستن و باز کردن اپ، متن اجرای آخر در حافظهٔ صفحه نیست؛ ولی عدد سنجش
+                    // در حافظهٔ شبکه پایدار شده است. نمایشش بهتر از «هیچ» است، به شرط برچسب صریح.
+                    val saved = neuralState.lastJournalCalibration
+                    if (saved.isMeasured) {
+                        val brierText = if (saved.brier.isFinite()) {
+                            String.format(Locale.US, "%.3f", saved.brier)
+                        } else {
+                            "—"
+                        }
+                        val baseText = if (saved.brierBaseline.isFinite()) {
+                            String.format(Locale.US, "%.3f", saved.brierBaseline)
+                        } else {
+                            "—"
+                        }
+                        Text(
+                            text = "🧾 آخرین سنجش ذخیره‌شدهٔ ژورنال: ${saved.samples} نمونه " +
+                                "(${saved.wins} برد) · Brier $brierText در برابر پایه $baseText · " +
+                                "گام‌به‌گام: ${saved.walkForwardVerdictFa.ifBlank { "—" }} · ${saved.verdictFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
                 if (allStrategyLearningFa.isNotBlank()) {
                     Text(
