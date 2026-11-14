@@ -33,3 +33,9 @@
 نسخهٔ Pine Script v5 برای TradingView در
 [`strategies/tradingview/README_BASE_ICHIMOKU_MAIN_CORE_NATIVE_15M_FA.md`](strategies/tradingview/README_BASE_ICHIMOKU_MAIN_CORE_NATIVE_15M_FA.md)
 قرار دارد. این strategy مستقل از Lipi، هستهٔ قابل‌انتقال `BASE_ICHIMOKU` را فقط از کندل‌های native 15m محاسبه می‌کند: Kumo/TK/Sanyaku، آیندهٔ Kumo، Chikou، Kijun/C-Clamp، SSB flat، ER14، candle/volume، Hosoda guard، Sniper pocket، R:R و execution economics. نسخهٔ دقیق Main چهارلایه نیست و هیچ داده یا منطق 1H/4H، `request.security` یا resampling ندارد. فقط برای Strategy Tester/بک‌تست است و به صرافی سفارش واقعی نمی‌فرستد.
+
+## TradingView Pine Script v5 — `Ichimoku Book Synthesis`
+
+استراتژی مستقلِ ساخته‌شده فقط از یافته‌های قابل‌صورت‌بندی کتاب‌های trading در Drive در
+[`strategies/tradingview/README_ICHIMOKU_BOOK_SYNTHESIS_FA.md`](strategies/tradingview/README_ICHIMOKU_BOOK_SYNTHESIS_FA.md)
+قرار دارد. این فایل از `BASE_ICHIMOKU` یا strategyهای دیگر dependency نمی‌گیرد: context استاندارد Ichimoku، clearance Chikou، BB squeeze breakout، RSI14/EMA89/SMA200، Kijun reclaim و bracket ثابت Kijun/ATR با هدف 2R تا 3R را در یک strategy مستقل برای Strategy Tester پیاده می‌کند. به سفارش واقعی متصل نیست و نتیجهٔ آن باید روی داده و هزینهٔ واقعی هر venue جداگانه بک‌تست شود.
