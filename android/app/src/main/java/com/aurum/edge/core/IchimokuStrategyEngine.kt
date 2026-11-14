@@ -35,7 +35,7 @@ enum class BitcoinStrategyModel(
     // ── ۱. ترکیب کامل ۴گانه (Quad Master) ───────────────────────────────────
     BASE_ICHIMOKU(
         id = "BASE_ICHIMOKU",
-        titleFa = "استراتژی بیس (ترکیب کامل ۴گانه: پاتل+تاتل+هوسودا+پلویل)",
+        titleFa = "ichimoku — ترکیب کامل ۴گانه (پاتل+تاتل+هوسودا+پلویل)",
         badgeFa = "ترکیب ۴گانه · بیس جامع",
         authorRefFa = "پاتل + تاتل + هوسودا + پلویل",
         summaryFa = "ترکیب کامل هر ۴ ستون ایچیموکو: تعادل کیجون پاتل، فیلتر چیکو و بریک‌اوت تاتل، امواج N/V/E و چرخه زمان هوسودا، و پلاتوهای فلت سه‌تایم‌فریمی کارن پلویل.",
@@ -129,9 +129,22 @@ enum class BitcoinStrategyModel(
         val activeStrategyIds: Set<String>
             get() = entries.filterNot { it.isTemporarilyDisabled || it.requiresExplicitOptIn }.map { it.id }.toSet()
 
+        /**
+         * نام‌های مستعار استراتژی جامع ایچیموکو. کاربر می‌تواند همین استراتژی را با نام
+         * `ichimoku` صدا بزند؛ شناسهٔ ذخیره‌شده در تنظیمات (`BASE_ICHIMOKU`) دست‌نخورده می‌ماند
+         * تا داده‌های یادگیری و ژورنال قبلی از دست نروند.
+         */
+        val strategyAliases: Map<String, String> = mapOf(
+            "ichimoku" to BASE_ICHIMOKU.id,
+            "ichimoku master" to BASE_ICHIMOKU.id,
+            "ichimoku_master" to BASE_ICHIMOKU.id,
+            "ichi" to BASE_ICHIMOKU.id,
+        )
+
         fun normalizeStrategyId(raw: String?): String {
             val cleaned = raw?.trim().orEmpty()
             if (cleaned.isEmpty()) return BASE_ICHIMOKU.id
+            strategyAliases[cleaned.lowercase()]?.let { return it }
             return cleaned
         }
 
