@@ -59,6 +59,22 @@
 
 دو گیت آخر نیز اجباری‌اند: `Future Kumo = RISING + THIN` و `Chikou = FRESH RELEASE/ARMED`. مقدار پیش‌فرض پنجرهٔ تأیید چهار کندل است. اگر Chikou باز باشد ولی release window تمام شده باشد، dashboard `OPEN BUT MATURE` و status `MATURE LEG: NO NEW ENTRY` نشان می‌دهد. این خطا نیست: حرکت در آن لحظه دیر شده و strategy عمداً دوباره وارد نمی‌شود.
 
+### خواندن dashboard در screenshot و Bar Replay
+
+dashboard همیشه فقط **آخرین کندل بسته‌شدهٔ فعلی** را توضیح می‌دهد؛ verdict آن را نباید به فلش یا setup تاریخیِ سمت چپ چارت تعمیم داد. برای بررسی یک candidate قدیمی، Bar Replay را روی همان کندل جلو ببرید تا panel همان bar را ببیند. به‌ویژه اگر آخرین bar `Bias = SHORT` باشد، `Chikou = BLOCKED` به corridor مربوط به **کاندید short فعلی** است؛ این عبارت ادعایی دربارهٔ Chikou یک موج long قبلی نیست.
+
+ردیف‌های diagnostic به ترتیب وابستگی نمایش داده می‌شوند:
+
+| وضعیت | معنای عملی | اقدام strategy |
+|---|---|---|
+| `Chikou = BLOCKED` / `Gate state = WAIT: CHIKOU BLOCKED` | release در جهت bias فعلی رخ نداده؛ روند مبدأ هنوز شروع نشده است. | entry ندارد؛ منتظر event واقعی release می‌ماند. |
+| `Chikou = FRESH RELEASE` یا `ARMED: n LEFT` | release رخ داده و حداکثر `n` کندل برای کامل‌شدن reclaim، impulse و Kijun SL باقی است. | فقط در همین پنجره setup را می‌سنجد. |
+| `Chikou = OPEN BUT MATURE` / `MATURE LEG: RESET NEEDED` | Chikou باز است اما پنجرهٔ آغاز روند گذشته است. | عمداً late-entry یا re-entry همان leg نمی‌گیرد؛ reset TK/Kumo لازم است. |
+| `WAIT: KUMO`، `WAIT: IMPULSE` یا `WAIT: KIJUN LEVEL` | release موجود است، اما یکی از hard gateهای ساختاری هنوز کامل نشده است. | تا پایان پنجره صبر می‌کند، بدون پایین آوردن معیار. |
+| `WAIT: PHASE` یا `WAIT: TRIGGER` | hard geometry می‌تواند سالم باشد، اما ER/range، فاز، reclaim یا trigger هنوز تأیید نشده است. | entry ندارد؛ این مورد با blocked/expired Chikou یکی نیست. |
+
+بنابراین تصویری که هم‌زمان `WIDE / TWIST`، `BLOCKED`، `NESTED/RETRACE` و `NO VALID LEVEL` دارد، یک setup ناقص روی **بار فعلی** است، نه یک نقص در فلش‌های قدیمی و نه مجوزی برای نرم‌کردن گیت‌ها.
+
 ## Main-Core منتقل‌شده از مرجع
 
 هر مورد زیر فقط با همان snapshot پانزده‌دقیقه‌ای محاسبه می‌شود:
@@ -125,8 +141,9 @@ S-point/time guard در Pine فقط بخش قابل‌محاسبه با کندل
 3. dashboard باید `15m OK` و سپس `READY` نشان دهد.
 4. برای chart XAUUSD تصویر، Inputs باید این مقادیر را نشان دهد: `Target R:R = 2.25`، `Round-trip cost fraction = 0.0000466`، `Minimum structural stop fraction = 0.0009` و `Maximum structural stop fraction = 0.0055`. اگر Pine تنظیمات قبلی را حفظ کرد، این موارد را دستی reset کنید.
 5. برای الگوی فلش، defaults این‌ها هستند: `Minimum body ratio = 0.22`، `Maximum progressive candle overlap = 0.10 ATR`، `Maximum thin future Kumo = 0.80 ATR`، `Chikou-release confirmation window = 4 bars`، `Kijun history bars = 20`، `Minimum historical Kijun touches = 2` و `Maximum Kijun SL distance = 1.35 ATR`.
-6. dashboard باید در پنجرهٔ setup هم‌زمان `Future Kumo = RISING + THIN`، `Chikou = FRESH RELEASE` یا `ARMED: n LEFT`، `Impulse = PROGRESSIVE`، `Kijun SL = HISTORICAL + NEAR` و `Cost / 1R` سبز و حداکثر `45.0%` را نشان دهد؛ در غیر این صورت ورود عمداً veto می‌شود.
-7. برای broker/نماد دیگر، commission، slippage، این مقادیر و هزینهٔ واقعی همان venue را تنظیم و سپس backtest را روی ساعت معاملاتی و بازهٔ واقعی خودتان انجام دهید.
+6. dashboard باید در پنجرهٔ setup هم‌زمان `Future Kumo = RISING + THIN`، `Chikou = FRESH RELEASE` یا `ARMED: n LEFT`، `Impulse = PROGRESSIVE`، `Kijun SL = HISTORICAL + NEAR` و `Cost / 1R` سبز و حداکثر `45.0%` را نشان دهد. `Gate state = HARD GATES READY` فقط یعنی گیت‌های سخت آماده‌اند؛ برای entry هنوز `Phase`، `Trigger` و Book gate نیز باید تأیید شوند.
+7. اگر panel در انتهای نمودار وضعیت دیگری نشان می‌دهد، آن وضعیت را با candidate تاریخی قاطی نکنید: Bar Replay را روی bar موردنظر اجرا کنید. `WAIT: CHIKOU BLOCKED`، `MATURE LEG: RESET NEEDED`، `WAIT: PHASE` و `WAIT: TRIGGER` چهار علت جداگانه‌اند و هیچ‌کدام با تغییر ظاهری چارت به‌تنهایی override نمی‌شوند.
+8. برای broker/نماد دیگر، commission، slippage، این مقادیر و هزینهٔ واقعی همان venue را تنظیم و سپس backtest را روی ساعت معاملاتی و بازهٔ واقعی خودتان انجام دهید.
 
 این محیط به TradingView متصل نیست؛ بنابراین syntax/اجرای نهایی باید در Pine Editor خودتان compile شود. تا قبل از آن، این فایل فقط static-reviewed است. لطفاً اگر Pine Editor خطا داد، متن خطا و شمارهٔ خط را بفرستید تا دقیق اصلاح شود.
 

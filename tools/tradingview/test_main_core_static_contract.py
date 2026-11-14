@@ -73,6 +73,12 @@ class MainCoreNative15StaticContractTests(unittest.TestCase):
         self.assertIn("bool kijunHistoricalLevelValid15", self.code)
         self.assertIn("bool kijunStopGeometry15", self.code)
         self.assertIn("and chikouReleaseArmed15 and futureKumoTrendOrigin15 and progressiveImpulse15 and kijunStopGeometry15", self.code)
+        self.assertIn("string phaseAudit15", self.code)
+        self.assertIn("string triggerAudit15", self.code)
+        self.assertIn("string gateState15", self.code)
+        self.assertIn('"WAIT: CHIKOU BLOCKED"', self.code)
+        self.assertIn('"MATURE LEG: RESET NEEDED"', self.code)
+        self.assertIn('"WAIT: TRIGGER"', self.code)
         self.assertIn('input.float(2.25, "Target R:R (set before backtest quantity)", minval=2.00, maxval=3.00', self.code)
         self.assertIn("bool c12 = targetRr >= 2.00 and targetRr <= 3.00", self.code)
         for rejected_anchor in ("anchorRibbon15", "anchorFractal15", "anchorKumo15", "anchorWave15"):

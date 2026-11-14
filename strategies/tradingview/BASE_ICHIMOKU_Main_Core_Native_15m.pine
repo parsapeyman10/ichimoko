@@ -218,9 +218,13 @@ int passedCount = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c
 
 bool strictSignal = dataReady and triggerFired and bookFires
 string triggerName = triggerGenesis ? "EARLY KATANA" : triggerBreakout ? "VALIDATED BREAKOUT" : triggerPullback ? "PULLBACK BOUNCE" : triggerContinuation ? "SANYAKU CORE" : "-"
-string phaseName = phaseGenesis15 ? "GENESIS" : phaseCore15 ? "CORE" : "BLOCKED"
+// Keep the panel diagnostic in sequence. A last-bar status is not a judgement on
+// an earlier historical arrow: it says which prerequisite the current bar lacks.
+string phaseAudit15 = not c13 ? "WAIT: ER / RANGE" : phaseGenesis15 ? "GENESIS" : phaseCore15 ? "CORE" : "EXPIRED"
+string triggerAudit15 = triggerFired ? triggerName : not c2 ? "WAIT: TK/KUMO RECLAIM" : not c7 ? "WAIT: CHIKOU STRUCTURE" : not c11 ? "WAIT: CANDLE/VOLUME" : not c16 ? "WAIT: SNIPER POCKET" : "WAIT: PATTERN CONFIRM"
 bool chikouMatureLeg15 = c6 and not chikouReleaseArmed15
-string hardVetoReason = chikouMatureLeg15 ? "MATURE LEG: NO NEW ENTRY" : not chikouReleaseArmed15 ? "VETO: CHIKOU NOT ARMED" : not futureKumoTrendOrigin15 ? "VETO: KUMO WIDE/TWIST" : not progressiveImpulse15 ? "VETO: NESTED/RETRACE" : not kijunStopGeometry15 ? "VETO: KIJUN SL" : not c17 ? "VETO: COST / 1R" : "HARD VETO"
+string gateState15 = not c6 ? "WAIT: CHIKOU BLOCKED" : chikouMatureLeg15 ? "MATURE LEG: RESET NEEDED" : not futureKumoTrendOrigin15 ? "WAIT: KUMO" : not progressiveImpulse15 ? "WAIT: IMPULSE" : not kijunStopGeometry15 ? "WAIT: KIJUN LEVEL" : not c15 ? "WAIT: PHASE" : not triggerFired ? "WAIT: TRIGGER" : "HARD GATES READY"
+string hardVetoReason = not c6 ? "WAIT: CHIKOU BLOCKED" : chikouMatureLeg15 ? "MATURE LEG: NO NEW ENTRY" : not futureKumoTrendOrigin15 ? "VETO: KUMO WIDE/TWIST" : not progressiveImpulse15 ? "VETO: NESTED/RETRACE" : not kijunStopGeometry15 ? "VETO: KIJUN SL" : not c15 ? "WAIT: PHASE QUALITY" : not triggerFired ? "WAIT: TRIGGER CONFIRM" : not c17 ? "VETO: COST / 1R" : "HARD VETO"
 
 // ── Smart exit: structural deterioration only; there is no bar-count time stop ─
 bool tkGapContracting15 = tkGapAtr15 < priorTkGapAtr15
@@ -329,7 +333,7 @@ if strategy.closedtrades > observedClosedTrades
     observedClosedTrades := strategy.closedtrades
 
 // A compact audit panel is diagnostic only; the strategy deliberately draws no entry markers.
-var table dashboard = table.new(position.top_right, 2, 14, bgcolor=color.new(color.black, 75), border_width=1)
+var table dashboard = table.new(position.top_right, 2, 15, bgcolor=color.new(color.black, 75), border_width=1)
 if barstate.islast
     table.cell(dashboard, 0, 0, "BASE MAIN-CORE")
     table.cell(dashboard, 1, 0, "NATIVE 15m")
@@ -339,10 +343,10 @@ if barstate.islast
     table.cell(dashboard, 1, 2, dataReady ? "READY" : "WARM-UP: need 80 bars", text_color=dataReady ? color.lime : color.orange)
     table.cell(dashboard, 0, 3, "Bias")
     table.cell(dashboard, 1, 3, dataReady ? (isLong ? "LONG" : "SHORT") : "-")
-    table.cell(dashboard, 0, 4, "Trigger")
-    table.cell(dashboard, 1, 4, triggerName, text_color=triggerFired ? color.aqua : color.gray)
-    table.cell(dashboard, 0, 5, "Phase")
-    table.cell(dashboard, 1, 5, phaseName, text_color=c15 ? color.lime : color.orange)
+    table.cell(dashboard, 0, 4, "Phase")
+    table.cell(dashboard, 1, 4, phaseAudit15, text_color=c15 ? color.lime : color.orange)
+    table.cell(dashboard, 0, 5, "Trigger")
+    table.cell(dashboard, 1, 5, triggerAudit15, text_color=triggerFired ? color.aqua : color.orange)
     table.cell(dashboard, 0, 6, "Future Kumo")
     table.cell(dashboard, 1, 6, futureKumoTrendOrigin15 ? "RISING + THIN" : "WIDE / TWIST", text_color=futureKumoTrendOrigin15 ? color.lime : color.red)
     table.cell(dashboard, 0, 7, "Chikou")
@@ -351,11 +355,13 @@ if barstate.islast
     table.cell(dashboard, 1, 8, progressiveImpulse15 ? "PROGRESSIVE" : "NESTED/RETRACE", text_color=progressiveImpulse15 ? color.lime : color.red)
     table.cell(dashboard, 0, 9, "Kijun SL")
     table.cell(dashboard, 1, 9, kijunStopGeometry15 ? "HISTORICAL + NEAR" : "NO VALID LEVEL", text_color=kijunStopGeometry15 ? color.lime : color.red)
-    table.cell(dashboard, 0, 10, "Conditions")
-    table.cell(dashboard, 1, 10, str.tostring(passedCount) + " / 17")
-    table.cell(dashboard, 0, 11, "Book gate")
-    table.cell(dashboard, 1, 11, str.tostring(bookPct, "#.0") + "%", text_color=bookFires ? color.lime : color.orange)
-    table.cell(dashboard, 0, 12, "Cost / 1R")
-    table.cell(dashboard, 1, 12, str.tostring(costToRiskRatio15 * 100.0, "#.1") + "%", text_color=c17 ? color.lime : color.red)
-    table.cell(dashboard, 0, 13, "Status")
-    table.cell(dashboard, 1, 13, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : blockedBySameTrend ? "WAIT: LEG RESET" : strictSignal ? "STRICT SIGNAL" : hardVetoPassed ? "WAITING" : hardVetoReason, text_color=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 or blockedBySameTrend ? color.yellow : strictSignal ? color.lime : hardVetoPassed ? color.yellow : color.red)
+    table.cell(dashboard, 0, 10, "Gate state")
+    table.cell(dashboard, 1, 10, gateState15, text_color=hardVetoPassed ? color.lime : chikouMatureLeg15 ? color.orange : color.red)
+    table.cell(dashboard, 0, 11, "Conditions")
+    table.cell(dashboard, 1, 11, str.tostring(passedCount) + " / 17")
+    table.cell(dashboard, 0, 12, "Book gate")
+    table.cell(dashboard, 1, 12, str.tostring(bookPct, "#.0") + "%", text_color=bookFires ? color.lime : color.orange)
+    table.cell(dashboard, 0, 13, "Cost / 1R")
+    table.cell(dashboard, 1, 13, str.tostring(costToRiskRatio15 * 100.0, "#.1") + "%", text_color=c17 ? color.lime : color.red)
+    table.cell(dashboard, 0, 14, "Status")
+    table.cell(dashboard, 1, 14, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : blockedBySameTrend ? "WAIT: LEG RESET" : strictSignal ? "STRICT SIGNAL" : hardVetoPassed ? "WAITING: BOOK GATE" : hardVetoReason, text_color=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 or blockedBySameTrend ? color.yellow : strictSignal ? color.lime : hardVetoPassed ? color.yellow : chikouMatureLeg15 ? color.orange : color.red)
