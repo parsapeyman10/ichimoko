@@ -60,7 +60,8 @@ class NeuralRegressionHonestyTest {
         initialStopLoss = 2_394.0,
     )
 
-    private fun features(seed: Int): DoubleArray = DoubleArray(16) { i ->
+    // ۲۴ ویژگی ورودی شبکه (۱۶ هویتی + ۸ حالت بازار) — با همان ابعاد واقعی موتور.
+    private fun features(seed: Int): DoubleArray = DoubleArray(NeuralSelfLearningEngine.INPUT_DIM) { i ->
         val base = ((seed * 37 + i * 11) % 100) / 100.0
         base.coerceIn(0.0, 1.0)
     }

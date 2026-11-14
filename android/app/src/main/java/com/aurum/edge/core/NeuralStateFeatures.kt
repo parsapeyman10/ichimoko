@@ -33,8 +33,8 @@ data class NeuralStateInputs(
     val volumeRatio20: Double? = null,
     /** R:R واقعیِ پلن (نه هدف). */
     val planRr: Double? = null,
-    /** زمان ورود (UTC) برای تعیین سشن. */
-    val entryTimeMs: Long = 0L,
+    /** زمان ورود (UTC) برای تعیین سشن. مقدار منفی = نامعلوم (ساعت ۰ یک ساعت واقعی است). */
+    val entryTimeMs: Long = -1L,
 ) {
     /** کد سشن بر اساس ساعت UTC — همان تقسیم‌بندی که در بررسی سشن‌ها استفاده می‌شد. */
     val sessionCode: String
@@ -57,7 +57,8 @@ object NeuralStateFeatures {
      * این تابع باید خالص و مستقل از دادهٔ بازار بماند؛ فقط «ساعت» را می‌بیند.
      */
     fun sessionCodeOf(entryTimeMs: Long): String {
-        if (entryTimeMs <= 0L) return ""
+        // صفر یک زمان واقعی است (نیمه‌شب UTC = آسیا)؛ فقط مقدار منفی «نامعلوم» است.
+        if (entryTimeMs < 0L) return ""
         val hourUtc = ((entryTimeMs / 3_600_000L) % 24L).toInt()
         return when {
             hourUtc in 0..6 -> "ASIA"

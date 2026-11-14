@@ -2126,8 +2126,8 @@ class NeuralSelfLearningEngine(
         preEntry3Code: String = "",
         /** اگر وضعیت بازار از قبل (مثلاً از فیلدهای ژورنال) آماده است، مستقیم داده می‌شود. */
         stateInputs: NeuralStateInputs? = null,
-        /** زمان ورود برای تعیین سشن؛ صفر = نامعلوم. */
-        entryTimeMs: Long = 0L,
+        /** زمان ورود برای تعیین سشن؛ مقدار منفی = نامعلوم. */
+        entryTimeMs: Long = -1L,
     ): Triple<List<Double>, String, String> {
         val symbol = V1Universe.normalize(symbolInput)
         val assetClass = AssetClass.of(symbol)

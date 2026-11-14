@@ -38,8 +38,8 @@ class NeuralStateAndCalibrationTest {
 
     @Test
     fun `unknown entry time means unknown session, never a made-up one`() {
-        assertEquals("", NeuralStateFeatures.sessionCodeOf(0L))
-        assertEquals(0.0, NeuralStateFeatures.build(NeuralStateInputs(entryTimeMs = 0L))[6], 0.0)
+        assertEquals("", NeuralStateFeatures.sessionCodeOf(-1L))
+        assertEquals(0.0, NeuralStateFeatures.build(NeuralStateInputs(entryTimeMs = -1L))[6], 0.0)
     }
 
     // ── ۲. بردار حالت: اندازه، بازه و بی‌طرفی مقدار نامعلوم ────────────────────

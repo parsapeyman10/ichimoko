@@ -943,7 +943,8 @@ class RiskAndCalendarEngineTest {
 
         // Verify Neural Brain explainability fields (learnedInsightsFeedFa, featureInsights, recentLessons)
         val brainSummary = neuralEngine.state.value
-        assertEquals(16, brainSummary.featureInsights.size)
+        // ۱۶ ویژگی هویتی + ۸ حالت بازار (R19) ⇒ ۲۴
+        assertEquals(24, brainSummary.featureInsights.size)
         assertTrue(brainSummary.learnedInsightsFeedFa.isNotEmpty())
         assertEquals(6, brainSummary.recentLessons.size)
         assertTrue(brainSummary.noTradeClusters.isNotEmpty())
@@ -1100,12 +1101,13 @@ class RiskAndCalendarEngineTest {
         // Verify v3.9.23 features:
         // 1. Unified Drive R:R method is identical to Base Ichimoku (baseOptimalRr = 2.25, same structural SL/TP & R:R formula)
         assertEquals(2.25, BitcoinStrategyModel.BASE_ICHIMOKU.baseOptimalRr, 1e-6)
-        // 2. All 16 learned neural features (0..15) are tunable specifically per strategy across all 16 strategies
+        // 2. All 24 learned neural features (0..23) are tunable specifically per strategy
         assertEquals(5, tunedParams.perStrategyProfiles.size)
         BitcoinStrategyModel.neuralLearningModels.forEach { stratModel ->
             val prof = tunedParams.perStrategyProfiles[stratModel.id]
             assertNotNull("Missing profile for ${stratModel.id}", prof)
-            assertEquals(16, prof!!.featureTunings.size)
+            // ۱۶ ویژگی هویتی + ۸ حالت بازار (R19)
+            assertEquals(24, prof!!.featureTunings.size)
         }
         val tunedFeatProfile = neuralEngineV3919.tuneStrategyFeature(
             strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
@@ -1187,7 +1189,7 @@ class RiskAndCalendarEngineTest {
             huberDelta = 1.35,
         )
         assertEquals(10, regReportAll.parameterRows.size)
-        assertEquals(16, regReportAll.featureSlopes.size)
+        assertEquals(24, regReportAll.featureSlopes.size)
         // R² از باقی‌ماندهٔ واقعی مدل محاسبه می‌شود (نه از شمار نمونه). برازش لب‌به‌مرز
         // لازم نیست بخشی از قرارداد باشد؛ آنچه قرارداد است، عددِ محدود و قابل‌دفاع است.
         // R² حالا **واقعی** است و می‌تواند منفی باشد (بدتر از میانگین) یا وقتی نمونه برای
