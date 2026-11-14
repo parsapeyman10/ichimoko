@@ -44,19 +44,14 @@ class RiskDollarTargetTest {
         )
         cases.forEach { (symbol, entry, stopDistance) ->
             val r = calc(symbol, entry, stopDistance, stopDistance * 2.0)
-            // حجم به «گام مجاز بازار» پایین گرد می‌شود (مثل قواعد واقعی سفارش)، پس زیان
-            // هرگز از ۵ دلار بالاتر نمی‌زند و حداکثر یک گام پایین‌تر می‌ایستد:
-            // گام طلا ۰٫۰۱ اونس ≈ ۸ سنت ریسک، فارکس ۱۰۰ واحد ≈ ۲۰ سنت، بیت‌کوین ۰٫۰۰۰۰۱ ≈ ۲ سنت.
-            val stepRiskUsd = com.aurum.edge.core.VenueSpecs.of(symbol).let { spec ->
-                spec.quantityStep * (stopDistance + spec.totalRoundTripFeeUsd(entry, 1.0))
-            }
-            assertTrue(
-                "زیان خالص در SL نباید از ۵ دلار بیشتر شود · $symbol (بود: ${r.netLossAtSlUsd})",
-                r.netLossAtSlUsd <= 5.0 + 0.01,
-            )
-            assertTrue(
-                "زیان خالص در SL باید نزدیک ۵ دلار بماند · $symbol (بود: ${r.netLossAtSlUsd})",
-                r.netLossAtSlUsd >= 5.0 - stepRiskUsd - 0.01,
+            // حجم از تقسیم بودجه بر هزینهٔ هر واحد ساخته می‌شود و بدون گرد کردن به گام بازار
+            // تا ۶ رقم اعشار نگه داشته می‌شود (گام بازار فقط در کارگزار اعمال می‌شود)، پس زیان
+            // خالص **دقیقاً** ۵ دلار است، نه ۴٫۹۵ و نه ۵٫۰۵.
+            assertEquals(
+                "زیان خالص در SL باید دقیقاً ۵ دلار باشد · $symbol",
+                5.0,
+                r.netLossAtSlUsd,
+                0.01,
             )
             assertTrue("کارمزد باید داخل محاسبه باشد · $symbol", r.totalRoundTripFeeUsd > 0.0)
             assertTrue(
@@ -69,19 +64,20 @@ class RiskDollarTargetTest {
     @Test
     fun `net reward keeps the planned R multiple after fees`() {
         val r = calc("XAU/USD", 2_600.0, 7.8, 7.8 * 2.0)
-        // ۲R ⇒ خالص حدود ۱۰ دلار (نه ۱۰ منهای کارمزد).
+        // ۲R ⇒ خالص دقیقاً ۱۰ دلار (نه ۱۰ منهای کارمزد).
         assertEquals("سود خالص ۲R", 10.0, r.netProfitAtTpUsd, 0.05)
-        // با پایین‌گرد کردن حجم به گام ۰٫۰۱ اونس، زیان خالص ۴٫۹۵ دلار می‌شود نه ۵٫۰۰، پس R خالص
-        // یک درصد بالاتر از ۲ می‌افتد؛ همین «ناهم‌ترازی گام» است، نه خطای محاسبه.
-        assertEquals("R خالص", 2.0, r.netRiskReward, 0.05)
+        // چون حجم به گام بازار گِرد نمی‌شود و هدف قیمتی تا جبران کامل کارمزد کشیده می‌شود،
+        // R خالص دقیقاً ۲ می‌ماند و هیچ ناهم‌ترازی‌ای در کار نیست.
+        assertEquals("R خالص", 2.0, r.netRiskReward, 0.01)
     }
 
     @Test
-    fun `take profit never leaves the one point five to three R band`() {
-        // هدف ساختاری ۵R خواسته شده ⇒ باید به سقف ۳R بریده شود.
+    fun `requested R is honored exactly and never shrunk by fees`() {
+        // هدف ساختاری ۵R ⇒ سود خالص دقیقاً ۵R؛ هیچ سقف قیمتی‌ای آن را نمی‌بُرد و
+        // فاصلهٔ قیمتی تا جایی کشیده می‌شود که کارمزد هم داخلش جبران شود.
         val wide = calc("XAU/USD", 2_600.0, 7.8, 7.8 * 5.0)
-        assertTrue("R باید حداکثر ۳ باشد، بود: ${wide.riskReward}", wide.riskReward <= 3.0 + 1e-6)
-        assertTrue("R باید دست‌کم ۱٫۵ باشد", wide.riskReward >= 1.5 - 1e-6)
+        assertEquals("سود خالص ۵R", 25.0, wide.netProfitAtTpUsd, 0.05)
+        assertEquals("R خالص", 5.0, wide.riskReward, 0.01)
 
         // هدف ۰٫۸R: پلن نباید «باد» شود تا داخل دالان بیفتد. عدد واقعی گزارش می‌شود و
         // مسیرهای اجرا (که `MIN_REQUIRED_RISK_REWARD` را چک می‌کنند) چنین معامله‌ای را باز نمی‌کنند.

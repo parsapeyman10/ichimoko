@@ -234,7 +234,6 @@ object CapitalDebugTrace {
         } else {
             0.0
         }
-        val stepRiskUsd = spec.quantityStep * (stopPerUnitUsd + feePerUnit)
         val budget = result.riskBudgetUsd
         val fee = result.totalRoundTripFeeUsd
         val feeSharePct = if (budget > 1e-9) fee / budget * 100.0 else 0.0
@@ -307,9 +306,9 @@ object CapitalDebugTrace {
                 "خالص $" + money(result.netLossAtSlUsd) + " ≤ بودجه $" + money(budget),
             ),
             CapitalTraceCheck(
-                "زیان خالص بیش از یک گام حجم کمتر از بودجه نیست",
-                result.netLossAtSlUsd >= budget - stepRiskUsd - 0.02,
-                "خالص $" + money(result.netLossAtSlUsd) + " ≥ $" + money(budget - stepRiskUsd),
+                "زیان خالص دقیقاً برابر مبلغ ریسک تنظیم‌شده است",
+                abs(result.netLossAtSlUsd - budget) <= 0.02,
+                "خالص $" + money(result.netLossAtSlUsd) + " = بودجه $" + money(budget),
             ),
             CapitalTraceCheck(
                 "سود خالص در دالان ۱٫۵R تا ۳R می‌ماند",
@@ -342,10 +341,10 @@ object CapitalDebugTrace {
                 num(result.liquidationBufferR) + "R · " + result.leverageReasonFa,
             ),
             CapitalTraceCheck(
-                "حجم روی گام مجاز بازار است",
-                spec.quantityStep <= 0.0 ||
-                    abs(result.positionUnits / spec.quantityStep - round(result.positionUnits / spec.quantityStep)) < 1e-6,
-                precise(result.positionUnits) + " ÷ گام " + precise(spec.quantityStep),
+                "حجم بدون گِرد به گام بازار و با دقت ۶ رقم اعشار است",
+                abs(result.positionUnits - round(result.positionUnits * 1_000_000.0) / 1_000_000.0) < 1e-9,
+                precise(result.positionUnits) + " · گام بازار " + precise(spec.quantityStep) +
+                    " در کارگزار اعمال می‌شود، نه در محاسبهٔ ریسک",
             ),
             CapitalTraceCheck(
                 "هیچ عددی NaN یا بی‌نهایت نیست",
