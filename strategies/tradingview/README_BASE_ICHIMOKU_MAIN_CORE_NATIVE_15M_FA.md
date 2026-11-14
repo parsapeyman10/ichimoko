@@ -17,6 +17,21 @@
 - time-stop وجود ندارد. خروج فقط SL، TP یا Smart Trend Exit ساختاری است.
 - روی چارت فقط خطوط واقعی **SL قرمز** و **TP سبز** رسم می‌شوند؛ entry line، marker و plot تشخیصی شلوغ وجود ندارد.
 
+## سنتز کتاب‌های موجود در Drive — با مرزهای صریح
+
+منابع قابل‌استخراجِ مرتبط مرور شدند: راهنماهای **Patel**، **Nicole Elliott**، **Karen Péloille**، کتاب `Ichimoku Charting & Technical Analysis`، راهنمای Cloud، برگهٔ mechanical cross و راهنمای Ichimoku/Bollinger. این Pine متن یا ادعای سودآوری هیچ کتابی را کپی نمی‌کند و آن‌ها را parity یکسان فرض نمی‌کند؛ فقط اصول مشترک و قابل‌آزمون را به یک قانون native-15m تبدیل می‌کند:
+
+| اصل تکرارشونده در منابع | پیاده‌سازی قابل‌آزمون در این strategy |
+|---|---|
+| Ichimoku یک مجموعهٔ هم‌گراست، نه یک cross منفرد | Kumo، Sanyaku/TK، Chikou، Kumo آینده و trigger باید هم‌جهت باشند. |
+| شروع حرکت معمولاً پس از فشردگی/تعادل و شکست رخ می‌دهد | **Origin base** داخلی فقط وقتی ثبت می‌شود که فشردگی Bollinger-width و TK هم‌زمان بوده و سپس پایان یابد؛ تا شش کندل arm می‌ماند. Bollinger روی چارت plot نمی‌شود. |
+| تست/ sweepِ Kijun و reclaim می‌تواند entry کم‌ریسک بسازد | اگر base ثبت نشده باشد، تنها جایگزین، touch/sweep نزدیک Kijun در سه کندل اخیر همراه با close بازپس‌گیری‌شدهٔ TK است. |
+| مومنتوم نباید مخالف روند باشد | RSI14 فقط به‌عنوان تأیید سمت خط 50 استفاده می‌شود، نه سیگنال مستقل یا پیش‌بینی اشباع. |
+| Kijun یک سطح تعادل و محل stop ساختاری است | SL فقط پشت Kijun تاریخیِ معتبر همان setup می‌ماند؛ fallback ساخته نمی‌شود. |
+| ورود با close معتبر و R:R از پیش‌تعریف‌شده انجام می‌شود | کندل progressive، entry در open بعدی، bracket قفل‌شده و TP ثابت 2R تا 3R؛ پیش‌فرض 2.25R. |
+
+دو مورد عمداً وارد نشده‌اند: مثال‌های multi-timeframe/Triple Screen در بعضی کتاب‌ها، چون قرارداد این فایل native 15m است؛ و ادعاهای عمومی سود ثابت، EMA89/MA200 یا RSI-overbought به‌تنهایی، چون در منابع برای XAUUSD 15mِ این پروژه اعتبارسنجی نشده‌اند. دو PDF اسکن‌شدهٔ Drive با نام‌های `trading strategy.pdf` و `analysis andstrategy.pdf` text layer قابل‌استخراج نداشتند؛ بدون OCR نمی‌توان محتوای آن‌ها را صادقانه به قانون تبدیل کرد.
+
 ## الگوی «شروع روند» مورد نظر در تصویر
 
 از screenshot به‌تنهایی نمی‌توان مقدار قطعی ATR، ER14، حجم یا فضای Chikou را استخراج کرد؛ پس نباید به‌اشتباه گفت همهٔ شرط‌ها در آن کندل پاس شده‌اند. اما ساختار قابل‌مشاهدهٔ ناحیه این است:
@@ -67,9 +82,13 @@ dashboard همیشه فقط **آخرین کندل بسته‌شدهٔ فعلی**
 
 | وضعیت | معنای عملی | اقدام strategy |
 |---|---|---|
+| `Origin = BB+TK BASE: n LEFT` | یک base فشردهٔ داخلی به پایان رسیده و پنجرهٔ کوتاه origin باز است. | Chikou/reclaim/impulse را فقط در همان پنجره می‌سنجد. |
+| `Origin = KIJUN SWEEP/RECLAIM` | جایگزین base: لمس یا sweep نزدیک Kijun در سه کندل اخیر و بازپس‌گیری TK دیده شده است. | به‌تنهایی entry نیست؛ تمام گیت‌های دیگر باقی می‌مانند. |
+| `WAIT: BASE/SWEEP` | نه base کامل‌شده و نه reclaim ساختاری در جهت bias فعلی وجود دارد. | entry ندارد؛ یک breakout دیرهنگام را origin تلقی نمی‌کند. |
 | `Chikou = BLOCKED` / `Gate state = WAIT: CHIKOU BLOCKED` | release در جهت bias فعلی رخ نداده؛ روند مبدأ هنوز شروع نشده است. | entry ندارد؛ منتظر event واقعی release می‌ماند. |
 | `Chikou = FRESH RELEASE` یا `ARMED: n LEFT` | release رخ داده و حداکثر `n` کندل برای کامل‌شدن reclaim، impulse و Kijun SL باقی است. | فقط در همین پنجره setup را می‌سنجد. |
 | `Chikou = OPEN BUT MATURE` / `MATURE LEG: RESET NEEDED` | Chikou باز است اما پنجرهٔ آغاز روند گذشته است. | عمداً late-entry یا re-entry همان leg نمی‌گیرد؛ reset TK/Kumo لازم است. |
+| `Momentum = RSI14 AGAINST` / `WAIT: RSI MIDLINE` | RSI14 در سمت مخالف خط 50 است. | entry ندارد؛ RSI سیگنال مستقل نیست. |
 | `WAIT: KUMO`، `WAIT: IMPULSE` یا `WAIT: KIJUN LEVEL` | release موجود است، اما یکی از hard gateهای ساختاری هنوز کامل نشده است. | تا پایان پنجره صبر می‌کند، بدون پایین آوردن معیار. |
 | `WAIT: PHASE` یا `WAIT: TRIGGER` | hard geometry می‌تواند سالم باشد، اما ER/range، فاز، reclaim یا trigger هنوز تأیید نشده است. | entry ندارد؛ این مورد با blocked/expired Chikou یکی نیست. |
 
@@ -99,7 +118,7 @@ dashboard همیشه فقط **آخرین کندل بسته‌شدهٔ فعلی**
 | 16 | Sniper pocket | فاصله از pocket مبتنی بر Tenkan و 55٪ بدنهٔ کندل |
 | 17 | اقتصاد اجرا | نسبت هزینهٔ رفت‌وبرگشت به 1R حداکثر 0.45R |
 
-گیت نهایی از مرجع Main-Core الگو می‌گیرد: شرط‌های **1، 3، 4، 6 و 17 وتوی سخت** هستند؛ سپس لایهٔ quality و trigger هرکدام باید حداقل 70٪ و امتیاز کل حداقل 80٪ بگیرند. علاوه‌بر آن، بنا بر الگوی فلش، `Future Kumo = RISING + THIN`، `Chikou = FRESH RELEASE/ARMED`، `Progressive Impulse` و `Kijun SL` معتبر چهار وتوی سخت اضافه هستند. به همین علت strategy صرفاً به‌خاطر یک TK cross یا یک شکست سطح وارد نمی‌شود.
+گیت نهایی از مرجع Main-Core الگو می‌گیرد: شرط‌های **1، 3، 4، 6 و 17 وتوی سخت** هستند؛ سپس لایهٔ quality و trigger هرکدام باید حداقل 70٪ و امتیاز کل حداقل 80٪ بگیرند. علاوه‌بر آن، بنا بر الگوی فلش و سنتز منابع Drive، `Origin base/sweep-reclaim`، `RSI14` در سمت روند، `Future Kumo = RISING + THIN`، `Chikou = FRESH RELEASE/ARMED`، `Progressive Impulse` و `Kijun SL` معتبر وتوی سخت هستند. به همین علت strategy صرفاً به‌خاطر یک TK cross یا یک شکست سطح وارد نمی‌شود.
 
 ## حد ضرر، حد سود و lifecycle
 
@@ -140,9 +159,9 @@ S-point/time guard در Pine فقط بخش قابل‌محاسبه با کندل
 2. کل فایل `.pine` را در Pine Editor paste و `Add to chart` کنید.
 3. dashboard باید `15m OK` و سپس `READY` نشان دهد.
 4. برای chart XAUUSD تصویر، Inputs باید این مقادیر را نشان دهد: `Target R:R = 2.25`، `Round-trip cost fraction = 0.0000466`، `Minimum structural stop fraction = 0.0009` و `Maximum structural stop fraction = 0.0055`. اگر Pine تنظیمات قبلی را حفظ کرد، این موارد را دستی reset کنید.
-5. برای الگوی فلش، defaults این‌ها هستند: `Minimum body ratio = 0.22`، `Maximum progressive candle overlap = 0.10 ATR`، `Maximum thin future Kumo = 0.80 ATR`، `Chikou-release confirmation window = 4 bars`، `Kijun history bars = 20`، `Minimum historical Kijun touches = 2` و `Maximum Kijun SL distance = 1.35 ATR`.
-6. dashboard باید در پنجرهٔ setup هم‌زمان `Future Kumo = RISING + THIN`، `Chikou = FRESH RELEASE` یا `ARMED: n LEFT`، `Impulse = PROGRESSIVE`، `Kijun SL = HISTORICAL + NEAR` و `Cost / 1R` سبز و حداکثر `45.0%` را نشان دهد. `Gate state = HARD GATES READY` فقط یعنی گیت‌های سخت آماده‌اند؛ برای entry هنوز `Phase`، `Trigger` و Book gate نیز باید تأیید شوند.
-7. اگر panel در انتهای نمودار وضعیت دیگری نشان می‌دهد، آن وضعیت را با candidate تاریخی قاطی نکنید: Bar Replay را روی bar موردنظر اجرا کنید. `WAIT: CHIKOU BLOCKED`، `MATURE LEG: RESET NEEDED`، `WAIT: PHASE` و `WAIT: TRIGGER` چهار علت جداگانه‌اند و هیچ‌کدام با تغییر ظاهری چارت به‌تنهایی override نمی‌شوند.
+5. برای الگوی فلش، defaults این‌ها هستند: `Minimum body ratio = 0.22`، `Maximum progressive candle overlap = 0.10 ATR`، `Maximum thin future Kumo = 0.80 ATR`، `Chikou-release confirmation window = 4 bars`، `Origin-base confirmation window = 6 bars`، `Maximum BB-width / 20-bar average = 0.80`، `Require RSI14 on trend side of 50 = on`، `Kijun history bars = 20`، `Minimum historical Kijun touches = 2` و `Maximum Kijun SL distance = 1.35 ATR`.
+6. dashboard باید در پنجرهٔ setup هم‌زمان `Origin = BB+TK BASE: n LEFT` یا `KIJUN SWEEP/RECLAIM`، `Chikou = FRESH RELEASE` یا `ARMED: n LEFT`، `Momentum = RSI14 TREND SIDE`، `Future Kumo = RISING + THIN`، `Impulse = PROGRESSIVE`، `Kijun SL = HISTORICAL + NEAR` و `Cost / 1R` سبز و حداکثر `45.0%` را نشان دهد. `Gate state = HARD GATES READY` فقط یعنی گیت‌های سخت آماده‌اند؛ برای entry هنوز `Phase`، `Trigger` و Book gate نیز باید تأیید شوند.
+7. اگر panel در انتهای نمودار وضعیت دیگری نشان می‌دهد، آن وضعیت را با candidate تاریخی قاطی نکنید: Bar Replay را روی bar موردنظر اجرا کنید. `WAIT: BASE/SWEEP`، `WAIT: RSI MIDLINE`، `WAIT: CHIKOU BLOCKED`، `MATURE LEG: RESET NEEDED`، `WAIT: PHASE` و `WAIT: TRIGGER` علت‌های جداگانه‌اند و هیچ‌کدام با تغییر ظاهری چارت به‌تنهایی override نمی‌شوند.
 8. برای broker/نماد دیگر، commission، slippage، این مقادیر و هزینهٔ واقعی همان venue را تنظیم و سپس backtest را روی ساعت معاملاتی و بازهٔ واقعی خودتان انجام دهید.
 
 این محیط به TradingView متصل نیست؛ بنابراین syntax/اجرای نهایی باید در Pine Editor خودتان compile شود. تا قبل از آن، این فایل فقط static-reviewed است. لطفاً اگر Pine Editor خطا داد، متن خطا و شمارهٔ خط را بفرستید تا دقیق اصلاح شود.

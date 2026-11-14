@@ -22,6 +22,10 @@ float breakoutBufferAtr = input.float(0.15, "Kumo/flat SSB breakout buffer (ATR)
 float minFutureKumoThicknessAtr = input.float(0.05, "Minimum future Kumo thickness (ATR)", minval=0.02, maxval=0.18, step=0.01)
 float maxTrendOriginKumoThicknessAtr = input.float(0.80, "Maximum thin future Kumo thickness (ATR)", minval=0.20, maxval=1.50, step=0.05)
 int chikouConfirmationWindowBars = input.int(4, "Chikou-release confirmation window (bars)", minval=1, maxval=6)
+bool requireOriginBaseOrSweep = input.bool(true, "Require native origin base or Kijun sweep/reclaim")
+int originBaseWindowBars = input.int(6, "Origin-base confirmation window (bars)", minval=2, maxval=12)
+float bbSqueezeWidthRatio = input.float(0.80, "Maximum BB-width / 20-bar average for origin base", minval=0.45, maxval=0.95, step=0.05)
+bool requireRsiMidline = input.bool(true, "Require RSI14 on trend side of 50")
 float minEfficiencyRatio = input.float(0.20, "Minimum ER14", minval=0.14, maxval=0.45, step=0.01)
 float minVolumeRatio20 = input.float(0.60, "Minimum volume / SMA20", minval=0.40, maxval=1.15, step=0.01)
 float maxAdverseWickRatio = input.float(0.45, "Maximum adverse wick ratio", minval=0.28, maxval=0.60, step=0.01)
@@ -62,6 +66,19 @@ float upperWick15 = math.max(0.0, (high - math.max(open, close)) / range15)
 float lowerWick15 = math.max(0.0, (math.min(open, close) - low) / range15)
 float volumeAverage20 = ta.sma(volume, 20)
 float volumeRatio20 = volumeAverage20 > 0.0 and volume > 0.0 ? volume / volumeAverage20 : 1.0
+float rsi14 = ta.rsi(close, 14)
+
+// Book-synthesis origin base: a completed, native-only compression of both
+// Bollinger width and TK equilibrium. The bands are internal; no extra plot is drawn.
+float bbBasis20 = ta.sma(close, 20)
+float bbWidth20 = bbBasis20 > syminfo.mintick ? (ta.stdev(close, 20) * 4.0) / bbBasis20 : na
+float bbWidthAverage20 = ta.sma(bbWidth20, 20)
+bool bbSqueeze15 = not na(bbWidth20) and not na(bbWidthAverage20) and bbWidth20 <= bbWidthAverage20 * bbSqueezeWidthRatio
+bool tkBaseCompressed15 = math.abs(tenkan15 - kijun15) <= atr15 * 0.18
+bool originBaseCompressed15 = bbSqueeze15 and tkBaseCompressed15
+bool newOriginBaseExit15 = not originBaseCompressed15 and originBaseCompressed15[1]
+int originBaseExitAge15 = ta.barssince(newOriginBaseExit15)
+bool originBaseArmed15 = not na(originBaseExitAge15) and originBaseExitAge15 <= originBaseWindowBars
 
 // ── Native snapshot properties copied from transferable Main-Core checks ─────
 float flatTolerance15 = math.max(close * 0.0003, atr15 * 0.04)
@@ -121,13 +138,22 @@ int shortWaveAge15 = math.abs(ta.highestbars(high, 46)) + 1
 bool nearLongHosodaCycle15 = math.abs(longWaveAge15 - 9) <= 1 or math.abs(longWaveAge15 - 17) <= 1 or math.abs(longWaveAge15 - 26) <= 1 or math.abs(longWaveAge15 - 33) <= 1 or math.abs(longWaveAge15 - 42) <= 1
 bool nearShortHosodaCycle15 = math.abs(shortWaveAge15 - 9) <= 1 or math.abs(shortWaveAge15 - 17) <= 1 or math.abs(shortWaveAge15 - 26) <= 1 or math.abs(shortWaveAge15 - 33) <= 1 or math.abs(shortWaveAge15 - 42) <= 1
 
-bool dataReady = closed15m and not na(currentA15) and not na(currentB15) and not na(er14) and not na(chikouCorridorHigh15) and not na(chikouCorridorLow15)
+bool dataReady = closed15m and not na(currentA15) and not na(currentB15) and not na(er14) and not na(rsi14) and not na(bbWidthAverage20) and not na(chikouCorridorHigh15) and not na(chikouCorridorLow15)
 
 // ── The 17 Main-Core conditions, calculated from the one native snapshot ─────
 bool bullishBias = close > kumoTop15
 bool bearishBias = close < kumoBottom15
 bool isLong = bullishBias and not bearishBias ? true : bearishBias and not bullishBias ? false : tenkan15 >= kijun15
 bool progressiveImpulse15 = isLong ? (bullProgressStep0 and bullProgressStep1) : (bearProgressStep0 and bearProgressStep1)
+bool rsiMidlineAligned15 = isLong ? rsi14 > 50.0 : rsi14 < 50.0
+// A sweep/reclaim is an alternative origin proof when a clean BB+TK base was
+// not visible. It must touch the local Kijun and close back through the TK zone.
+bool recentKijunSweepReclaimLong15 = (low <= kijun15 + atr15 * 0.10 or low[1] <= kijun15[1] + atr15[1] * 0.10 or low[2] <= kijun15[2] + atr15[2] * 0.10) and close > tkTop15
+bool recentKijunSweepReclaimShort15 = (high >= kijun15 - atr15 * 0.10 or high[1] >= kijun15[1] - atr15[1] * 0.10 or high[2] >= kijun15[2] - atr15[2] * 0.10) and close < tkBottom15
+bool kijunSweepReclaim15 = isLong ? recentKijunSweepReclaimLong15 : recentKijunSweepReclaimShort15
+bool originEvidence15 = originBaseArmed15 or kijunSweepReclaim15
+bool originBaseOrSweepPassed15 = not requireOriginBaseOrSweep or originEvidence15
+bool rsiMidlinePassed15 = not requireRsiMidline or rsiMidlineAligned15
 bool chikouReleaseArmed15 = isLong ? chikouBullishReleaseArmed15 : chikouBearishReleaseArmed15
 int chikouReleaseAge15 = isLong ? bullChikouReleaseAge15 : bearChikouReleaseAge15
 bool futureKumoStableThin15 = futureKumoThicknessAtr15 >= 0.02 and futureKumoThicknessAtr15 <= maxTrendOriginKumoThicknessAtr
@@ -210,9 +236,10 @@ float triggerScore = (c2 ? 0.6 : 0.0) + (c7 ? 0.6 : 0.0) + (c10 ? 0.8 : 0.0) + (
 float qualityPct = qualityScore / 5.2 * 100.0
 float triggerPct = triggerScore / 6.6 * 100.0
 float bookPct = (regimeScore + qualityScore + triggerScore) / 16.8 * 100.0
-// User-selected trend-origin gates: a fresh Chikou release, a rising-but-not-wide Kumo,
-// no nested/retracing impulse, and no distant/non-historical Kijun stop.
-bool hardVetoPassed = c1 and c3 and c4 and c6 and c17 and chikouReleaseArmed15 and futureKumoTrendOrigin15 and progressiveImpulse15 and kijunStopGeometry15
+// User-selected trend-origin gates: a released base or Kijun sweep/reclaim, a fresh
+// Chikou release, a rising-but-not-wide Kumo, clean progressive impulse, directional
+// RSI momentum, and no distant/non-historical Kijun stop.
+bool hardVetoPassed = c1 and c3 and c4 and c6 and c17 and originBaseOrSweepPassed15 and rsiMidlinePassed15 and chikouReleaseArmed15 and futureKumoTrendOrigin15 and progressiveImpulse15 and kijunStopGeometry15
 bool bookFires = hardVetoPassed and qualityPct >= 70.0 and triggerPct >= 70.0 and bookPct >= 80.0
 int passedCount = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0) + (c6 ? 1 : 0) + (c7 ? 1 : 0) + (c8 ? 1 : 0) + (c9 ? 1 : 0) + (c10 ? 1 : 0) + (c11 ? 1 : 0) + (c12 ? 1 : 0) + (c13 ? 1 : 0) + (c14 ? 1 : 0) + (c15 ? 1 : 0) + (c16 ? 1 : 0) + (c17 ? 1 : 0)
 
@@ -222,9 +249,11 @@ string triggerName = triggerGenesis ? "EARLY KATANA" : triggerBreakout ? "VALIDA
 // an earlier historical arrow: it says which prerequisite the current bar lacks.
 string phaseAudit15 = not c13 ? "WAIT: ER / RANGE" : phaseGenesis15 ? "GENESIS" : phaseCore15 ? "CORE" : "EXPIRED"
 string triggerAudit15 = triggerFired ? triggerName : not c2 ? "WAIT: TK/KUMO RECLAIM" : not c7 ? "WAIT: CHIKOU STRUCTURE" : not c11 ? "WAIT: CANDLE/VOLUME" : not c16 ? "WAIT: SNIPER POCKET" : "WAIT: PATTERN CONFIRM"
+string originAudit15 = not requireOriginBaseOrSweep ? "OPTIONAL: OFF" : originBaseArmed15 ? "BB+TK BASE: " + str.tostring(originBaseWindowBars - originBaseExitAge15) + " LEFT" : kijunSweepReclaim15 ? "KIJUN SWEEP/RECLAIM" : originBaseCompressed15 ? "BASE STILL FORMING" : "WAIT: BASE/SWEEP"
+string momentumAudit15 = not requireRsiMidline ? "OPTIONAL: OFF" : rsiMidlineAligned15 ? "RSI14 TREND SIDE" : "RSI14 AGAINST"
 bool chikouMatureLeg15 = c6 and not chikouReleaseArmed15
-string gateState15 = not c6 ? "WAIT: CHIKOU BLOCKED" : chikouMatureLeg15 ? "MATURE LEG: RESET NEEDED" : not futureKumoTrendOrigin15 ? "WAIT: KUMO" : not progressiveImpulse15 ? "WAIT: IMPULSE" : not kijunStopGeometry15 ? "WAIT: KIJUN LEVEL" : not c15 ? "WAIT: PHASE" : not triggerFired ? "WAIT: TRIGGER" : "HARD GATES READY"
-string hardVetoReason = not c6 ? "WAIT: CHIKOU BLOCKED" : chikouMatureLeg15 ? "MATURE LEG: NO NEW ENTRY" : not futureKumoTrendOrigin15 ? "VETO: KUMO WIDE/TWIST" : not progressiveImpulse15 ? "VETO: NESTED/RETRACE" : not kijunStopGeometry15 ? "VETO: KIJUN SL" : not c15 ? "WAIT: PHASE QUALITY" : not triggerFired ? "WAIT: TRIGGER CONFIRM" : not c17 ? "VETO: COST / 1R" : "HARD VETO"
+string gateState15 = not originBaseOrSweepPassed15 ? "WAIT: BASE/SWEEP" : not rsiMidlinePassed15 ? "WAIT: RSI MIDLINE" : not c6 ? "WAIT: CHIKOU BLOCKED" : chikouMatureLeg15 ? "MATURE LEG: RESET NEEDED" : not futureKumoTrendOrigin15 ? "WAIT: KUMO" : not progressiveImpulse15 ? "WAIT: IMPULSE" : not kijunStopGeometry15 ? "WAIT: KIJUN LEVEL" : not c15 ? "WAIT: PHASE" : not triggerFired ? "WAIT: TRIGGER" : "HARD GATES READY"
+string hardVetoReason = not originBaseOrSweepPassed15 ? "WAIT: BASE/SWEEP" : not rsiMidlinePassed15 ? "WAIT: RSI MIDLINE" : not c6 ? "WAIT: CHIKOU BLOCKED" : chikouMatureLeg15 ? "MATURE LEG: NO NEW ENTRY" : not futureKumoTrendOrigin15 ? "VETO: KUMO WIDE/TWIST" : not progressiveImpulse15 ? "VETO: NESTED/RETRACE" : not kijunStopGeometry15 ? "VETO: KIJUN SL" : not c15 ? "WAIT: PHASE QUALITY" : not triggerFired ? "WAIT: TRIGGER CONFIRM" : not c17 ? "VETO: COST / 1R" : "HARD VETO"
 
 // ── Smart exit: structural deterioration only; there is no bar-count time stop ─
 bool tkGapContracting15 = tkGapAtr15 < priorTkGapAtr15
@@ -333,7 +362,7 @@ if strategy.closedtrades > observedClosedTrades
     observedClosedTrades := strategy.closedtrades
 
 // A compact audit panel is diagnostic only; the strategy deliberately draws no entry markers.
-var table dashboard = table.new(position.top_right, 2, 15, bgcolor=color.new(color.black, 75), border_width=1)
+var table dashboard = table.new(position.top_right, 2, 17, bgcolor=color.new(color.black, 75), border_width=1)
 if barstate.islast
     table.cell(dashboard, 0, 0, "BASE MAIN-CORE")
     table.cell(dashboard, 1, 0, "NATIVE 15m")
@@ -343,25 +372,29 @@ if barstate.islast
     table.cell(dashboard, 1, 2, dataReady ? "READY" : "WARM-UP: need 80 bars", text_color=dataReady ? color.lime : color.orange)
     table.cell(dashboard, 0, 3, "Bias")
     table.cell(dashboard, 1, 3, dataReady ? (isLong ? "LONG" : "SHORT") : "-")
-    table.cell(dashboard, 0, 4, "Phase")
-    table.cell(dashboard, 1, 4, phaseAudit15, text_color=c15 ? color.lime : color.orange)
-    table.cell(dashboard, 0, 5, "Trigger")
-    table.cell(dashboard, 1, 5, triggerAudit15, text_color=triggerFired ? color.aqua : color.orange)
-    table.cell(dashboard, 0, 6, "Future Kumo")
-    table.cell(dashboard, 1, 6, futureKumoTrendOrigin15 ? "RISING + THIN" : "WIDE / TWIST", text_color=futureKumoTrendOrigin15 ? color.lime : color.red)
-    table.cell(dashboard, 0, 7, "Chikou")
-    table.cell(dashboard, 1, 7, chikouReleaseArmed15 ? (chikouReleaseAge15 == 0 ? "FRESH RELEASE" : "ARMED: " + str.tostring(chikouConfirmationWindowBars - chikouReleaseAge15) + " LEFT") : c6 ? "OPEN BUT MATURE" : "BLOCKED", text_color=chikouReleaseArmed15 ? color.lime : c6 ? color.orange : color.red)
-    table.cell(dashboard, 0, 8, "Impulse")
-    table.cell(dashboard, 1, 8, progressiveImpulse15 ? "PROGRESSIVE" : "NESTED/RETRACE", text_color=progressiveImpulse15 ? color.lime : color.red)
-    table.cell(dashboard, 0, 9, "Kijun SL")
-    table.cell(dashboard, 1, 9, kijunStopGeometry15 ? "HISTORICAL + NEAR" : "NO VALID LEVEL", text_color=kijunStopGeometry15 ? color.lime : color.red)
-    table.cell(dashboard, 0, 10, "Gate state")
-    table.cell(dashboard, 1, 10, gateState15, text_color=hardVetoPassed ? color.lime : chikouMatureLeg15 ? color.orange : color.red)
-    table.cell(dashboard, 0, 11, "Conditions")
-    table.cell(dashboard, 1, 11, str.tostring(passedCount) + " / 17")
-    table.cell(dashboard, 0, 12, "Book gate")
-    table.cell(dashboard, 1, 12, str.tostring(bookPct, "#.0") + "%", text_color=bookFires ? color.lime : color.orange)
-    table.cell(dashboard, 0, 13, "Cost / 1R")
-    table.cell(dashboard, 1, 13, str.tostring(costToRiskRatio15 * 100.0, "#.1") + "%", text_color=c17 ? color.lime : color.red)
-    table.cell(dashboard, 0, 14, "Status")
-    table.cell(dashboard, 1, 14, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : blockedBySameTrend ? "WAIT: LEG RESET" : strictSignal ? "STRICT SIGNAL" : hardVetoPassed ? "WAITING: BOOK GATE" : hardVetoReason, text_color=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 or blockedBySameTrend ? color.yellow : strictSignal ? color.lime : hardVetoPassed ? color.yellow : chikouMatureLeg15 ? color.orange : color.red)
+    table.cell(dashboard, 0, 4, "Origin")
+    table.cell(dashboard, 1, 4, originAudit15, text_color=not requireOriginBaseOrSweep ? color.gray : originEvidence15 ? color.lime : originBaseCompressed15 ? color.orange : color.red)
+    table.cell(dashboard, 0, 5, "Phase")
+    table.cell(dashboard, 1, 5, phaseAudit15, text_color=c15 ? color.lime : color.orange)
+    table.cell(dashboard, 0, 6, "Trigger")
+    table.cell(dashboard, 1, 6, triggerAudit15, text_color=triggerFired ? color.aqua : color.orange)
+    table.cell(dashboard, 0, 7, "Future Kumo")
+    table.cell(dashboard, 1, 7, futureKumoTrendOrigin15 ? "RISING + THIN" : "WIDE / TWIST", text_color=futureKumoTrendOrigin15 ? color.lime : color.red)
+    table.cell(dashboard, 0, 8, "Chikou")
+    table.cell(dashboard, 1, 8, chikouReleaseArmed15 ? (chikouReleaseAge15 == 0 ? "FRESH RELEASE" : "ARMED: " + str.tostring(chikouConfirmationWindowBars - chikouReleaseAge15) + " LEFT") : c6 ? "OPEN BUT MATURE" : "BLOCKED", text_color=chikouReleaseArmed15 ? color.lime : c6 ? color.orange : color.red)
+    table.cell(dashboard, 0, 9, "Momentum")
+    table.cell(dashboard, 1, 9, momentumAudit15, text_color=not requireRsiMidline ? color.gray : rsiMidlineAligned15 ? color.lime : color.red)
+    table.cell(dashboard, 0, 10, "Impulse")
+    table.cell(dashboard, 1, 10, progressiveImpulse15 ? "PROGRESSIVE" : "NESTED/RETRACE", text_color=progressiveImpulse15 ? color.lime : color.red)
+    table.cell(dashboard, 0, 11, "Kijun SL")
+    table.cell(dashboard, 1, 11, kijunStopGeometry15 ? "HISTORICAL + NEAR" : "NO VALID LEVEL", text_color=kijunStopGeometry15 ? color.lime : color.red)
+    table.cell(dashboard, 0, 12, "Gate state")
+    table.cell(dashboard, 1, 12, gateState15, text_color=hardVetoPassed ? color.lime : chikouMatureLeg15 ? color.orange : color.red)
+    table.cell(dashboard, 0, 13, "Conditions")
+    table.cell(dashboard, 1, 13, str.tostring(passedCount) + " / 17")
+    table.cell(dashboard, 0, 14, "Book gate")
+    table.cell(dashboard, 1, 14, str.tostring(bookPct, "#.0") + "%", text_color=bookFires ? color.lime : color.orange)
+    table.cell(dashboard, 0, 15, "Cost / 1R")
+    table.cell(dashboard, 1, 15, str.tostring(costToRiskRatio15 * 100.0, "#.1") + "%", text_color=c17 ? color.lime : color.red)
+    table.cell(dashboard, 0, 16, "Status")
+    table.cell(dashboard, 1, 16, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : blockedBySameTrend ? "WAIT: LEG RESET" : strictSignal ? "STRICT SIGNAL" : hardVetoPassed ? "WAITING: BOOK GATE" : hardVetoReason, text_color=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 or blockedBySameTrend ? color.yellow : strictSignal ? color.lime : hardVetoPassed ? color.yellow : chikouMatureLeg15 ? color.orange : color.red)
