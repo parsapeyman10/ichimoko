@@ -205,8 +205,8 @@ object NeuralCalibration {
             if (points.size < minFoldTestSamples) return@forEachIndexed
             val wins = points.count { it.won }
             val base = wins.toDouble() / points.size
-            val brier = points.sumOf { p -> (p.predictedWinProb - if (p.won) 1.0).let { it * it } } / points.size
-            val baseline = points.sumOf { p -> (base - if (p.won) 1.0).let { it * it } } / points.size
+            val brier = points.sumOf { p -> (p.predictedWinProb - if (p.won) 1.0 else 0.0).let { it * it } } / points.size
+            val baseline = points.sumOf { p -> (base - if (p.won) 1.0 else 0.0).let { it * it } } / points.size
             val logLoss = points.sumOf { p ->
                 val q = p.predictedWinProb.coerceIn(1e-6, 1 - 1e-6)
                 if (p.won) -ln(q) else -ln(1.0 - q)
