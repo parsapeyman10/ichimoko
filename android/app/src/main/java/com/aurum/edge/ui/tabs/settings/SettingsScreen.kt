@@ -81,6 +81,8 @@ fun SettingsScreen(
     val aiChecking by viewModel.aiChecking.collectAsStateWithLifecycle()
     val lastAiVerdict by viewModel.lastAiVerdict.collectAsStateWithLifecycle()
     val activeSymbol by viewModel.activeRiskSymbol.collectAsStateWithLifecycle()
+    // قیمت زندهٔ همان نماد برای «آزمون فرضی» کارت دیباگ؛ اگر خوانده نشده باشد هیچ عددی جعل نمی‌شود.
+    val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
     val backfillSummaries by viewModel.backfillSummaries.collectAsStateWithLifecycle()
     val isBackfilling by viewModel.isBackfilling.collectAsStateWithLifecycle()
     val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
@@ -431,6 +433,10 @@ fun SettingsScreen(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 4.dp),
                     )
+                    // هر اصلاح و هر هشدارِ همین تنظیمات، همان‌جا و بی‌پرده (نه در لاگ پنهان).
+                    CapitalFindingsBlock(
+                        findings = com.aurum.edge.core.CapitalPolicy.from(settings).findings(),
+                    )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -551,6 +557,14 @@ fun SettingsScreen(
                         )
                     }
                 }
+
+                // 🧪 دیباگ مدیریت سرمایه: همان موتور واقعی، قدم‌به‌قدم، با ناورداهای سبز/قرمز
+                CapitalDebugCard(
+                    settings = settings,
+                    symbol = activeSymbol,
+                    referencePrice = liveTicks[activeSymbol]?.price,
+                    lastTrade = trades.maxByOrNull { it.openedAt },
+                )
 
                 CapitalAndRiskLimitsCard(
                     settings = settings,

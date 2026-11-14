@@ -325,20 +325,34 @@ class SettingsStore(context: Context) {
     fun update(transform: (AppSettings) -> AppSettings) {
         val proposed = transform(_settings.value)
         if (proposed.accountBalance != _settings.value.accountBalance) dayOpeningEquity()
+        // سقف‌های مدیریت سرمایه فقط از یک‌جا می‌آیند (CapitalPolicy) تا UI و ذخیره‌سازی هرگز
+        // دو عدد ناهمخوان نشان ندهند؛ قبلاً UI سقف ۳۰٪ را نشان می‌داد و این‌جا بی‌صدا ۲۵٪ می‌شد.
+        val capital = com.aurum.edge.core.CapitalPolicy(
+            accountBalance = proposed.accountBalance,
+            initialCapital = proposed.initialCapital,
+            targetCapital = proposed.targetCapital,
+            riskPercent = proposed.riskPercent,
+            useFixedDollarRisk = proposed.useFixedDollarRisk,
+            fixedRiskUsd = proposed.fixedRiskUsd,
+            dailyLossLimitPercent = proposed.dailyLossLimitPercent,
+            maxDrawdownLimitPercent = proposed.maxDrawdownLimitPercent,
+            maxOpenTrades = proposed.maxOpenTrades,
+            maxOpenTradesPerSymbol = proposed.maxOpenTradesPerSymbol,
+        ).sanitized().policy
         val next = proposed.copy(
             symbol = V1Universe.normalize(proposed.symbol).takeIf(V1Universe::valid) ?: "XAU/USD",
             interval = Interval.M5,
-            riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 10.0) ?: 0.5,
-            initialCapital = proposed.initialCapital.takeIf { it.isFinite() && it >= 10.0 } ?: proposed.accountBalance.coerceAtLeast(10.0),
-            targetCapital = proposed.targetCapital.takeIf { it.isFinite() && it >= 100.0 } ?: 100_000.0,
-            fixedRiskUsd = proposed.fixedRiskUsd.takeIf { it.isFinite() && it >= 0.5 } ?: 5.0,
-            dailyLossLimitPercent = proposed.dailyLossLimitPercent.takeIf { it.isFinite() }?.coerceIn(0.5, 25.0) ?: 3.0,
-            maxDrawdownLimitPercent = proposed.maxDrawdownLimitPercent.takeIf { it.isFinite() }?.coerceIn(1.0, 50.0) ?: 10.0,
+            riskPercent = capital.riskPercent,
+            initialCapital = capital.initialCapital,
+            targetCapital = capital.targetCapital,
+            fixedRiskUsd = capital.fixedRiskUsd,
+            dailyLossLimitPercent = capital.dailyLossLimitPercent,
+            maxDrawdownLimitPercent = capital.maxDrawdownLimitPercent,
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
             // سقف پوزیشن‌ها به‌صورت عدد صحیح و محدود ذخیره می‌شود تا مقدار خراب ذخیره‌شده
             // هرگز دروازهٔ ایمنی را باز نکند.
-            maxOpenTrades = proposed.maxOpenTrades.coerceIn(0, 12),
-            maxOpenTradesPerSymbol = proposed.maxOpenTradesPerSymbol.coerceIn(0, 4),
+            maxOpenTrades = capital.maxOpenTrades,
+            maxOpenTradesPerSymbol = capital.maxOpenTradesPerSymbol,
         )
         prefs.edit()
             .putString(KEY_API, next.apiKey.trim())

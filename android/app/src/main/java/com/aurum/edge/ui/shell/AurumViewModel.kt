@@ -833,35 +833,51 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         maxOpenTrades: Int = settings.value.maxOpenTrades,
         maxOpenTradesPerSymbol: Int = settings.value.maxOpenTradesPerSymbol,
     ) {
-        if (!accountBalance.isFinite() || accountBalance < 10.0) {
+        if (!accountBalance.isFinite() || accountBalance < com.aurum.edge.core.CapitalPolicy.MIN_BALANCE) {
             _toast.value = "موجودی حساب باید حداقل ۱۰ دلار باشد"
             return
         }
-        val safeInitial = if (initialCapital.isFinite() && initialCapital >= 10.0) initialCapital else accountBalance
-        val safeTarget = if (targetCapital.isFinite() && targetCapital >= 100.0) targetCapital else 100_000.0
-        val safeFixedRisk = if (fixedRiskUsd.isFinite() && fixedRiskUsd >= 0.5) fixedRiskUsd else 5.0
-        val safeRisk = riskPercent.coerceIn(0.1, 10.0)
-        val safeDaily = dailyLossLimitPercent.coerceIn(0.5, 100.0)
-        val safeMaxDd = maxDrawdownLimitPercent.coerceIn(1.0, 100.0)
+        // تنها مرجع پاک‌سازی و هشدار: CapitalPolicy. هر عددی که اصلاح شود، همین‌جا و در توست
+        // گفته می‌شود؛ دیگر هیچ‌جا بی‌صدا عوض نمی‌شود.
+        val result = com.aurum.edge.core.CapitalPolicy(
+            accountBalance = accountBalance,
+            initialCapital = initialCapital,
+            targetCapital = targetCapital,
+            riskPercent = riskPercent,
+            useFixedDollarRisk = useFixedDollarRisk,
+            fixedRiskUsd = fixedRiskUsd,
+            dailyLossLimitPercent = dailyLossLimitPercent,
+            maxDrawdownLimitPercent = maxDrawdownLimitPercent,
+            maxOpenTrades = maxOpenTrades,
+            maxOpenTradesPerSymbol = maxOpenTradesPerSymbol,
+        ).sanitized()
+        val safe = result.policy
         container.settingsStore.update {
             it.copy(
-                accountBalance = accountBalance,
-                initialCapital = safeInitial,
-                targetCapital = safeTarget,
-                useFixedDollarRisk = useFixedDollarRisk,
-                fixedRiskUsd = safeFixedRisk,
-                riskPercent = safeRisk,
-                dailyLossLimitPercent = safeDaily,
-                maxDrawdownLimitPercent = safeMaxDd,
+                accountBalance = safe.accountBalance,
+                initialCapital = safe.initialCapital,
+                targetCapital = safe.targetCapital,
+                useFixedDollarRisk = safe.useFixedDollarRisk,
+                fixedRiskUsd = safe.fixedRiskUsd,
+                riskPercent = safe.riskPercent,
+                dailyLossLimitPercent = safe.dailyLossLimitPercent,
+                maxDrawdownLimitPercent = safe.maxDrawdownLimitPercent,
                 // ۰ = بدون سقف (درخواست کاربر)؛ عدد دستی کاربر تا ۱۲/۴ همچنان اعمال می‌شود.
-                maxOpenTrades = maxOpenTrades.coerceIn(0, 12),
-                maxOpenTradesPerSymbol = maxOpenTradesPerSymbol.coerceIn(0, 4),
+                maxOpenTrades = safe.maxOpenTrades,
+                maxOpenTradesPerSymbol = safe.maxOpenTradesPerSymbol,
             )
         }
-        _toast.value = if (useFixedDollarRisk) {
-            "✅ موجودی حساب ($${String.format(Locale.US, "%,.0f", accountBalance)}) با ریسک ثابت $${safeFixedRisk} در هر معامله ذخیره شد"
+        val base = if (safe.useFixedDollarRisk) {
+            "✅ موجودی حساب ($${String.format(Locale.US, "%,.0f", safe.accountBalance)}) با ریسک ثابت $${String.format(Locale.US, "%.2f", safe.fixedRiskUsd)} در هر معامله ذخیره شد"
         } else {
             "تنظیمات مدیریت سرمایه و ریسک ذخیره شد"
+        }
+        val firstFix = result.fixes.firstOrNull()
+        _toast.value = if (firstFix == null) {
+            base
+        } else {
+            base + " · اصلاح شد: " + firstFix.messageFa +
+                (if (result.fixes.size > 1) " (+" + (result.fixes.size - 1) + " اصلاح دیگر)" else "")
         }
     }
 
