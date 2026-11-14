@@ -312,6 +312,9 @@ class BacktestNeuralTrainer(
                     optimalRr = request.plannedRiskReward,
                     confidence = request.engineConfidencePct,
                     report = request.report,
+                    // سشن همان زمانی است که در بک‌تست معامله باز می‌شد — بدون این، ویژگی
+                    // «سشن» همیشه صفر می‌ماند و شبکه هرگز تفاوت آسیا/نیویورک را نمی‌آموخت.
+                    entryTimeMs = request.entryTime,
                 )
                 val evaluation = engine.evaluateFeatures(
                     symbol = request.symbol,
@@ -355,6 +358,7 @@ class BacktestNeuralTrainer(
             optimalRr = trade.effectiveOptimalRr,
             confidence = trade.confidence,
             report = report,
+            entryTimeMs = trade.openedAt,
         )
         features to key
     }.getOrNull()

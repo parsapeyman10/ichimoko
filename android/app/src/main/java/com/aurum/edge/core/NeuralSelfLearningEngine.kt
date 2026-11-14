@@ -217,9 +217,9 @@ data class PerSymbolNeuralTuningProfile(
     val trendPersistencePct: Double = 50.0,
     val wickNoisePct: Double = 50.0,
     val breakoutReliabilityPct: Double = 50.0,
-    /** ضریب اهمیت آموخته‌شدهٔ هر ۱۶ ویژگی برای این نماد (خالی = خنثی). */
+    /** ضریب اهمیت آموخته‌شدهٔ هر ۲۴ ویژگی برای این نماد (خالی = خنثی). */
     val featureMultipliers: List<Double> = emptyList(),
-    /** میانگین بردار ۱۶ ویژگی در معاملات برندهٔ همین نماد (اثر انگشت رفتاری). */
+    /** میانگین بردار ۲۴ ویژگی در معاملات برندهٔ همین نماد (اثر انگشت رفتاری). */
     val winningFingerprint: List<Double> = emptyList(),
     val decisionStyleFa: String = "در انتظار داده",
     val personalityFa: String = "",
@@ -291,7 +291,7 @@ data class NeuralParameterRegressionReport(
     val featureSlopes: List<NeuralFeatureRegressionSlope> = emptyList(),
     /** چند پارامتر واقعاً از Prior تغییر کرد (بقیه معنادار نبودند و دست‌نخورده ماندند). */
     val parametersApplied: Int = 0,
-    /** چند ویژگی از ۱۶ ویژگی ضریب معنادار (|t| ≥ ۱٫۹۶) داشت. */
+    /** چند ویژگی از ۲۴ ویژگی ضریب معنادار (|t| ≥ ۱٫۹۶) داشت. */
     val significantFeatures: Int = 0,
     /** قضاوت یک‌خطی دربارهٔ اعتبار آماری همین برازش. */
     val fitQualityVerdictFa: String = "هنوز برازشی اجرا نشده است",
@@ -569,7 +569,16 @@ class NeuralSelfLearningEngine(
 ) {
     companion object {
         const val WARMUP_TARGET_TRADES: Int = 10_000
-        const val INPUT_DIM: Int = 16
+        /**
+         * بُعد بردار ویژگی: ۲۴ ویژگی «هویت/ساختار» + ۸ ویژگی «وضعیت بازار».
+         *
+         * ۱۶ تای اول دست‌نخورده مانده‌اند تا دانش ذخیره‌شده معنا را از دست ندهد؛ هشت ویژگی
+         * تازه (`NeuralStateFeatures`) در انتها اضافه شده‌اند و وزن اولیه‌شان صفر است، پس
+         * رفتار مدل تا وقتی داده‌ی کافی نرسیده دقیقاً همان قبل می‌ماند.
+         */
+        const val INPUT_DIM: Int = 24
+        /** بُعد نسخهٔ پیشین — فقط برای مهاجرت وزن‌ها. */
+        const val LEGACY_INPUT_DIM: Int = 16
         const val HIDDEN_DIM: Int = 16
 
         /**
@@ -640,6 +649,15 @@ class NeuralSelfLearningEngine(
         13 -> "۱۴. کیفیت بدنه کندل و شدوی مخالف (Wick/CLV)" to "تشخیص تله فیک‌بریک‌اوت و رد شدوی معکوس"
         14 -> "۱۵. عدد مناسب R:R معامله (Optimal R:R)" to "نسبت پاداش به ریسک بهینه در ساختار فعلی"
         15 -> "۱۶. دقت نقطه‌زنی ورود (Sniper Score & Phase)" to "ورود در ناحیه طلایی تنکان بدون تعقیب قیمت"
+        // ── ۸ ویژگی وضعیت بازار (نشان ۱۶ تا ۲۳) ──
+        16 -> "۱۷. فاز روند (Genesis/Core/Exhaustion/Range)" to "کجای چرخهٔ روند ایستاده‌ایم"
+        17 -> "۱۸. کارایی جهت‌دار روی تایم ماشه (ER14)" to "خلوص حرکت در کندل ورود"
+        18 -> "۱۹. رژیم نوسان (ATR٪ قیمت)" to "آرام یا پرنوسان — آستانهٔ ۰٫۳۰٪ همان R38"
+        19 -> "۲۰. فاصله از کیجون (ATR)" to "کشیدگی از تعادل"
+        20 -> "۲۱. ضخامت ابر آینده (ATR)" to "قدرت حمایت/مقاومت ابر"
+        21 -> "۲۲. نسبت حجم کندل ماشه (۲۰ دوره)" to "حضور سفارش نهادی"
+        22 -> "۲۳. سشن معاملاتی (UTC)" to "نیویورک/لندن/آسیا/پایان روز"
+        23 -> "۲۴. R:R پلن‌شده" to "سخاوت یا تنگی پاداش نسبت به ریسک"
         else -> "۱۰. ستون پلاتوهای کارن پلویل / لایه‌های ساختاری" to "وزن سطوح فلت، بولینگر، فرکتال و RSI/DMI"
     }
 
@@ -685,7 +703,7 @@ class NeuralSelfLearningEngine(
             )
         }
 
-        // استخراج وزن‌های توجه (Self-Attention) و تاثیر هر یک از ۱۶ ویژگی
+        // استخراج وزن‌های توجه (Self-Attention) و تاثیر هر یک از ۲۴ ویژگی
         val attnSum = cur.attentionWeights.sum().coerceAtLeast(1e-6)
         val featInsights = (0 until INPUT_DIM).map { idx ->
             val (title, desc) = featureTitleFa(idx)
@@ -720,7 +738,7 @@ class NeuralSelfLearningEngine(
         val topAttn2 = if (attentionStillUniform) rankedByWeight.getOrNull(1) else featInsights.getOrNull(1)
         if (topAttn1 != null && topAttn2 != null) {
             insightsFeed += if (attentionStillUniform) {
-                "🧠 توزیع توجه (FT-Attention) هنوز یکنواخت است: هر ۱۶ ویژگی سهم برابر " +
+                "🧠 توزیع توجه (FT-Attention) هنوز یکنواخت است: هر ۲۴ ویژگی سهم برابر " +
                     "${topAttn1.attentionPercent}% دارند، پس هیچ ویژگی‌ای بر دیگری ترجیح داده نشده است. " +
                     "بیشترین اثر واقعی روی تصمیم‌گیری از نظر وزن، «${topAttn1.titleFa}» (${String.format(Locale.US, "%+.2f", topAttn1.netWeightImpact)}) " +
                     "و «${topAttn2.titleFa}» (${String.format(Locale.US, "%+.2f", topAttn2.netWeightImpact)}) است."
@@ -1094,7 +1112,7 @@ class NeuralSelfLearningEngine(
             minDriveBooksConsensus = 6,
             neuralWinProbGatePct = if (model.isDrivePdfStrategy) 58.0 else 56.0,
             featureTunings = feats,
-            tuningSummaryFa = "پروفایل اختصاصی ${model.badgeFa}: تمام ۱۶ ویژگی شبکه عصبی + پارامترهای ساختاری کالیبره شدند (R:R≥1:$minRr · سقف کیجون=${maxKijunExt}ATR).",
+            tuningSummaryFa = "پروفایل اختصاصی ${model.badgeFa}: تمام ۲۴ ویژگی شبکه عصبی + پارامترهای ساختاری کالیبره شدند (R:R≥1:$minRr · سقف کیجون=${maxKijunExt}ATR).",
         )
     }
 
@@ -1196,18 +1214,72 @@ class NeuralSelfLearningEngine(
 
     private fun sanitizeLoadedState(loaded: NeuralNetworkPersistedState): NeuralNetworkPersistedState {
         val fresh = createFreshInitializedState()
-        val safeAttn = if (loaded.attentionWeights.size == INPUT_DIM) loaded.attentionWeights else fresh.attentionWeights
-        val safeGateW = if (loaded.gateWeights.size == INPUT_DIM * HIDDEN_DIM) loaded.gateWeights else fresh.gateWeights
+        // ── مهاجرت وزن‌ها از ۱۶ ویژگی به ۲۴ ────────────────────────────────────
+        // بدون این، هر کاربری که قبلاً آموزش داده بود، با ارتقا همهٔ وزن‌ها را از دست می‌داد
+        // (کد قدیمی در ناسازگاری ابعاد، وزن‌های «تازه» می‌گذاشت). این‌جا وزن‌های موجود
+        // **حفظ** می‌شوند و برای ۸ ویژگی تازه صفر اضافه می‌شود؛ یعنی مدل همان رفتار قبلی را
+        // دارد تا وقتی دادهٔ تازه وزن‌های تازه را بسازد.
+        fun resizeVector(list: List<Double>, target: Int): List<Double> = when {
+            list.size == target -> list
+            list.size == LEGACY_INPUT_DIM && target == INPUT_DIM -> list + List(INPUT_DIM - LEGACY_INPUT_DIM) { 0.0 }
+            else -> emptyList()
+        }
+        fun resizeMatrix(list: List<Double>, target: Int): List<Double> = when {
+            list.size == target -> list
+            list.size == LEGACY_INPUT_DIM * HIDDEN_DIM && target == INPUT_DIM * HIDDEN_DIM ->
+                list + List((INPUT_DIM - LEGACY_INPUT_DIM) * HIDDEN_DIM) { 0.0 }
+            else -> emptyList()
+        }
+        val safeAttn = resizeVector(loaded.attentionWeights, INPUT_DIM).ifEmpty { fresh.attentionWeights }
+        val safeGateW = resizeMatrix(loaded.gateWeights, INPUT_DIM * HIDDEN_DIM).ifEmpty { fresh.gateWeights }
         val safeGateB = if (loaded.gateBias.size == HIDDEN_DIM) loaded.gateBias else fresh.gateBias
-        val safeUpW = if (loaded.upWeights.size == INPUT_DIM * HIDDEN_DIM) loaded.upWeights else fresh.upWeights
+        val safeUpW = resizeMatrix(loaded.upWeights, INPUT_DIM * HIDDEN_DIM).ifEmpty { fresh.upWeights }
         val safeUpB = if (loaded.upBias.size == HIDDEN_DIM) loaded.upBias else fresh.upBias
         val safeHeadWinW = if (loaded.headWinWeights.size == HIDDEN_DIM) loaded.headWinWeights else fresh.headWinWeights
         val safeHeadRW = if (loaded.headRWeights.size == HIDDEN_DIM) loaded.headRWeights else fresh.headRWeights
         val safeMHeadWin = if (loaded.mHeadWin.size == HIDDEN_DIM) loaded.mHeadWin else fresh.mHeadWin
         val safeVHeadWin = if (loaded.vHeadWin.size == HIDDEN_DIM) loaded.vHeadWin else fresh.vHeadWin
-        val safeMGate = if (loaded.mGate.size == INPUT_DIM * HIDDEN_DIM) loaded.mGate else fresh.mGate
-        val safeVGate = if (loaded.vGate.size == INPUT_DIM * HIDDEN_DIM) loaded.vGate else fresh.vGate
+        val safeMGate = resizeMatrix(loaded.mGate, INPUT_DIM * HIDDEN_DIM).ifEmpty { fresh.mGate }
+        val safeVGate = resizeMatrix(loaded.vGate, INPUT_DIM * HIDDEN_DIM).ifEmpty { fresh.vGate }
+        // ── مهاجرت پروفایل‌های استراتژی/نماد از ۱۶ ویژگی به ۲۴ ──────────────────
+        // پروفایل‌های ذخیره‌شدهٔ نسخهٔ قبل ۱۶ ردیف ویژگی دارند. بدون این مهاجرت، شرط
+        // `size == INPUT_DIM` آن‌ها را «ناسازگار» می‌دید و همهٔ تیونینگ‌های آموخته‌شده را
+        // دور می‌ریخت. ردیف‌های موجود حفظ می‌شوند و فقط ۸ ردیف تازه با مقدار پیش‌فرض اضافه می‌شود.
+        val migratedAuto = run {
+            val auto = loaded.autoTunedParameters
+            val stratProfiles = auto.perStrategyProfiles.mapValues { (id, prof) ->
+                if (prof.featureTunings.size == INPUT_DIM) {
+                    prof
+                } else {
+                    val model = BitcoinStrategyModel.fromId(id)
+                    val defaults = buildDefaultFeatureTuningsForStrategy(
+                        model = model,
+                        attnWeights = loaded.attentionWeights,
+                        winWeights = loaded.headWinWeights,
+                    )
+                    val padded = if (prof.featureTunings.size == LEGACY_INPUT_DIM) {
+                        prof.featureTunings + defaults.drop(prof.featureTunings.size)
+                    } else {
+                        defaults
+                    }
+                    prof.copy(featureTunings = padded)
+                }
+            }
+            fun padDouble(list: List<Double>, fill: Double): List<Double> = when {
+                list.size == INPUT_DIM -> list
+                list.size == LEGACY_INPUT_DIM -> list + List(INPUT_DIM - LEGACY_INPUT_DIM) { fill }
+                else -> emptyList()
+            }
+            val symbolProfiles = auto.perSymbolProfiles.mapValues { (_, prof) ->
+                prof.copy(
+                    featureMultipliers = padDouble(prof.featureMultipliers, 1.0),
+                    winningFingerprint = padDouble(prof.winningFingerprint, 0.0),
+                )
+            }
+            auto.copy(perStrategyProfiles = stratProfiles, perSymbolProfiles = symbolProfiles)
+        }
         val baseSanitized = loaded.copy(
+            autoTunedParameters = migratedAuto,
             attentionWeights = safeAttn,
             gateWeights = safeGateW,
             gateBias = safeGateB,
@@ -1948,7 +2020,7 @@ class NeuralSelfLearningEngine(
                 knowledgeChangeLog = log,
             ),
         )
-        // هر معاملهٔ تازه‌ای که یاد گرفته شد، یک دور «آموزش روی همهٔ ۱۶ استراتژی» را هم اجرا می‌کند
+        // هر معاملهٔ تازه‌ای که یاد گرفته شد، یک دور «آموزش روی همهٔ استراتژی‌های مشمول یادگیری» را هم اجرا می‌کند
         // تا تجربهٔ همان معامله به همهٔ استراتژی‌ها (نه فقط استراتژی خودش) برسد.
         if (newlyLearned > 0) {
             runCatching { learnAllStrategiesNow(nowMs = nowMs) }
@@ -1962,7 +2034,7 @@ class NeuralSelfLearningEngine(
         syncWithClosedJournalTrades(closedTrades)
 
     /**
-     * استخراج کامل بردار ۱۶ ویژگی و امضای شرایط برای معاملات بسته‌شده با ترکیب تمام متدهای اصلی:
+     * استخراج کامل بردار ۲۴ ویژگی و امضای شرایط برای معاملات بسته‌شده با ترکیب تمام متدهای اصلی:
      * ۱. ۴ ستون اصیل هوسودا (تعادل کومو/کیجون/چیکو، امواج I/V/N/P/S، چرخه زمان 9/17/26/33، اهداف V/N/E/NT)
      * ۲. هر ۲۴ استراتژی (۱۵ ترکیب ۴ مکتب + ۹ لایهٔ تحلیلی)
      * ۳. دسته‌بندی ۳ کندل قبل از ورود (`PRE3_*` و کیفیت بدنه/شدوی ۳ کندل قبل)
@@ -2002,6 +2074,22 @@ class NeuralSelfLearningEngine(
             else -> 0.0
         }
 
+        // وضعیت بازار: اول از فیلدهای ذخیره‌شدهٔ خود معامله (برای معاملات قدیمی ژورنال) و
+        // اگر خالی بود از اسنپ‌شات بازسازی‌شده.
+        val storedState = NeuralStateFeatures.fromTrade(trade)
+        val mergedState = storedState.copy(
+            trendPhaseCode = storedState.trendPhaseCode.ifBlank { report?.trendPhase?.name ?: "" },
+            er14 = storedState.er14 ?: reconstructedSnap?.efficiencyRatio14,
+            atrPctOfPrice = storedState.atrPctOfPrice ?: reconstructedSnap?.let { snap ->
+                if (snap.close > 0.0) snap.atr14 / snap.close * 100.0 else null
+            },
+            distKijunAtr = storedState.distKijunAtr ?: reconstructedSnap?.distanceToKijunAtr,
+            kumoThicknessAtr = storedState.kumoThicknessAtr ?: reconstructedSnap?.let { snap ->
+                if (snap.atr14 > 0.0) snap.kumoThickness / snap.atr14 else null
+            },
+            volumeRatio20 = storedState.volumeRatio20 ?: reconstructedSnap?.volumeRatio20,
+            planRr = storedState.planRr ?: trade.effectiveOptimalRr.takeIf { it > 0.0 },
+        )
         val (baseFeatures, baseKey, baseDescFa) = extractConditionFeatures(
             symbolInput = trade.symbol,
             action = trade.action,
@@ -2013,6 +2101,8 @@ class NeuralSelfLearningEngine(
             snapshotOverride = reconstructedSnap,
             preEntry3Bonus = pre3Bonus,
             preEntry3Code = pre3Code,
+            stateInputs = mergedState,
+            entryTimeMs = trade.openedAt,
         )
 
         val pre3Badge = trade.preEntry3CandleCategoryFa.takeIf { it.isNotBlank() }
@@ -2021,7 +2111,7 @@ class NeuralSelfLearningEngine(
     }
 
     /**
-     * استخراج بردار ۱۶ ویژگی نرمال‌شده `[-1, +1]` و امضای شرایط بازار (`conditionSignatureKey`) از معامله یا گزارش استراتژی.
+     * استخراج بردار ۲۴ ویژگی نرمال‌شده `[-1, +1]` و امضای شرایط بازار (`conditionSignatureKey`) از معامله یا گزارش استراتژی.
      */
     fun extractConditionFeatures(
         symbolInput: String,
@@ -2034,6 +2124,10 @@ class NeuralSelfLearningEngine(
         snapshotOverride: IchimokuBarSnapshot? = null,
         preEntry3Bonus: Double = 0.0,
         preEntry3Code: String = "",
+        /** اگر وضعیت بازار از قبل (مثلاً از فیلدهای ژورنال) آماده است، مستقیم داده می‌شود. */
+        stateInputs: NeuralStateInputs? = null,
+        /** زمان ورود برای تعیین سشن؛ مقدار منفی = نامعلوم. */
+        entryTimeMs: Long = -1L,
     ): Triple<List<Double>, String, String> {
         val symbol = V1Universe.normalize(symbolInput)
         val assetClass = AssetClass.of(symbol)
@@ -2072,12 +2166,32 @@ class NeuralSelfLearningEngine(
         val rrNorm = (((optimalRr.coerceAtLeast(1.5)) - 2.0) / 1.5).coerceIn(-1.0, 1.0)
         val confNorm = (((confidence - 80.0) / 20.0) + preEntry3Bonus).coerceIn(-1.0, 1.0)
 
-        val features = listOf(
+        val baseSixteen = listOf(
             f0, f1, f2, f3,
             f4, f5,
             f6, f7, f8, f9,
             er14, kumoAtr, distKijunAtr, adverseWick, rrNorm, confNorm,
         )
+
+        // ── ۸ ویژگی «وضعیت بازار» (نشان ۱۶..۲۳) ────────────────────────────────
+        // اگر گزارش/اسنپ‌شات نباشد (معاملهٔ قدیمی ژورنال) از فیلدهای ذخیره‌شدهٔ خود معامله
+        // استفاده می‌شود؛ اگر آن هم نباشد، صفر = بی‌طرف.
+        val stateIn = stateInputs ?: NeuralStateInputs(
+            trendPhaseCode = report?.trendPhase?.name ?: "",
+            er14 = trigSnap?.efficiencyRatio14,
+            atrPctOfPrice = if (trigSnap != null && trigSnap.close > 0.0) {
+                trigSnap.atr14 / trigSnap.close * 100.0
+            } else null,
+            distKijunAtr = trigSnap?.distanceToKijunAtr,
+            kumoThicknessAtr = if (trigSnap != null && trigSnap.atr14 > 0.0) {
+                trigSnap.kumoThickness / trigSnap.atr14
+            } else null,
+            volumeRatio20 = trigSnap?.volumeRatio20,
+            planRr = optimalRr,
+            entryTimeMs = entryTimeMs,
+        )
+        val stateBand = NeuralStateFeatures.build(stateIn)
+        val features = baseSixteen + stateBand
 
         val phaseTag = report?.trendPhase?.name ?: "CORE_EXPANSION"
         val erBand = when {
@@ -2088,7 +2202,16 @@ class NeuralSelfLearningEngine(
         val extBand = if (distKijunAtr > 0.35) "OVEREXTENDED_KIJUN" else "EQUILIBRIUM_OK"
         val wickBand = if (adverseWick > 0.30) "HEAVY_ADVERSE_WICK" else "CLEAN_CANDLE"
         val pre3Short = preEntry3Code.takeIf { it.isNotBlank() }?.let { "|$it" }.orEmpty()
-        val signatureKey = "${assetClass.code}|${interval.label}|$phaseTag|$erBand|$extBand|$wickBand|books${model.combinationCount}$pre3Short"
+        // نشان وضعیت: فقط برای تفکیک خوشه‌ها در ژورنال، نه یک سیگنال مستقل.
+        val stateBandKey = when {
+            stateBand[0] >= 0.8 -> "GENESIS"   // فاز Genesis
+            stateBand[2] >= 0.6 -> "HIGH_VOL"  // ATR٪ بالا
+            stateBand[6] <= -0.5 -> "ASIA"     // سشن آسیا
+            stateBand[6] >= 0.6 -> "NY"        // سشن نیویورک
+            else -> "BASE"
+        }
+        val signatureKey = "${assetClass.code}|${interval.label}|$phaseTag|$erBand|$extBand|$wickBand|" +
+            "state$stateBandKey|books${model.combinationCount}$pre3Short"
 
         val descFa = buildString {
             append("${categoryTitleFa(assetClass)} · تایم ${interval.label}")
@@ -2102,6 +2225,7 @@ class NeuralSelfLearningEngine(
             )
             if (extBand == "OVEREXTENDED_KIJUN") append(" · فاصله زیاد از کیجون")
             if (wickBand == "HEAVY_ADVERSE_WICK") append(" · شدوی مخالف بلند")
+            append(" · ").append(NeuralStateFeatures.describeFa(stateIn))
         }
 
         return Triple(features, signatureKey, descFa)
@@ -2112,7 +2236,7 @@ class NeuralSelfLearningEngine(
 
     /**
      * عبور رو به جلو (Forward Pass) در معماری `FT-Attention + SwiGLU Residual + LayerNorm`:
-     * با اعمال ضریب تیونینگ و وزن یادگرفته‌شده اختصاصی هر استراتژی روی هر ۱۶ ویژگی (`PerStrategyNeuralFeatureTuning`).
+     * با اعمال ضریب تیونینگ و وزن یادگرفته‌شده اختصاصی هر استراتژی روی هر ۲۴ ویژگی (`PerStrategyNeuralFeatureTuning`).
      */
     /**
      * پیش‌بینی احتمال برد برای یک بردار ویژگی — فقط خواندن، هیچ آموزشی.
@@ -2158,7 +2282,7 @@ class NeuralSelfLearningEngine(
             cur.autoTunedParameters.perStrategyProfiles[normStratId]
         } else null
         val stratFeats = stratProfile?.featureTunings
-        // شخصیت آموخته‌شدهٔ همان نماد: ضریب اهمیت ۱۶ ویژگی مخصوص این نماد روی ضریب استراتژی
+        // شخصیت آموخته‌شدهٔ همان نماد: ضریب اهمیت ۲۴ ویژگی مخصوص این نماد روی ضریب استراتژی
         // ضرب می‌شود تا شبکه برای هر نماد جداگانه «توجه» کند (بدون تغییر ابعاد یا ترتیب ویژگی‌ها).
         val symbolProfile = symbol?.let { cur.autoTunedParameters.perSymbolProfiles[V1Universe.normalize(it)] }
         val symbolMults = symbolProfile?.featureMultipliers?.takeIf { it.size == INPUT_DIM }
@@ -2596,6 +2720,8 @@ class NeuralSelfLearningEngine(
         persistImmediately: Boolean,
         featuresOverride: DoubleArray? = null,
         conditionKeyOverride: String? = null,
+        /** توضیح شرط وقتی ویژگی‌ها از بیرون می‌آیند (بدون بازخوانی دوبارهٔ کندل‌ها). */
+        conditionDescFaOverride: String? = null,
     ) {
         if (!BitcoinStrategyModel.fromId(trade.strategyId).neuralLearningEnabled) return
         val pnl = trade.pnlUsd ?: return
@@ -2607,10 +2733,13 @@ class NeuralSelfLearningEngine(
         val achievedR = (trade.rMultiple ?: (pnl / (trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0))).coerceIn(-1.5, 4.5)
         val assetClass = AssetClass.of(trade.symbol)
 
-        val (extractedFeatures, extractedKey, condDescFa) = extractConditionFeaturesForClosedTrade(
-            trade = trade,
-            report = report,
-        )
+        // اگر ویژگی‌ها از قبل استخراج شده‌اند (مسیر «آموزش از ژورنال»)، بازخوانی دوبارهٔ کندل‌ها
+        // از حافظهٔ گوشی لازم نیست؛ همان بردار و همان امضا استفاده می‌شود.
+        val (extractedFeatures, extractedKey, condDescFa) = if (featuresOverride != null) {
+            Triple(featuresOverride.toList(), conditionKeyOverride.orEmpty(), conditionDescFaOverride.orEmpty())
+        } else {
+            extractConditionFeaturesForClosedTrade(trade = trade, report = report)
+        }
         val noteConditionKey = Regex("""\[NN:([^\s\]]+)""")
             .find(trade.note)
             ?.groupValues
@@ -3267,7 +3396,7 @@ class NeuralSelfLearningEngine(
     }
 
     /**
-     * تیونینگ اختصاصی هر یک از ۱۶ ویژگی یادگرفته‌شده شبکه عصبی برای یک استراتژی مشخص (`strategyId`).
+     * تیونینگ اختصاصی هر یک از ۲۴ ویژگی یادگرفته‌شده شبکه عصبی برای یک استراتژی مشخص (`strategyId`).
      */
     @Synchronized
     fun tuneStrategyFeature(
@@ -3377,7 +3506,7 @@ class NeuralSelfLearningEngine(
 
     /**
      * اجرای رگرسیون ماتریسی پیشرفته پارامترها (`Ridge L2 + Huber Robust IRLS + Walk-Forward Cross-Validation + Empirical Bayes`):
-     * این موتور هم برای کل ۱۶ استراتژی (`strategyId = "ALL"`) و هم به تفکیک هر استراتژی، شیب رگرسیونی هر ۱۶ ویژگی،
+     * این موتور هم برای کل استراتژی‌های مشمول یادگیری (`strategyId = "ALL"`) و هم به تفکیک هر استراتژی، شیب رگرسیونی هر ۲۴ ویژگی،
      * بازه بهینه حد ضرر ساختاری (`[0.85 ATR .. 2.10 ATR]`)، و بازه قفل‌شده `R:R` (`[1:1.50 .. 1:3.00]`) را رگرسیون و اعمال می‌کند.
      */
     @Synchronized
@@ -3899,7 +4028,7 @@ class NeuralSelfLearningEngine(
     }
 
     /**
-     * اجرای تیونینگ هوشمند خودکار (`CEM + Bayesian`) صرفاً برای یک استراتژی مشخص (`strategyId`) روی هر ۱۶ ویژگی و پارامترها.
+     * اجرای تیونینگ هوشمند خودکار (`CEM + Bayesian`) صرفاً برای یک استراتژی مشخص (`strategyId`) روی هر ۲۴ ویژگی و پارامترها.
      */
     @Synchronized
     fun runAutoTuningForSingleStrategy(
@@ -3930,7 +4059,193 @@ class NeuralSelfLearningEngine(
         return tunedSingle
     }
 
-    /** گزارش یک دور «آموزش روی همهٔ ۱۶ استراتژی». */
+    /** گزارش یک دور «آموزش روی همهٔ استراتژی‌های مشمول یادگیری». */
+    /** یک نمونهٔ آمادهٔ آموزش از ژورنال واقعی (ویژگی‌ها یک‌بار استخراج می‌شوند). */
+    data class JournalTrainingSample(
+        val trade: PaperTrade,
+        val features: List<Double>,
+        val conditionKey: String,
+        val conditionDescFa: String,
+        val won: Boolean,
+        val stateCode: String,
+        val atMs: Long,
+    )
+
+    /**
+     * نتیجهٔ «آموزش از ژورنال».
+     *
+     * دو عدد جدا دارد و این جداسازی عمدی است:
+     *  • [inSample] — شبکهٔ فعلی روی همان معامله‌هایی سنجیده می‌شود که از آن‌ها آموخته؛ خوش‌بین است.
+     *  • [outOfSample] — شبکه‌ای **از صفر** فقط روی ۷۰٪ اولِ زمانی آموزش می‌بیند و روی ۳۰٪ آخر
+     *    سنجیده می‌شود. تنها عددی که می‌توان به آن استناد کرد همین است.
+     */
+    data class JournalTrainingReport(
+        val journalClosedTrades: Int,
+        val usableSamples: Int,
+        val newlyLearned: Int,
+        val alreadyLearned: Int,
+        val trainingSamples: Int,
+        val holdoutSamples: Int,
+        val inSample: NeuralCalibrationReport,
+        val outOfSample: NeuralCalibrationReport,
+        val expectedCalibrationError: Double,
+        val withStateData: Int,
+        val trainedAtMs: Long,
+        val summaryFa: String,
+    )
+
+    /**
+     * آماده‌سازی نمونه‌ها از ژورنال: هر معاملهٔ بستهٔ واقعی — **برد یا باخت** — یک نمونه است.
+     * معامله‌های بدون نتیجه (`pnlUsd == null`) و استراتژی‌های خارج از دامنهٔ یادگیری حذف می‌شوند.
+     */
+    fun buildJournalTrainingSamples(closedTrades: List<PaperTrade>): List<JournalTrainingSample> =
+        closedTrades
+            .asSequence()
+            .filter { !it.isOpen && it.pnlUsd != null }
+            .filter { BitcoinStrategyModel.fromId(it.strategyId).neuralLearningEnabled }
+            .distinctBy { it.id }
+            .sortedBy { it.closedAt ?: it.openedAt }
+            .mapNotNull { trade ->
+                val pnl = trade.pnlUsd ?: return@mapNotNull null
+                val (features, key, descFa) = extractConditionFeaturesForClosedTrade(trade, null)
+                if (features.size != INPUT_DIM) return@mapNotNull null
+                val state = NeuralStateFeatures.fromTrade(trade)
+                val session = NeuralStateFeatures.sessionCodeOf(trade.openedAt).ifBlank { "نامعلوم" }
+                val phase = state.trendPhaseCode.ifBlank { "نامعلوم" }
+                JournalTrainingSample(
+                    trade = trade,
+                    features = features,
+                    conditionKey = key,
+                    conditionDescFa = descFa,
+                    won = pnl > 0.0,
+                    stateCode = "$session · $phase",
+                    atMs = trade.closedAt ?: trade.openedAt,
+                )
+            }
+            .toList()
+
+    /**
+     * «آموزش از ژورنال» به‌همراه سنجش صادقانه.
+     *
+     * @param closedTrades همهٔ معامله‌های ژورنال (بازها خودشان نادیده گرفته می‌شوند).
+     */
+    @Synchronized
+    fun trainFromJournal(
+        closedTrades: List<PaperTrade>,
+        oosFraction: Double = NeuralCalibration.DEFAULT_OOS_FRACTION,
+        nowMs: Long = System.currentTimeMillis(),
+    ): JournalTrainingReport {
+        val usableClosed = closedTrades.filter {
+            !it.isOpen && it.pnlUsd != null &&
+                BitcoinStrategyModel.fromId(it.strategyId).neuralLearningEnabled
+        }.distinctBy { it.id }
+        val samples = buildJournalTrainingSamples(usableClosed)
+        if (samples.isEmpty()) {
+            val empty = NeuralCalibrationReport(verdictFa = "هیچ معاملهٔ بسته‌ای در ژورنال نیست")
+            return JournalTrainingReport(
+                journalClosedTrades = usableClosed.size,
+                usableSamples = 0,
+                newlyLearned = 0,
+                alreadyLearned = 0,
+                trainingSamples = 0,
+                holdoutSamples = 0,
+                inSample = empty,
+                outOfSample = empty,
+                expectedCalibrationError = Double.NaN,
+                withStateData = 0,
+                trainedAtMs = nowMs,
+                summaryFa = "ژورنال هنوز معاملهٔ بستهٔ قابل یادگیری ندارد.",
+            )
+        }
+
+        // ── ۱) سنجش بیرون‌نمونه‌ای: شبکه‌ای از صفر، فقط روی ۷۰٪ اولِ زمانی ──────────
+        // از حالت «تازه» شروع می‌کنیم تا دانش قبلی نتواند جواب معامله‌های آینده را لو بدهد.
+        val cut = (samples.size * (1.0 - oosFraction.coerceIn(0.05, 0.5))).toInt()
+            .coerceIn(1, (samples.size - 1).coerceAtLeast(1))
+        val early = samples.take(cut)
+        val late = samples.drop(cut)
+        val savedState = persistedState
+        val oosPoints = try {
+            persistedState = createFreshInitializedState()
+            early.forEach { s ->
+                learnFromClosedTradeInternal(
+                    trade = s.trade,
+                    report = null,
+                    persistImmediately = false,
+                    featuresOverride = s.features.toDoubleArray(),
+                    conditionKeyOverride = s.conditionKey,
+                    conditionDescFaOverride = s.conditionDescFa,
+                )
+            }
+            late.map { s ->
+                NeuralCalibrationPoint(
+                    predictedWinProb = predictWinProbability(
+                        features = s.features,
+                        strategyId = s.trade.strategyId,
+                        symbol = s.trade.symbol,
+                    ),
+                    won = s.won,
+                    stateCode = s.stateCode,
+                    atMs = s.atMs,
+                )
+            }
+        } finally {
+            // هیچ‌کدام از اثرهای تمرین آزمایشی نباید در حافظهٔ واقعی بماند.
+            persistedState = savedState
+        }
+
+        // ── ۲) یادگیری واقعی روی همهٔ نمونه‌ها (دفتر و شمارنده هم به‌روز می‌شوند) ─────
+        val beforeLearned = persistedState.totalLearnedTrades
+        val reconcile = syncWithClosedJournalTrades(usableClosed)
+        val newlyLearned = persistedState.totalLearnedTrades - beforeLearned
+
+        // ── ۳) سنجش درون‌نمونه‌ای با شبکهٔ نهایی ──────────────────────────────────
+        val inSamplePoints = samples.map { s ->
+            NeuralCalibrationPoint(
+                predictedWinProb = predictWinProbability(
+                    features = s.features,
+                    strategyId = s.trade.strategyId,
+                    symbol = s.trade.symbol,
+                ),
+                won = s.won,
+                stateCode = s.stateCode,
+                atMs = s.atMs,
+            )
+        }
+        val inSample = NeuralCalibration.evaluate(inSamplePoints, oosFraction)
+        val outOfSample = NeuralCalibration.evaluate(oosPoints, oosFraction)
+        val ece = NeuralCalibration.expectedCalibrationError(inSamplePoints)
+
+        val withState = samples.count { s ->
+            val st = NeuralStateFeatures.fromTrade(s.trade)
+            st.trendPhaseCode.isNotBlank() || st.er14 != null || st.atrPctOfPrice != null ||
+                st.volumeRatio20 != null
+        }
+        val oosText = if (outOfSample.brier.isFinite()) {
+            String.format(Locale.US, "OOS Brier %.3f در برابر پایه %.3f", outOfSample.brier, outOfSample.brierBaseline)
+        } else {
+            "OOS نامعلوم (${outOfSample.verdictFa})"
+        }
+        val summary = "🧠 آموزش از ژورنال: ${samples.size} نمونهٔ واقعی (${samples.count { it.won }} برد / " +
+            "${samples.count { !it.won }} باخت) · $newlyLearned تازه آموخته شد · $oosText · " +
+            "درون‌نمونه Brier ${if (inSample.brier.isFinite()) String.format(Locale.US, "%.3f", inSample.brier) else "—"}"
+
+        return JournalTrainingReport(
+            journalClosedTrades = usableClosed.size,
+            usableSamples = samples.size,
+            newlyLearned = newlyLearned,
+            alreadyLearned = reconcile.distinctJournalTrades - reconcile.newlyLearnedThisRun,
+            trainingSamples = samples.size,
+            holdoutSamples = late.size,
+            inSample = inSample,
+            outOfSample = outOfSample,
+            expectedCalibrationError = if (ece.isFinite()) Math.round(ece * 1000.0) / 1000.0 else Double.NaN,
+            withStateData = withState,
+            trainedAtMs = nowMs,
+            summaryFa = summary,
+        )
+    }
+
     data class AllStrategyLearningReport(
         val strategiesTotal: Int,
         val strategiesWithOwnSamples: Int,
@@ -3946,9 +4261,9 @@ class NeuralSelfLearningEngine(
     )
 
     /**
-     * آموزش یک‌جای شبکهٔ عصبی روی **همهٔ ۱۶ استراتژی**.
+     * آموزش یک‌جای شبکهٔ عصبی روی **همهٔ استراتژی‌های مشمول یادگیری**.
      *
-     * برای هر استراتژی، پروفایل ۱۶ ویژگی + پارامترها دوباره محاسبه می‌شود؛ دادهٔ اختصاصی همان
+     * برای هر استراتژی، پروفایل ۲۴ ویژگی + پارامترها دوباره محاسبه می‌شود؛ دادهٔ اختصاصی همان
      * استراتژی اولویت دارد و در صورت کمبود، از تجربهٔ بقیهٔ استراتژی‌ها (یادگیری انتقالی) پر می‌شود.
      * خروجی: تعداد نمونه به‌ازای هر استراتژی و نسل تیونینگ.
      */
@@ -4236,7 +4551,7 @@ class NeuralSelfLearningEngine(
             auto.minDriveBooksConsensus.coerceIn(4, 9)
         }
 
-        // ── ضریب اهمیت ۱۶ ویژگی مخصوص همین نماد ──
+        // ── ضریب اهمیت ۲۴ ویژگی مخصوص همین نماد ──
         val multipliers = if (effective.size >= 4) {
             (0 until INPUT_DIM).map { idx ->
                 val winMean = if (wins.isNotEmpty()) wins.map { it.features.getOrElse(idx) { 0.0 } }.average() else 0.0
@@ -4421,7 +4736,7 @@ class NeuralSelfLearningEngine(
             else -> baseDefault.neuralWinProbGatePct
         }
 
-        // تیونینگ اختصاصی هر ۱۶ ویژگی بر اساس همبستگی برد/باخت در این استراتژی
+        // تیونینگ اختصاصی هر ۲۴ ویژگی بر اساس همبستگی برد/باخت در این استراتژی
         val rawMults = (0 until INPUT_DIM).map { idx ->
             val prevFeat = existingProfile?.featureTunings?.getOrNull(idx)
             if (prevFeat?.isManuallyTuned == true) {
@@ -4481,7 +4796,7 @@ class NeuralSelfLearningEngine(
             minEfficiencyRatio = tunedMinEr,
             neuralWinProbGatePct = tunedGate,
             featureTunings = tunedFeatures,
-            tuningSummaryFa = "پروفایل اختصاصی ${model.badgeFa} (نسل #$nextGen): تمام ۱۶ ویژگی + پارامترها تیون شدند " +
+            tuningSummaryFa = "پروفایل اختصاصی ${model.badgeFa} (نسل #$nextGen): تمام ۲۴ ویژگی + پارامترها تیون شدند " +
                 "(R:R≥1:$tunedMinRr · کیجون≤${String.format(Locale.US, "%.2f", tunedMaxKijun)}ATR · " +
                 "نرخ برد اندازه‌گیری‌شده=${measuredWr}% روی ${stratSamples.size} نمونه · PF=$measuredPf).",
         )
@@ -4729,7 +5044,7 @@ class NeuralSelfLearningEngine(
         val newLoss = round((0.92 * cur.runningBceLoss + 0.08 * bceSample) * 1000.0) / 1000.0
         val newAcc = round((0.92 * cur.runningAccuracyPct + 0.08 * (if (correctPred) 100.0 else 0.0)) * 10.0) / 10.0
 
-        // به‌روزرسانی آنی وزن‌های ۱۶ ویژگی در پروفایل اختصاصی همین استراتژی
+        // به‌روزرسانی آنی وزن‌های ۲۴ ویژگی در پروفایل اختصاصی همین استراتژی
         val ensuredAuto = ensurePerStrategyProfiles(cur.autoTunedParameters, cur)
         val targetModel = BitcoinStrategyModel.fromId(normStratId)
         val curStratProf = ensuredAuto.perStrategyProfiles[targetModel.id]
