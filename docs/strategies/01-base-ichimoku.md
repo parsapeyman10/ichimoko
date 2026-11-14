@@ -792,4 +792,5 @@ grep -rn "BASE_ICHIMOKU" android/app/src/main/java/com/aurum/edge | head -20
 - `android/app/src/test/java/com/aurum/edge/core/CompressionExpansionEngineTest.kt`
 - `android/app/src/test/java/com/aurum/edge/core/EntrySafetyGateTest.kt`
 - `android/app/src/test/java/com/aurum/edge/core/HeavyCsvGuardTest.kt`
+- `android/app/src/test/java/com/aurum/edge/core/NeuralRegressionHonestyTest.kt`
 - `android/app/src/test/java/com/aurum/edge/engine/RiskAndCalendarEngineTest.kt`
