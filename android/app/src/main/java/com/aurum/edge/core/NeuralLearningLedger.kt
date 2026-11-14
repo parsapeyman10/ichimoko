@@ -343,6 +343,9 @@ object NeuralLearningLedger {
         ignoreUnknownKeys = true
         encodeDefaults = true
         prettyPrint = false
+        // آماره‌های مدل می‌توانند NaN باشند (نمونهٔ ناکافی)؛ بدون این خط، ساخت پشتیبان
+        // با استثنای serialization شکست می‌خورد.
+        allowSpecialFloatingPointValues = true
     }
 
     fun encodeBundle(bundle: KnowledgeBundle): String = bundleJson.encodeToString(bundle)

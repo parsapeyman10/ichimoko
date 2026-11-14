@@ -608,6 +608,12 @@ class NeuralSelfLearningEngine(
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+        // ⚠️ ضروری: آماره‌ها می‌توانند `NaN` باشند (مثلاً R² وقتی نمونه برای برآورد واریانس
+        // کافی نیست، یا t متناظر). پیش‌فرض kotlinx.serialization روی NaN **استثنا** می‌دهد و
+        // همین باعث می‌شد `persistState` بی‌صدا شکست بخورد: حافظهٔ شبکه ذخیره نمی‌شد و
+        // «حافظه پر نشد» در آزمون‌ها و «یادگیری صفر» در برنامه دیده می‌شد. با این تنظیم،
+        // `NaN` به‌صورت عادی در فایل می‌نشیند و خواننده‌اش آن را «نامعلوم» تفسیر می‌کند.
+        allowSpecialFloatingPointValues = true
     }
 
     private val appContext: Context? = context?.applicationContext

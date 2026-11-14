@@ -78,6 +78,7 @@ object MasterIchimokuTradingAssistant {
         ignoreUnknownKeys = true
         encodeDefaults = true
         prettyPrint = true
+        allowSpecialFloatingPointValues = true
     }
 
     private const val INTERNAL_NOTES_FILE = "ichimoku_assistant_fix_notes_v1.json"

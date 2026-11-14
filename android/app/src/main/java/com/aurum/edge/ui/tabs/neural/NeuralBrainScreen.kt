@@ -339,7 +339,19 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Pill(text = regReport.regressionMethodFa, color = AurumColors.Cyan)
-                        Pill(text = "R² = ${String.format(Locale.US, "%.2f", regReport.rSquared)}", color = AurumColors.Green)
+                        // R² ممکن است «نامعلوم» باشد (نمونهٔ ناکافی) و منفی هم می‌تواند باشد؛
+                        // چاپ «0.00» یا «NaN» هر دو گمراه‌کننده بود.
+                        val r2Txt = if (regReport.rSquared.isFinite()) {
+                            String.format(Locale.US, "%.3f", regReport.rSquared)
+                        } else {
+                            "—"
+                        }
+                        val r2Color = when {
+                            !regReport.rSquared.isFinite() -> AurumColors.TextMuted
+                            regReport.rSquared > 0.02 -> AurumColors.Green
+                            else -> AurumColors.Orange
+                        }
+                        Pill(text = "R² = $r2Txt", color = r2Color)
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -347,7 +359,11 @@ fun NeuralBrainScreen(
                     ) {
                         StatTile(
                             label = "ضریب تعیین (Adj R²)",
-                            value = String.format(Locale.US, "%.2f", regReport.adjustedRSquared),
+                            value = if (regReport.adjustedRSquared.isFinite()) {
+                                String.format(Locale.US, "%.3f", regReport.adjustedRSquared)
+                            } else {
+                                "—"
+                            },
                             valueColor = AurumColors.Green,
                             modifier = Modifier.weight(1f),
                         )

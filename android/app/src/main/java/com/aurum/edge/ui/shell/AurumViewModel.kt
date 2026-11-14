@@ -2608,7 +2608,12 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 }
                 report
             }.onSuccess { report ->
-                _toast.value = "📐 رگرسیون ماتریسی پارامترها (${report.strategyTitleFa} · R²=${String.format(Locale.US, "%.2f", report.rSquared)}) با موفقیت کالیبره و اعمال شد"
+                val r2Label = if (report.rSquared.isFinite()) String.format(Locale.US, "%.3f", report.rSquared) else "—"
+                _toast.value = if (report.parametersApplied == 0) {
+                    "📐 رگرسیون اجرا شد (${report.strategyTitleFa} · R²=$r2Label) ولی هیچ پارامتری معنادار نبود — تنظیمات دست‌نخورده ماند"
+                } else {
+                    "📐 رگرسیون ماتریسی (${report.strategyTitleFa} · R²=$r2Label) ${report.parametersApplied} پارامتر معنادار را اعمال کرد"
+                }
                 scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
             }.onFailure { err ->
                 _toast.value = "⚠️ خطا در اجرای رگرسیون پارامترها: ${err.message}"
