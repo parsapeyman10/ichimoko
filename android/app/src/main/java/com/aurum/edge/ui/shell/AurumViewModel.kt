@@ -1462,6 +1462,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             equityUsd = equity,
             peakEquityUsd = peak,
             requestedRiskPct = requestedRiskPct,
+            riskUsdOverride = calc.riskBudgetUsd,
             openRiskPct = TradingHabitsPolicy.openRiskPct(allTrades, equity),
             lossStreak = streak,
             setupScorePct = setupScorePct,

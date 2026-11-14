@@ -336,6 +336,14 @@ object TradingHabitsPolicy {
         val peakEquityUsd: Double = equityUsd,
         /** ریسکی که موتور پیشنهاد داده، به‌صورت درصد حساب. */
         val requestedRiskPct: Double,
+        /**
+         * همان ریسک، ولی به **دلار** — عددی که واقعاً روی معامله می‌نشیند.
+         *
+         * چرا لازم است؟ قاعده‌های درصدی کتاب (R32) برای «سنجش» هستند؛ اگر پولِ گزارش‌شده از
+         * درصد بازمحاسبه شود، روی حساب کوچک عددی مثل `$0.60` نشان داده می‌شد در حالی که
+         * ریسک واقعی معامله `$5.00` بود. گزارش باید همان دلاری را بگوید که معامله می‌کند.
+         */
+        val riskUsdOverride: Double = 0.0,
         /** مجموع ریسک پوزیشن‌های باز (درصد حساب) — پیش از این معامله. */
         val openRiskPct: Double = 0.0,
         val lossStreak: Int = 0,
@@ -406,7 +414,7 @@ object TradingHabitsPolicy {
             notesFa = emptyList(),
             sizeMultiplier = 1.0,
             effectiveRiskPct = requested,
-            riskUsd = request.equityUsd * requested / 100.0,
+            riskUsd = if (request.riskUsdOverride > 0.0) request.riskUsdOverride else request.equityUsd * requested / 100.0,
             grade = grade,
             riskReward = rr,
             neededWinRatePct = needed,
@@ -529,7 +537,7 @@ object TradingHabitsPolicy {
         }
 
         val effectiveRiskPct = (requested * multiplier).coerceAtMost(cappedRiskPct)
-        val riskUsd = request.equityUsd * effectiveRiskPct / 100.0
+        val riskUsd = if (request.riskUsdOverride > 0.0) request.riskUsdOverride else request.equityUsd * effectiveRiskPct / 100.0
         val afterThisTradePct = openRisk + effectiveRiskPct
 
         // R34 — مجموع ریسک باز (پس از این معامله) نباید از ۳٪ بگذرد.
