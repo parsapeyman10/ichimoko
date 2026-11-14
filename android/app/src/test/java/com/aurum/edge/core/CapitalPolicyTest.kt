@@ -38,16 +38,26 @@ class CapitalPolicyTest {
 
     @Test
     fun `percent mode derives the budget from the balance`() {
-        val policy = CapitalPolicy(
+        // درصد موجودی فقط وقتی ملاک است که هیچ مبلغ ثابت معتبری تنظیم نشده باشد؛
+        // با مبلغ ثابت، همان مبلغ حاکم است (قانون «دلار دقیق» کاربر).
+        val percentOnly = CapitalPolicy(
             accountBalance = 2_000.0,
             riskPercent = 1.5,
             useFixedDollarRisk = false,
-            fixedRiskUsd = 5.0,
+            fixedRiskUsd = 0.0,
         )
-        assertEquals(30.0, policy.riskBudgetUsd, 1e-9)
-        assertEquals(45.0, policy.rewardFloorUsd, 1e-9)
-        assertEquals(90.0, policy.rewardCeilingUsd, 1e-9)
-        assertTrue("درصد معتبر نباید اصلاحی داشته باشد", policy.sanitized().fixes.isEmpty())
+        assertEquals(30.0, percentOnly.riskBudgetUsd, 1e-9)
+        assertEquals(45.0, percentOnly.rewardFloorUsd, 1e-9)
+        assertEquals(90.0, percentOnly.rewardCeilingUsd, 1e-9)
+
+        val withFixedAmount = percentOnly.copy(fixedRiskUsd = 5.0)
+        assertEquals(
+            "درصد موجودی نباید مبلغ ثابت را کوچک یا بزرگ کند",
+            5.0,
+            withFixedAmount.riskBudgetUsd,
+            1e-9,
+        )
+        assertTrue("درصد معتبر نباید اصلاحی داشته باشد", percentOnly.sanitized().fixes.isEmpty())
     }
 
     @Test
