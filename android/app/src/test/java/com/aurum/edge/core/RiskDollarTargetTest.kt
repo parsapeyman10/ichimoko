@@ -98,9 +98,11 @@ class RiskDollarTargetTest {
         // برای «۲٫۵R خالص» باید هدف قیمتی ۴٫۳R دور برود؛ چون سقف ۳R است، هدف روی ۳R می‌ماند
         // و سود خالص واقعی ۸٫۲۰ دلار (۱٫۶۴R) گزارش می‌شود — عدد دروغ نمی‌گوییم.
         val r = calc("BNB/USDT", 701.60, 2.86, 7.14)
-        assertEquals(3.0, r.grossRiskReward, 1e-4)
-        assertTrue("R خالص باید کمتر از سقف قیمتی باشد", r.riskReward < 3.0)
-        assertTrue("R خالص نباید از کف ۱٫۵ بیرون بزند", r.riskReward >= 1.5)
+        // قانون کاربر روی **پول** است: سود خالص دقیقاً ۲٫۵ × ۵ = ۱۲٫۵ دلار، هرچند فاصلهٔ
+        // قیمتی هدف برای پوشش کارمزد بیشتر از ۳R می‌شود.
+        assertTrue("فاصلهٔ قیمتی هدف باید بیشتر از ۳R شود", r.grossRiskReward > 3.0)
+        assertEquals(2.5, r.riskReward, 0.02)
+        assertEquals("سود خالص دقیقاً R × مبلغ ریسک", 12.5, r.netProfitAtTpUsd, 0.05)
         assertTrue("سود خالص باید داخل دالان ۷٫۵ تا ۱۵ دلار بماند", r.netProfitAtTpUsd in 7.5..15.0)
     }
 

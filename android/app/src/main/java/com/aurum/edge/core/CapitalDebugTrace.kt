@@ -326,9 +326,9 @@ object CapitalDebugTrace {
                 "ورود " + priceText(result.entry) + " · SL " + priceText(result.stopLoss) + " · TP " + priceText(result.takeProfit),
             ),
             CapitalTraceCheck(
-                "فاصلهٔ هدف از سقف ۳R بیرون نمی‌زند",
-                result.grossRiskReward <= CapitalPolicy.MAX_RR + 1e-4,
-                "R خام قیمتی " + num(result.grossRiskReward) + " ≤ ۳",
+                "سود خالص دقیقاً R × مبلغ ریسک است",
+                abs(result.netProfitAtTpUsd - targetR * budget) <= 0.05,
+                "$" + money(result.netProfitAtTpUsd) + " در برابر " + num(targetR) + " × $" + money(budget),
             ),
             CapitalTraceCheck(
                 "کارمزد کمتر از یک‌چهارم مبلغ ریسک است",

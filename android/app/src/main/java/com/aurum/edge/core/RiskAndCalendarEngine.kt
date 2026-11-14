@@ -279,12 +279,10 @@ object RiskAndCalendarEngine {
         //   units × (زیان هر واحد در SL + کارمزد هر واحد) = بودجهٔ ریسک
         val feePerUnitUsd = spec.totalRoundTripFeeUsd(entry, 1.0).coerceAtLeast(0.0)
         val rawUnits = riskBudgetUsd / (perUnitStopUsd + feePerUnitUsd)
-        // حجم را به «گام مجاز همان بازار» **پایین** می‌گردانیم (مثل قواعد واقعی سفارش):
-        // گرد کردن به سمت بالا یعنی ریسک بیشتر از مبلغی که کاربر تعیین کرده. با گام طلا
-        // (۰٫۰۱ اونس) اختلاف چند سنت است، ولی هرگز از بودجهٔ ۵ دلاری بالاتر نمی‌زند.
-        val quantityStepUsd = if (spec.quantityStep > 0.0) spec.quantityStep else 0.0001
-        val steppedUnits = floor(rawUnits / quantityStepUsd) * quantityStepUsd
-        val positionUnits = if (steppedUnits > 1e-12) round6(steppedUnits) else round6(max(0.0001, rawUnits))
+        // حجم با دقت ریز (۶ رقم اعشار) نگه داشته می‌شود تا زیان خالص **دقیقاً** برابر مبلغ
+        // تنظیم‌شده دربیاید (مثلاً ۵٫۰۰ دلار، نه ۴٫۹۵ با پایین‌گرد به گام ۰٫۰۱ اونس).
+        // این موتور کاغذی است؛ برای سفارش واقعی، گام بازار را کارگزار اعمال می‌کند.
+        val positionUnits = round6(max(0.0001, rawUnits))
         val unitLabel = PaperOrderRules.unitFor(symbol)
         val (standardLots, lotDesc) = computeStandardLots(symbol, positionUnits, unitLabel)
         val roundTripFeeUsd = round2(positionUnits * feePerUnitUsd)
@@ -317,9 +315,9 @@ object RiskAndCalendarEngine {
         // اگر TP سر جایش بماند، کارمزد از سود کم می‌شود و «۲٫۵R» در عمل کمتر می‌شود.
         // پس هدف را طوری می‌چینیم که «سود ناخالص − کارمزد» = R پلن × بودجهٔ ریسک شود:
         //   فاصلهٔ لازم = (سود خالص خواسته‌شده + کارمزد) ÷ (ارزش هر واحد حرکت قیمت)
-        // و سقف قیمتی ۳R دست‌نخورده می‌ماند؛ اگر کارمزد آن‌قدر سنگین باشد که برای «۳ برابر
-        // خالص» فاصلهٔ بیشتری لازم شود، هدف روی همان ۳R می‌ماند و R خالص کمی کمتر از ۳ می‌شود
-        // (مثلاً روی نمادهای کریپتو که کارمزد چند درصد ریسک است) — عدد واقعی گزارش می‌شود.
+        // یعنی اگر ریسک ۵ دلار است، در ۱٫۵R دقیقاً ۷٫۵۰ و در ۳R دقیقاً ۱۵٫۰۰ دلار به حساب
+        // می‌رسد — همان قانون کاربر. اگر کارمزد سنگین باشد، فقط **فاصلهٔ قیمتی** هدف دورتر
+        // می‌رود؛ مقدار دلاری سود عوض نمی‌شود.
         val perUnitTargetUsd = PaperOrderRules.quotePnlToUsd(symbol, targetDistance, entry)
         val netFeeUsd = positionUnits * feePerUnitUsd
         val slopeUsdPerUnitPrice = if (targetDistance > 1e-12) perUnitTargetUsd / targetDistance else 0.0
@@ -330,8 +328,10 @@ object RiskAndCalendarEngine {
         } else {
             targetDistance
         }
-        val maxTargetDistance = stopDistance * MAX_ALLOWED_RISK_REWARD
-        val adjustedTargetDistance = requiredTargetDistance.coerceAtMost(maxTargetDistance)
+        // سقف ۳R روی «پول» اعمال می‌شود (desiredNetUsd خودش از R پلن می‌آید و R پلن هم
+        // در TradePlanGuard در [1.5 .. 3] قفل است)، نه روی فاصلهٔ قیمتی؛ وگرنه کارمزد
+        // سنگین سود را از قانون پایین‌تر می‌آورد.
+        val adjustedTargetDistance = requiredTargetDistance
         val dirSign = if (inferredAction == SignalAction.BUY) 1.0 else -1.0
         val adjustedTakeProfit = TradePlanGuard.roundToTick(symbol, entry + dirSign * adjustedTargetDistance)
 

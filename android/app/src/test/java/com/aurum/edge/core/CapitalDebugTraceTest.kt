@@ -82,13 +82,10 @@ class CapitalDebugTraceTest {
         assertNotNull("ناوردای کارمزد باید وجود داشته باشد", feeCheck)
         assertFalse("کارمزد سنگین باید قرمز شود", feeCheck!!.passed)
         assertTrue("با یک قرمز، گزارش سالم نیست", !trace.isHealthy)
-        // و پیامدِ همان کارمزد هم باید بی‌پرده دیده شود: هدف قیمتی روی سقف ۳R می‌ماند،
-        // ولی سود خالص از کف دالان (۷٫۵ دلار) هم پایین‌تر می‌افتد.
-        assertTrue(
-            "سود خالص با این حد ضرر تنگ باید زیر کف ۷٫۵ دلار باشد، بود: ${trace.result.netProfitAtTpUsd}",
-            trace.result.netProfitAtTpUsd < 7.5,
-        )
-        assertFalse("ناوردای دالان باید قرمز شود", check(trace, "دالان")?.passed == true)
+        // ولی پول قانون است: سود خالص دقیقاً ۲٫۵R می‌ماند و هدف قیمتی برای پوشش کارمزد دورتر می‌رود.
+        assertEquals(12.5, trace.result.netProfitAtTpUsd, 0.05)
+        assertTrue("دالان ۱٫۵–۳R باید سبز بماند", check(trace, "دالان")?.passed == true)
+        assertTrue("سود خالص باید دقیقاً R × مبلغ ریسک باشد", check(trace, "R × مبلغ ریسک")?.passed == true)
     }
 
     @Test

@@ -733,23 +733,8 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                             lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
                             continue
                         }
-                        // 🧠 ضریب حجم از «عمق یادگیری»: همان حالت (فاز × سشن × نوسان × دالان هدف)
-                        // اگر با شواهد کافی بازنده بوده باشد، این ورود انجام نمی‌شود؛ اگر ضعیف
-                        // باشد، ریسک همان معامله نصف می‌شود. با کمتر از ۱۲ نمونه، ضریب ۱ است.
-                        val depthMultiplier = neuralDepthMultiplier(armedReport, tick, cfg)
-                        if (depthMultiplier <= 0.0) {
-                            lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
-                            val blockKey = "$fireKey|${armedReport.triggerBarTime}|depth"
-                            if (rejectedPlanKeys.add(blockKey)) {
-                                _toast.value = "⛔ این حالت (فاز/سشن/نوسان/هدف) در ژورنال با شواهد کافی بازنده بوده است"
-                            }
-                            continue
-                        }
-                        val baseBudgetUsd = if (cfg.useFixedDollarRisk) {
-                            cfg.fixedRiskUsd
-                        } else {
-                            cfg.accountBalance * cfg.riskPercent / 100.0
-                        }
+                        // مبلغ ریسک هر معامله **دقیقاً** همان چیزی است که در تنظیمات است؛
+                        // هیچ لایه‌ای (نه عادت‌ها و نه عمق یادگیری) آن را کم/زیاد نمی‌کند.
                         val calc = RiskAndCalendarEngine.calculatePosition(
                             symbolInput = symbol,
                             accountBalance = cfg.accountBalance,
@@ -758,7 +743,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                             stopLoss = guarded.stopLoss,
                             takeProfit = guarded.takeProfit,
                             preferredAction = armedReport.action,
-                            fixedRiskUsdOverride = baseBudgetUsd * depthMultiplier,
+                            fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
                             triggerInterval = armedReport.triggerInterval,
                             referenceAtr14 = armedReport.triggerSnapshot?.atr14 ?: 0.0,
                         )
@@ -1493,21 +1478,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             return null
         }
 
-        val scaledRiskUsd = calc.riskBudgetUsd * decision.sizeMultiplier
-        val resized = if (scaledRiskUsd > 0.0 && scaledRiskUsd < calc.riskBudgetUsd - 0.005) {
-            RiskAndCalendarEngine.calculatePosition(
-                symbolInput = calc.symbol,
-                accountBalance = equity,
-                riskPercent = cfg.riskPercent,
-                entry = calc.entry,
-                stopLoss = calc.stopLoss,
-                takeProfit = calc.takeProfit,
-                preferredAction = calc.action,
-                fixedRiskUsdOverride = scaledRiskUsd,
-            ) ?: calc
-        } else {
-            calc
-        }
+        // درخواست صریح کاربر: مبلغ ریسک هر معامله **دقیقاً** همان عدد تنظیمات است.
+        // لایهٔ عادت‌ها فقط می‌تواند ورود را رد کند (allowed=false)، نه حجم را کم کند.
+        val resized = calc
         val note = buildString {
             append("\n")
             append(decision.summaryFa)

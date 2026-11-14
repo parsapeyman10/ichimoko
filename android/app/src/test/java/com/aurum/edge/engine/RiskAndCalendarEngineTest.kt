@@ -52,13 +52,13 @@ class RiskAndCalendarEngineTest {
         goldCalc!!
         assertEquals(SignalAction.BUY, goldCalc.action)
         assertEquals(10.0, goldCalc.riskBudgetUsd, 0.001)
-        // بودجهٔ ریسک **خالص** است: ۱۰ دلار تقسیم بر (فاصلهٔ حد ضرر ۱۰ + کارمزد ۰٫۱۹ هر اونس)
-        // و بعد پایین‌گرد به گام ۰٫۰۱ اونس ⇒ ۰٫۹۸ اونس (هرگز بیشتر از بودجه ریسک نمی‌شود).
-        assertEquals(0.98, goldCalc.positionUnits, 0.001)
-        assertEquals(0.0098, goldCalc.standardLots, 0.0001) // 0.98 oz / 100 oz per lot
+        // بودجهٔ ریسک **دقیقاً** همان عدد است: ۱۰ دلار ÷ (فاصلهٔ حد ضرر ۱۰ + کارمزد ۰٫۱۹ هر اونس)
+        // ⇒ ۰٫۹۸۱۴ اونس، و ۰٫۹۸۱۴ × (۱۰ + ۰٫۱۹) = ۱۰٫۰۰۰ دلار.
+        assertEquals(0.9814, goldCalc.positionUnits, 0.001)
+        assertEquals(0.0098, goldCalc.standardLots, 0.0001) // 0.9814 oz / 100 oz per lot
         assertEquals(2.0, goldCalc.riskReward, 0.01) // R خالص، نه نسبت خام قیمتی
-        assertEquals(20.0, goldCalc.netProfitAtTpUsd, 0.02) // ۲R از ۱۰ دلار
-        assertEquals(9.99, goldCalc.netLossAtSlUsd, 0.02) // ۱۰ دلار منهای یک گام، با کارمزد
+        assertEquals(20.0, goldCalc.netProfitAtTpUsd, 0.02) // ۲R از ۱۰ دلار — دقیق
+        assertEquals(10.0, goldCalc.netLossAtSlUsd, 0.02) // دقیقاً ۱۰ دلار، با کارمزد
         assertEquals(20.19, goldCalc.grossProfitAtTpUsd, 0.03) // سود ناخالص = خالص + کارمزد
 
         val fxShort = RiskAndCalendarEngine.calculatePosition(
@@ -73,8 +73,8 @@ class RiskAndCalendarEngineTest {
         fxShort!!
         assertEquals(SignalAction.SELL, fxShort.action)
         assertEquals(40.0, fxShort.riskBudgetUsd, 0.001)
-        // 40 دلار ÷ (۰٫۰۰۲۰ فاصله + ۰٫۰۰۰۰۸ کارمزد رفت‌وبرگشت) = ۱۹٬۲۳۰ ⇒ پایین‌گرد به گام ۱۰۰ ⇒ ۱۹٬۲۰۰
-        assertEquals(19_200.0, fxShort.positionUnits, 0.5)
+        // ۴۰ دلار ÷ (۰٫۰۰۲۰ فاصله + ۰٫۰۰۰۰۸ کارمزد رفت‌وبرگشت) = ۱۹٬۲۳۰٫۷۷ واحد
+        assertEquals(19_230.77, fxShort.positionUnits, 0.5)
         assertEquals(0.192, fxShort.standardLots, 0.001) // 19,200 / 100,000
         assertEquals(2.5, fxShort.riskReward, 0.01)
     }
@@ -654,11 +654,11 @@ class RiskAndCalendarEngineTest {
         )!!
         assertEquals(5.0, calcFixed5.riskBudgetUsd, 1e-4)
         // کارمزد کریپتو (۰٫۱۰٪ در هر سمت + ۱bps) برای این حد ضرر ۱۳۶٫۵۰ دلار در هر واحد است،
-        // یعنی حدود ۲۱٪ از کل ریسک. هدف قیمتی روی سقف ۳R می‌ماند و R **خالص** ۲٫۱۴ می‌شود؛
-        // همین عدد در UI نمایش داده می‌شود، چون دلارِ واقعی است.
-        assertEquals(2.14, calcFixed5.riskReward, 1e-4)
-        assertEquals(3.0, calcFixed5.grossRiskReward, 1e-4)
-        assertEquals(10.70, calcFixed5.netProfitAtTpUsd, 0.05)
+        // یعنی حدود ۲۱٪ از کل ریسک. قانون کاربر پول است: سود خالص **دقیقاً** ۲٫۵ × ۵ = ۱۲٫۵۰
+        // دلار و زیان خالص دقیقاً ۵٫۰۰ دلار می‌شود؛ فقط فاصلهٔ قیمتیِ حد سود دورتر می‌رود.
+        assertEquals(2.5, calcFixed5.riskReward, 1e-4)
+        assertTrue("فاصلهٔ قیمتیِ هدف با کارمزد پوشش داده می‌شود", calcFixed5.grossRiskReward > 3.0)
+        assertEquals(12.5, calcFixed5.netProfitAtTpUsd, 0.05)
         assertEquals(5.0, calcFixed5.netLossAtSlUsd, 0.05)
 
         val tradeManish = calcFixed5.toPaperTrade(
@@ -732,8 +732,8 @@ class RiskAndCalendarEngineTest {
             fixedRiskUsdOverride = 5.0,
         )!!
         val opened3R = runnerJournal.openTrade(calc3R, note = "تست بستن کامل در هدف ۱:۳")
-        // Live tick reaches 66,500 (3.0R) -> Trade immediately closes at TP (no SL raising or TP extension past 3R)
-        val runnerTickHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = 66_500.0, at = 1_760_002_000_000L))
+        // Live tick reaches the stored TP (پول: دقیقاً ۳R = ۱۵ دلار خالص؛ فاصلهٔ قیمتی کمی دورتر)
+        val runnerTickHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = calc3R.takeProfit, at = 1_760_002_000_000L))
         assertEquals(1, runnerTickHits.size)
         assertEquals(com.aurum.edge.core.AutoExitKind.TAKE_PROFIT, runnerTickHits.first().kind)
         assertTrue(runnerTickHits.first().netPnlUsd >= 14.5)
