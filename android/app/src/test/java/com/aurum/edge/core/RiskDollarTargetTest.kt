@@ -44,11 +44,19 @@ class RiskDollarTargetTest {
         )
         cases.forEach { (symbol, entry, stopDistance) ->
             val r = calc(symbol, entry, stopDistance, stopDistance * 2.0)
-            assertEquals(
-                "زیان خالص در SL باید همان ۵ دلار باشد · $symbol",
-                5.0,
-                r.netLossAtSlUsd,
-                0.02,
+            // حجم به «گام مجاز بازار» پایین گرد می‌شود (مثل قواعد واقعی سفارش)، پس زیان
+            // هرگز از ۵ دلار بالاتر نمی‌زند و حداکثر یک گام پایین‌تر می‌ایستد:
+            // گام طلا ۰٫۰۱ اونس ≈ ۸ سنت ریسک، فارکس ۱۰۰ واحد ≈ ۲۰ سنت، بیت‌کوین ۰٫۰۰۰۰۱ ≈ ۲ سنت.
+            val stepRiskUsd = com.aurum.edge.core.VenueSpecs.of(symbol).let { spec ->
+                spec.quantityStep * (stopDistance + spec.totalRoundTripFeeUsd(entry, 1.0))
+            }
+            assertTrue(
+                "زیان خالص در SL نباید از ۵ دلار بیشتر شود · $symbol (بود: ${r.netLossAtSlUsd})",
+                r.netLossAtSlUsd <= 5.0 + 0.01,
+            )
+            assertTrue(
+                "زیان خالص در SL باید نزدیک ۵ دلار بماند · $symbol (بود: ${r.netLossAtSlUsd})",
+                r.netLossAtSlUsd >= 5.0 - stepRiskUsd - 0.01,
             )
             assertTrue("کارمزد باید داخل محاسبه باشد · $symbol", r.totalRoundTripFeeUsd > 0.0)
             assertTrue(
@@ -83,6 +91,18 @@ class RiskDollarTargetTest {
     }
 
     @Test
+    fun `heavy crypto fees cap the price target at three R and report the smaller net R`() {
+        // BNB: کارمزد رفت‌وبرگشت ۱٫۴۷ دلار در هر واحد است و حد ضرر ۲٫۸۶ دلار ⇒ کارمزد ۳۴٪ کل ریسک.
+        // برای «۲٫۵R خالص» باید هدف قیمتی ۴٫۳R دور برود؛ چون سقف ۳R است، هدف روی ۳R می‌ماند
+        // و سود خالص واقعی ۸٫۲۰ دلار (۱٫۶۴R) گزارش می‌شود — عدد دروغ نمی‌گوییم.
+        val r = calc("BNB/USDT", 701.60, 2.86, 7.14)
+        assertEquals(3.0, r.grossRiskReward, 1e-4)
+        assertTrue("R خالص باید کمتر از سقف قیمتی باشد", r.riskReward < 3.0)
+        assertTrue("R خالص نباید از کف ۱٫۵ بیرون بزند", r.riskReward >= 1.5)
+        assertTrue("سود خالص باید داخل دالان ۷٫۵ تا ۱۵ دلار بماند", r.netProfitAtTpUsd in 7.5..15.0)
+    }
+
+    @Test
     fun `dollar target stays inside seven point five to fifteen for five dollar risk`() {
         listOf(1.5, 1.85, 2.3, 2.5, 3.0).forEach { rr ->
             val r = calc("XAU/USD", 2_600.0, 7.8, 7.8 * rr)
@@ -109,7 +129,7 @@ class RiskDollarTargetTest {
             preferredAction = com.aurum.edge.domain.SignalAction.SELL,
             fixedRiskUsdOverride = 5.0,
         )!!
-        assertEquals(5.0, r.netLossAtSlUsd, 0.02)
+        assertTrue("زیان خالص فروش هم باید نزدیک ۵ دلار بماند", r.netLossAtSlUsd in 4.9..5.01)
         assertEquals(10.0, r.netProfitAtTpUsd, 0.05)
         assertTrue("حد سود فروش باید زیر ورود باشد", r.takeProfit < r.entry)
     }

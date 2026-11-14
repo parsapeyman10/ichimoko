@@ -10,6 +10,7 @@ import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.round
@@ -53,7 +54,10 @@ data class RiskCalculationResult(
     val riskBudgetUsd: Double,
     val stopDistance: Double,
     val targetDistance: Double,
+    /** R خالص: (سود خالص در TP) ÷ (زیان خالص در SL). همان عددی که کیف پول نشان می‌دهد. */
     val riskReward: Double,
+    /** R خامِ قیمتی: فاصلهٔ حد سود تا ورود ÷ فاصلهٔ حد ضرر (بدون کارمزد). */
+    val grossRiskReward: Double = 0.0,
     val positionUnits: Double,
     val unitLabel: String,
     val standardLots: Double,
@@ -88,13 +92,13 @@ data class RiskCalculationResult(
         get() = if (roundTripFeeUsd > 0.0) roundTripFeeUsd else commissionUsd + spreadCostUsd
 
     /**
-     * R خالص = سود خالص در TP ÷ زیان خالص در SL.
+     * R خالص = سود خالص در TP ÷ زیان خالص در SL (کارمزد و اسپرد کسر شده‌اند).
      *
-     * این عدد همان چیزی است که واقعاً به حساب می‌رسد؛ `riskReward` خامِ قیمتی است و
-     * کارمزد در آن دیده نمی‌شود. هرجا کاربر «۱٫۵ تا ۳R» می‌خواهد، ملاک همین است.
+     * از نسخهٔ ۳.۹.۸۱ خودِ `riskReward` هم همین عدد است تا هر جا «۱٫۵ تا ۳R» نوشته می‌شود،
+     * با دلاری که واقعاً به حساب می‌رسد یکی باشد. نسبت خامِ قیمتی در `grossRiskReward` است.
      */
     val netRiskReward: Double
-        get() = if (netLossAtSlUsd > 1e-9) netProfitAtTpUsd / netLossAtSlUsd else 0.0
+        get() = if (netLossAtSlUsd > 1e-9) netProfitAtTpUsd / netLossAtSlUsd else riskReward
 
     fun buildVenueRulesSummaryFa(): String =
         VenueSpecs.of(symbol).buildRulesSummaryFa(entry, positionUnits)
@@ -275,7 +279,12 @@ object RiskAndCalendarEngine {
         //   units × (زیان هر واحد در SL + کارمزد هر واحد) = بودجهٔ ریسک
         val feePerUnitUsd = spec.totalRoundTripFeeUsd(entry, 1.0).coerceAtLeast(0.0)
         val rawUnits = riskBudgetUsd / (perUnitStopUsd + feePerUnitUsd)
-        val positionUnits = round4(max(0.0001, rawUnits))
+        // حجم را به «گام مجاز همان بازار» **پایین** می‌گردانیم (مثل قواعد واقعی سفارش):
+        // گرد کردن به سمت بالا یعنی ریسک بیشتر از مبلغی که کاربر تعیین کرده. با گام طلا
+        // (۰٫۰۱ اونس) اختلاف چند سنت است، ولی هرگز از بودجهٔ ۵ دلاری بالاتر نمی‌زند.
+        val quantityStepUsd = if (spec.quantityStep > 0.0) spec.quantityStep else 0.0001
+        val steppedUnits = floor(rawUnits / quantityStepUsd) * quantityStepUsd
+        val positionUnits = if (steppedUnits > 1e-12) round6(steppedUnits) else round6(max(0.0001, rawUnits))
         val unitLabel = PaperOrderRules.unitFor(symbol)
         val (standardLots, lotDesc) = computeStandardLots(symbol, positionUnits, unitLabel)
         val roundTripFeeUsd = round2(positionUnits * feePerUnitUsd)
@@ -304,28 +313,34 @@ object RiskAndCalendarEngine {
         val commissionUsd = spec.commissionUsd(entry, positionUnits) * 2.0
         val spreadCostUsd = spec.spreadCostUsd(entry, positionUnits)
 
-        // ── هدف: R خالص باید همان R پلن بماند ─────────────────────────────────────
-        // کارمزد از سود TP کم می‌شود؛ اگر فاصلهٔ هدف را به‌اندازهٔ همان کارمزد بزرگ نکنیم،
-        // «۱٫۵R» در عمل ۱٫۴۸R می‌شود. افزایش در حد چند سنت است و از سقف ۳R بیرون نمی‌زند.
+        // ── هدف: سود **خالص** در TP باید همان R پلن باشد ───────────────────────────
+        // اگر TP سر جایش بماند، کارمزد از سود کم می‌شود و «۲٫۵R» در عمل کمتر می‌شود.
+        // پس هدف را طوری می‌چینیم که «سود ناخالص − کارمزد» = R پلن × بودجهٔ ریسک شود:
+        //   فاصلهٔ لازم = (سود خالص خواسته‌شده + کارمزد) ÷ (ارزش هر واحد حرکت قیمت)
+        // و سقف قیمتی ۳R دست‌نخورده می‌ماند؛ اگر کارمزد آن‌قدر سنگین باشد که برای «۳ برابر
+        // خالص» فاصلهٔ بیشتری لازم شود، هدف روی همان ۳R می‌ماند و R خالص کمی کمتر از ۳ می‌شود
+        // (مثلاً روی نمادهای کریپتو که کارمزد چند درصد ریسک است) — عدد واقعی گزارش می‌شود.
         val perUnitTargetUsd = PaperOrderRules.quotePnlToUsd(symbol, targetDistance, entry)
         val netFeeUsd = positionUnits * feePerUnitUsd
-        val feeAsPriceDistance = if (perUnitTargetUsd > 1e-12 && targetDistance > 0.0) {
-            netFeeUsd / positionUnits * (targetDistance / perUnitTargetUsd)
+        val slopeUsdPerUnitPrice = if (targetDistance > 1e-12) perUnitTargetUsd / targetDistance else 0.0
+        val planR = if (stopDistance > 1e-12) targetDistance / stopDistance else 0.0
+        val desiredNetUsd = planR * riskBudgetUsd
+        val requiredTargetDistance = if (slopeUsdPerUnitPrice > 1e-12 && positionUnits > 1e-12) {
+            (desiredNetUsd + netFeeUsd) / (positionUnits * slopeUsdPerUnitPrice)
         } else {
-            0.0
+            targetDistance
         }
         val maxTargetDistance = stopDistance * MAX_ALLOWED_RISK_REWARD
-        val minTargetDistance = stopDistance * MIN_REQUIRED_RISK_REWARD
-        val adjustedTargetDistance = (targetDistance + feeAsPriceDistance)
-            .coerceIn(minTargetDistance.coerceAtMost(targetDistance), maxTargetDistance)
+        val adjustedTargetDistance = requiredTargetDistance.coerceAtMost(maxTargetDistance)
         val dirSign = if (inferredAction == SignalAction.BUY) 1.0 else -1.0
         val adjustedTakeProfit = TradePlanGuard.roundToTick(symbol, entry + dirSign * adjustedTargetDistance)
 
-        val riskReward = adjustedTargetDistance / stopDistance
         val grossProfitAtTp = positionUnits * PaperOrderRules.quotePnlToUsd(symbol, adjustedTargetDistance, entry)
         val grossLossAtSl = positionUnits * perUnitStopUsd
         val exactProfitAtTpUsd = (grossProfitAtTp - netFeeUsd).coerceAtLeast(0.0)
         val exactLossAtSlUsd = grossLossAtSl + netFeeUsd
+        val netRiskReward = if (exactLossAtSlUsd > 1e-9) exactProfitAtTpUsd / exactLossAtSlUsd else planR
+        val grossRiskReward = if (stopDistance > 1e-12) adjustedTargetDistance / stopDistance else planR
 
         return RiskCalculationResult(
             symbol = symbol,
@@ -339,7 +354,8 @@ object RiskAndCalendarEngine {
             riskBudgetUsd = round2(riskBudgetUsd),
             stopDistance = stopDistance,
             targetDistance = targetDistance,
-            riskReward = round2(riskReward),
+            riskReward = round2(netRiskReward),
+            grossRiskReward = round2(grossRiskReward),
             positionUnits = positionUnits,
             unitLabel = unitLabel,
             standardLots = round4(standardLots),
@@ -913,3 +929,4 @@ object RiskAndCalendarEngine {
 
 private fun round2(v: Double): Double = round(v * 100.0) / 100.0
 private fun round4(v: Double): Double = round(v * 10_000.0) / 10_000.0
+private fun round6(v: Double): Double = round(v * 1_000_000.0) / 1_000_000.0

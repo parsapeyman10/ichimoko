@@ -293,7 +293,11 @@ class TradePlanGuardTest {
         assertTrue(calc.liquidationBufferR >= TradePlanGuard.MIN_LIQUIDATION_BUFFER_R - 0.6)
         assertTrue(calc.leverageReasonFa.isNotBlank())
         assertTrue(calc.stopPctOfPrice in 0.003..0.005)
-        assertEquals("1 : 2.50", String.format(java.util.Locale.US, "1 : %.2f", calc.riskReward))
+        // R نمایش‌داده‌شده **خالص** است. برای BNB کارمزد رفت‌وبرگشت ۱٫۷۰ دلار است
+        // (۳۴٪ از ریسک ۵ دلاری)، پس هدف قیمتی روی سقف ۳R می‌نشیند و سود خالص ۸٫۲۰ دلار
+        // می‌شود ⇒ ۱٫۶۴R واقعی، هرچند فاصلهٔ قیمتی هدف ۳R است.
+        assertEquals(3.0, calc.grossRiskReward, 1e-4)
+        assertEquals("1 : 1.64", String.format(java.util.Locale.US, "1 : %.2f", calc.riskReward))
         assertTrue(calc.planVerdictFa.isNotBlank())
 
         val paper = calc.toPaperTrade(entryInterval = Interval.M5)
