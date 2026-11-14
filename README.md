@@ -27,3 +27,9 @@
 آمده است. فایل عملیاتی سبک فقط برای چارت **15m**،
 [`BASE_ICHIMOKU_15m_Light_Audit.lipi`](strategies/gocharting/BASE_ICHIMOKU_15m_Light_Audit.lipi)،
 تمام محاسبات را فقط از کندل‌های native 15m انجام می‌دهد و هیچ داده یا محاسبهٔ 30m/1H ندارد. فقط خطوط واقعی SL قرمز و TP سبز را روی چارت نشان می‌دهد؛ خط Entry، indicator و label محاسباتی ندارد و R:R نیز پیش از quantity توسط کاربر تعیین می‌شود. این strategy فقط بک‌تست/شبیه‌سازی است و سفارش واقعی ارسال نمی‌کند.
+
+## TradingView Pine Script v5 — native 15m
+
+نسخهٔ Pine Script v5 همین strategy برای TradingView در
+[`strategies/tradingview/README_BASE_ICHIMOKU_15M_LIGHT_AUDIT_FA.md`](strategies/tradingview/README_BASE_ICHIMOKU_15M_LIGHT_AUDIT_FA.md)
+قرار دارد. این نسخه مستقل از Lipi است، اما منطق native 15m، فاصلهٔ خطوط Ichimoku، Smart Trend Exit، lifecycle تک‌معامله‌ای و SL/TP آن را منتقل می‌کند. فقط برای Strategy Tester/بک‌تست است و به صرافی سفارش واقعی نمی‌فرستد.
