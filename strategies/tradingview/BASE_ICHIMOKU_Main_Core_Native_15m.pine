@@ -10,7 +10,7 @@ int TENKAN = input.int(9, "Tenkan", minval=2)
 int KIJUN = input.int(26, "Kijun", minval=2)
 int SPAN_B = input.int(52, "Senkou B", minval=2)
 int DISPLACEMENT = input.int(26, "Displacement", minval=10)
-float targetRr = input.float(2.25, "Target R:R (set before backtest quantity)", minval=1.50, maxval=3.00, step=0.05)
+float targetRr = input.float(2.25, "Target R:R (set before backtest quantity)", minval=2.00, maxval=3.00, step=0.05)
 float qty = input.float(1.0, "Backtest quantity (set after R:R)", minval=0.000001, step=0.01)
 bool allowLong = input.bool(true, "Enable long")
 bool allowShort = input.bool(true, "Enable short")
@@ -24,6 +24,12 @@ float minEfficiencyRatio = input.float(0.20, "Minimum ER14", minval=0.14, maxval
 float minVolumeRatio20 = input.float(0.60, "Minimum volume / SMA20", minval=0.40, maxval=1.15, step=0.01)
 float maxAdverseWickRatio = input.float(0.45, "Maximum adverse wick ratio", minval=0.28, maxval=0.60, step=0.01)
 float maxSniperDistanceAtr = input.float(0.35, "Maximum sniper-pocket distance (ATR)", minval=0.20, maxval=0.55, step=0.01)
+float progressiveBodyRatio = input.float(0.22, "Minimum body ratio for progressive impulse", minval=0.22, maxval=0.70, step=0.01)
+float maxProgressiveOverlapAtr = input.float(0.10, "Maximum progressive candle overlap (ATR)", minval=0.00, maxval=0.30, step=0.01)
+int kijunLevelLookback = input.int(20, "Kijun support/resistance history bars", minval=8, maxval=40)
+int minKijunLevelTouches = input.int(2, "Minimum historical Kijun touches", minval=1, maxval=6)
+float kijunLevelToleranceAtr = input.float(0.16, "Kijun historical-level tolerance (ATR)", minval=0.05, maxval=0.35, step=0.01)
+float maxKijunStopDistanceAtr = input.float(1.35, "Maximum Kijun SL distance (ATR)", minval=0.80, maxval=2.10, step=0.05)
 float slBufferAtr = input.float(0.25, "Structural SL buffer (ATR)", minval=0.15, maxval=0.55, step=0.01)
 float minStopPct = input.float(0.0009, "Minimum structural stop fraction (XAU reference)", minval=0.0001, maxval=0.0050, step=0.0001)
 float maxStopPct = input.float(0.0055, "Maximum structural stop fraction (XAU reference)", minval=0.0010, maxval=0.0200, step=0.0001)
@@ -81,6 +87,15 @@ bool recentKatanaRelease15 = compressedRecently15 and tkGapAtr15 >= priorTkGapAt
 bool impulseBull3 = ((close > open ? 1 : 0) + (close[1] > open[1] ? 1 : 0) + (close[2] > open[2] ? 1 : 0) >= 2) and close >= math.max(close[1], close[2])
 bool impulseBear3 = ((close < open ? 1 : 0) + (close[1] < open[1] ? 1 : 0) + (close[2] < open[2] ? 1 : 0) >= 2) and close <= math.min(close[1], close[2])
 
+// Trend-origin candle geometry: two successive directional steps, not nested bodies.
+// A very small ATR tolerance allows normal quote noise but rejects a real retracement.
+float bodyFloor15 = math.min(open, close)
+float bodyCeiling15 = math.max(open, close)
+bool bullProgressStep0 = close > open and bodyRatio15 >= progressiveBodyRatio and high > high[1] and bodyFloor15 >= math.min(open[1], close[1]) - atr15 * maxProgressiveOverlapAtr and low >= low[1] - atr15 * maxProgressiveOverlapAtr
+bool bullProgressStep1 = close[1] > open[1] and bodyRatio15[1] >= progressiveBodyRatio and high[1] > high[2] and math.min(open[1], close[1]) >= math.min(open[2], close[2]) - atr15 * maxProgressiveOverlapAtr and low[1] >= low[2] - atr15 * maxProgressiveOverlapAtr
+bool bearProgressStep0 = close < open and bodyRatio15 >= progressiveBodyRatio and low < low[1] and bodyCeiling15 <= math.max(open[1], close[1]) + atr15 * maxProgressiveOverlapAtr and high <= high[1] + atr15 * maxProgressiveOverlapAtr
+bool bearProgressStep1 = close[1] < open[1] and bodyRatio15[1] >= progressiveBodyRatio and low[1] < low[2] and math.max(open[1], close[1]) <= math.max(open[2], close[2]) + atr15 * maxProgressiveOverlapAtr and high[1] <= high[2] + atr15 * maxProgressiveOverlapAtr
+
 // A transferable native-15m S-point/time guard. It checks the same recent C area
 // and Hosoda cycle numbers; it does not claim to recreate the Main app's full wave projector.
 float nativeSPointLong15 = math.min(ta.lowest(low, 7), tenkan15)
@@ -96,6 +111,7 @@ bool dataReady = closed15m and not na(currentA15) and not na(currentB15) and not
 bool bullishBias = close > kumoTop15
 bool bearishBias = close < kumoBottom15
 bool isLong = bullishBias and not bearishBias ? true : bearishBias and not bullishBias ? false : tenkan15 >= kijun15
+bool progressiveImpulse15 = isLong ? (bullProgressStep0 and bullProgressStep1) : (bearProgressStep0 and bearProgressStep1)
 bool c1 = isLong ? bullishBias : bearishBias
 bool c2 = isLong ? (close > tenkan15 and tenkan15 >= kijun15 and kijun15 > kumoTop15) : (close < tenkan15 and tenkan15 <= kijun15 and kijun15 < kumoBottom15)
 bool c3 = isLong ? (tenkan15 >= kijun15 and tenkan15 >= tenkan15[1] - atr15 * 0.05 and kijun15 >= kijun15[1] - atr15 * 0.02) : (tenkan15 <= kijun15 and tenkan15 <= tenkan15[1] + atr15 * 0.05 and kijun15 <= kijun15[1] + atr15 * 0.02)
@@ -137,45 +153,34 @@ float distanceFromTenkanAtr15 = math.abs(close - tenkan15) / math.max(atr15, sym
 bool c16 = distanceToSniperAtr15 <= maxSniperDistanceAtr and distanceFromTenkanAtr15 <= maxSniperDistanceAtr + 0.50
 
 // Native XAU/USD corridor from Main: max(0.09% of price, 0.80 ATR) through
-// min(0.55% of price, 2.10 ATR). The previous crypto-sized 0.25% floor, paired
-// with a 0.21% cost input, made condition 17 a permanent hard veto on this chart.
+// min(0.55% of price, 2.10 ATR). The stop may only be built from this bar's
+// Kijun after that Kijun has proved to be a historical support/resistance level.
 float stopFloor15 = math.max(close * minStopPct, atr15 * 0.80)
 float stopCeiling15 = math.max(stopFloor15, math.min(close * maxStopPct, atr15 * 2.10))
 float sweepShield15 = atr15 * (slBufferAtr + (isLong ? lowerWick15 : upperWick15) * 0.16)
-float pivotLow15 = ta.pivotlow(low, 2, 2)
-float pivotHigh15 = ta.pivothigh(high, 2, 2)
-float lastPivotLow15 = ta.valuewhen(not na(pivotLow15), pivotLow15, 0)
-float lastPivotHigh15 = ta.valuewhen(not na(pivotHigh15), pivotHigh15, 0)
-float kijun30 = (ta.highest(high, 30) + ta.lowest(low, 30)) / 2.0
-float ema34 = ta.ema(close, 34)
-float anchorKijun15 = isLong ? kijun15 - sweepShield15 : kijun15 + sweepShield15
-float anchorRibbon15 = isLong ? math.min(kijun30, ema34) - sweepShield15 * 0.90 : math.max(kijun30, ema34) + sweepShield15 * 0.90
-float anchorFractal15 = isLong ? lastPivotLow15 - sweepShield15 : lastPivotHigh15 + sweepShield15
-float anchorKumo15 = isLong ? kumoBottom15 - sweepShield15 * 0.85 : kumoTop15 + sweepShield15 * 0.85
-float anchorWave15 = isLong ? nativeSPointLong15 - sweepShield15 : nativeSPointShort15 + sweepShield15
-bool anchorKijunValid15 = isLong ? (anchorKijun15 < close and close - anchorKijun15 >= stopFloor15 and close - anchorKijun15 <= stopCeiling15) : (anchorKijun15 > close and anchorKijun15 - close >= stopFloor15 and anchorKijun15 - close <= stopCeiling15)
-bool anchorRibbonValid15 = isLong ? (anchorRibbon15 < close and close - anchorRibbon15 >= stopFloor15 and close - anchorRibbon15 <= stopCeiling15) : (anchorRibbon15 > close and anchorRibbon15 - close >= stopFloor15 and anchorRibbon15 - close <= stopCeiling15)
-bool anchorFractalValid15 = isLong ? (anchorFractal15 < close and close - anchorFractal15 >= stopFloor15 and close - anchorFractal15 <= stopCeiling15) : (anchorFractal15 > close and anchorFractal15 - close >= stopFloor15 and anchorFractal15 - close <= stopCeiling15)
-bool anchorKumoValid15 = isLong ? (anchorKumo15 < close and close - anchorKumo15 >= stopFloor15 and close - anchorKumo15 <= stopCeiling15) : (anchorKumo15 > close and anchorKumo15 - close >= stopFloor15 and anchorKumo15 - close <= stopCeiling15)
-bool anchorWaveValid15 = isLong ? (anchorWave15 < close and close - anchorWave15 >= stopFloor15 and close - anchorWave15 <= stopCeiling15) : (anchorWave15 > close and anchorWave15 - close >= stopFloor15 and anchorWave15 - close <= stopCeiling15)
-float selectedStructuralStop15 = isLong ? close - stopFloor15 : close + stopFloor15
-if anchorKijunValid15
-    selectedStructuralStop15 := anchorKijun15
-else if anchorRibbonValid15
-    selectedStructuralStop15 := anchorRibbon15
-else if anchorFractalValid15
-    selectedStructuralStop15 := anchorFractal15
-else if anchorKumoValid15
-    selectedStructuralStop15 := anchorKumo15
-else if anchorWaveValid15
-    selectedStructuralStop15 := anchorWave15
-float stopDistance15 = math.min(math.max(math.abs(close - selectedStructuralStop15), stopFloor15), stopCeiling15)
+float kijunLevelTolerance15 = atr15 * kijunLevelToleranceAtr
+int historicalKijunTouches15 = 0
+int matchingKijunHistoryBars15 = 0
+for offset = 2 to kijunLevelLookback
+    bool sameHistoricalKijun15 = math.abs(kijun15[offset] - kijun15) <= kijunLevelTolerance15
+    bool touchedHistoricalKijun15 = high[offset] >= kijun15 - kijunLevelTolerance15 and low[offset] <= kijun15 + kijunLevelTolerance15
+    if sameHistoricalKijun15
+        matchingKijunHistoryBars15 += 1
+        if touchedHistoricalKijun15
+            historicalKijunTouches15 += 1
+bool kijunHistoricalLevelValid15 = matchingKijunHistoryBars15 >= 3 and historicalKijunTouches15 >= minKijunLevelTouches
+float rawKijunStop15 = isLong ? kijun15 - sweepShield15 : kijun15 + sweepShield15
+float rawKijunRisk15 = math.abs(close - rawKijunStop15)
+float maxKijunStopDistance15 = math.max(stopFloor15, math.min(stopCeiling15, atr15 * maxKijunStopDistanceAtr))
+bool rawKijunStopCorrectSide15 = isLong ? rawKijunStop15 < close : rawKijunStop15 > close
+bool kijunStopGeometry15 = kijunHistoricalLevelValid15 and rawKijunStopCorrectSide15 and rawKijunRisk15 <= maxKijunStopDistance15
+float stopDistance15 = math.min(math.max(rawKijunRisk15, stopFloor15), maxKijunStopDistance15)
 float stopPrice15 = isLong ? close - stopDistance15 : close + stopDistance15
 float targetDistance15 = stopDistance15 * targetRr
 float targetPrice15 = isLong ? close + targetDistance15 : close - targetDistance15
 float executionCost15 = close * roundTripCostPct
 float costToRiskRatio15 = executionCost15 / math.max(stopDistance15, syminfo.mintick)
-bool c12 = targetRr >= 1.50 and targetRr <= 3.00 and targetDistance15 >= executionCost15 * 2.0
+bool c12 = targetRr >= 2.00 and targetRr <= 3.00 and targetDistance15 >= executionCost15 * 2.0
 bool c17 = costToRiskRatio15 <= 0.45
 
 // The BASE book gate: hard regime vetoes plus independently scored quality and entry layers.
@@ -185,13 +190,15 @@ float triggerScore = (c2 ? 0.6 : 0.0) + (c7 ? 0.6 : 0.0) + (c10 ? 0.8 : 0.0) + (
 float qualityPct = qualityScore / 5.2 * 100.0
 float triggerPct = triggerScore / 6.6 * 100.0
 float bookPct = (regimeScore + qualityScore + triggerScore) / 16.8 * 100.0
-bool hardVetoPassed = c1 and c3 and c4 and c6 and c17
+// User-selected trend-origin gates: no nested/retracing impulse and no distant/non-historical Kijun stop.
+bool hardVetoPassed = c1 and c3 and c4 and c6 and c17 and progressiveImpulse15 and kijunStopGeometry15
 bool bookFires = hardVetoPassed and qualityPct >= 70.0 and triggerPct >= 70.0 and bookPct >= 80.0
 int passedCount = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0) + (c6 ? 1 : 0) + (c7 ? 1 : 0) + (c8 ? 1 : 0) + (c9 ? 1 : 0) + (c10 ? 1 : 0) + (c11 ? 1 : 0) + (c12 ? 1 : 0) + (c13 ? 1 : 0) + (c14 ? 1 : 0) + (c15 ? 1 : 0) + (c16 ? 1 : 0) + (c17 ? 1 : 0)
 
 bool strictSignal = dataReady and triggerFired and bookFires
 string triggerName = triggerGenesis ? "EARLY KATANA" : triggerBreakout ? "VALIDATED BREAKOUT" : triggerPullback ? "PULLBACK BOUNCE" : triggerContinuation ? "SANYAKU CORE" : "-"
 string phaseName = phaseGenesis15 ? "GENESIS" : phaseCore15 ? "CORE" : "BLOCKED"
+string hardVetoReason = not progressiveImpulse15 ? "VETO: NESTED/RETRACE" : not kijunStopGeometry15 ? "VETO: KIJUN SL" : not c17 ? "VETO: COST / 1R" : "HARD VETO"
 
 // ── Smart exit: structural deterioration only; there is no bar-count time stop ─
 bool tkGapContracting15 = tkGapAtr15 < priorTkGapAtr15
@@ -300,7 +307,7 @@ if strategy.closedtrades > observedClosedTrades
     observedClosedTrades := strategy.closedtrades
 
 // A compact audit panel is diagnostic only; the strategy deliberately draws no entry markers.
-var table dashboard = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 75), border_width=1)
+var table dashboard = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 75), border_width=1)
 if barstate.islast
     table.cell(dashboard, 0, 0, "BASE MAIN-CORE")
     table.cell(dashboard, 1, 0, "NATIVE 15m")
@@ -314,11 +321,15 @@ if barstate.islast
     table.cell(dashboard, 1, 4, triggerName, text_color=triggerFired ? color.aqua : color.gray)
     table.cell(dashboard, 0, 5, "Phase")
     table.cell(dashboard, 1, 5, phaseName, text_color=c15 ? color.lime : color.orange)
-    table.cell(dashboard, 0, 6, "Conditions")
-    table.cell(dashboard, 1, 6, str.tostring(passedCount) + " / 17")
-    table.cell(dashboard, 0, 7, "Book gate")
-    table.cell(dashboard, 1, 7, str.tostring(bookPct, "#.0") + "%", text_color=bookFires ? color.lime : color.orange)
-    table.cell(dashboard, 0, 8, "Cost / 1R")
-    table.cell(dashboard, 1, 8, str.tostring(costToRiskRatio15 * 100.0, "#.1") + "%", text_color=c17 ? color.lime : color.red)
-    table.cell(dashboard, 0, 9, "Status")
-    table.cell(dashboard, 1, 9, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : blockedBySameTrend ? "WAIT: LEG RESET" : strictSignal ? "STRICT SIGNAL" : hardVetoPassed ? "WAITING" : "HARD VETO", text_color=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 or blockedBySameTrend ? color.yellow : strictSignal ? color.lime : hardVetoPassed ? color.yellow : color.red)
+    table.cell(dashboard, 0, 6, "Impulse")
+    table.cell(dashboard, 1, 6, progressiveImpulse15 ? "PROGRESSIVE" : "NESTED/RETRACE", text_color=progressiveImpulse15 ? color.lime : color.red)
+    table.cell(dashboard, 0, 7, "Kijun SL")
+    table.cell(dashboard, 1, 7, kijunStopGeometry15 ? "HISTORICAL + NEAR" : "NO VALID LEVEL", text_color=kijunStopGeometry15 ? color.lime : color.red)
+    table.cell(dashboard, 0, 8, "Conditions")
+    table.cell(dashboard, 1, 8, str.tostring(passedCount) + " / 17")
+    table.cell(dashboard, 0, 9, "Book gate")
+    table.cell(dashboard, 1, 9, str.tostring(bookPct, "#.0") + "%", text_color=bookFires ? color.lime : color.orange)
+    table.cell(dashboard, 0, 10, "Cost / 1R")
+    table.cell(dashboard, 1, 10, str.tostring(costToRiskRatio15 * 100.0, "#.1") + "%", text_color=c17 ? color.lime : color.red)
+    table.cell(dashboard, 0, 11, "Status")
+    table.cell(dashboard, 1, 11, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : blockedBySameTrend ? "WAIT: LEG RESET" : strictSignal ? "STRICT SIGNAL" : hardVetoPassed ? "WAITING" : hardVetoReason, text_color=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 or blockedBySameTrend ? color.yellow : strictSignal ? color.lime : hardVetoPassed ? color.yellow : color.red)

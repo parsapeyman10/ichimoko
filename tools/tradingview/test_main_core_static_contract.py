@@ -65,6 +65,16 @@ class MainCoreNative15StaticContractTests(unittest.TestCase):
         self.assertNotIn("priorHigh15", self.code)
         self.assertNotIn("priorLow15", self.code)
 
+    def test_requires_progressive_impulse_kijun_stop_and_two_to_three_risk_reward(self) -> None:
+        self.assertIn("bool progressiveImpulse15", self.code)
+        self.assertIn("bool kijunHistoricalLevelValid15", self.code)
+        self.assertIn("bool kijunStopGeometry15", self.code)
+        self.assertIn("and progressiveImpulse15 and kijunStopGeometry15", self.code)
+        self.assertIn('input.float(2.25, "Target R:R (set before backtest quantity)", minval=2.00, maxval=3.00', self.code)
+        self.assertIn("bool c12 = targetRr >= 2.00 and targetRr <= 3.00", self.code)
+        for rejected_anchor in ("anchorRibbon15", "anchorFractal15", "anchorKumo15", "anchorWave15"):
+            self.assertNotIn(rejected_anchor, self.code)
+
     def test_preserves_single_lifecycle_and_frozen_bracket(self) -> None:
         for token in (
             'strategy.entry("BASE Main Long"',
