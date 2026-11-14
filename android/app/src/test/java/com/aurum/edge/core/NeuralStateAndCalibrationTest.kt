@@ -303,6 +303,9 @@ class NeuralStateAndCalibrationTest {
         assertEquals(1_760_000_000_000L, saved.measuredAtMs)
         assertTrue(saved.verdictFa.isNotBlank())
         assertTrue(saved.walkForwardVerdictFa.isNotBlank())
+        // عدد نامعلوم هرگز با NaN در فایل ذخیره نمی‌شود؛ پرچم `has*` جایش را می‌گیرد.
+        assertTrue(saved.brier.isFinite())
+        assertTrue(saved.walkForwardGain.isFinite())
     }
 
     @Test
@@ -313,6 +316,10 @@ class NeuralStateAndCalibrationTest {
 
         assertEquals(7, report.usableSamples)
         assertFalse("با ۷ نمونه هیچ Brier اعلام نمی‌شود", report.inSample.brier.isFinite())
+        val saved = engine.state.value.lastJournalCalibration
+        assertTrue(saved.isMeasured)
+        assertFalse("پرچم Brier باید صریحاً نامعلوم باشد", saved.hasBrier)
+        assertFalse(saved.brierOrNaN.isFinite())
         assertEquals(0, report.walkForward.usableFolds)
         assertTrue("خلاصه باید تعداد واقعی نمونه را داشته باشد، بود: ${report.summaryFa}",
             report.summaryFa.contains("7 نمونه"))

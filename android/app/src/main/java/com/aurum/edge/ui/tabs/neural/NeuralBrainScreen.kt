@@ -1461,12 +1461,12 @@ fun NeuralBrainScreen(
                     // در حافظهٔ شبکه پایدار شده است. نمایشش بهتر از «هیچ» است، به شرط برچسب صریح.
                     val saved = neuralState.lastJournalCalibration
                     if (saved.isMeasured) {
-                        val brierText = if (saved.brier.isFinite()) {
+                        val brierText = if (saved.brierOrNaN.isFinite()) {
                             String.format(Locale.US, "%.3f", saved.brier)
                         } else {
                             "—"
                         }
-                        val baseText = if (saved.brierBaseline.isFinite()) {
+                        val baseText = if (saved.brierOrNaN.isFinite()) {
                             String.format(Locale.US, "%.3f", saved.brierBaseline)
                         } else {
                             "—"

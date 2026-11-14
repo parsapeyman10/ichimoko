@@ -477,19 +477,35 @@ data class NeuralJournalCalibrationSnapshot(
     val samples: Int = 0,
     val wins: Int = 0,
     val baseWinRatePct: Double = 0.0,
-    val brier: Double = Double.NaN,
-    val brierBaseline: Double = Double.NaN,
+    val brier: Double = 0.0,
+    val brierBaseline: Double = 0.0,
+    /** آیا Brier واقعاً محاسبه شد؟ (سه رقم اعشار صفر یک عدد معتبر است، پس پرچم لازم است.) */
+    val hasBrier: Boolean = false,
     val oosSamples: Int = 0,
-    val oosBrier: Double = Double.NaN,
+    val oosBrier: Double = 0.0,
+    val hasOosBrier: Boolean = false,
     val walkForwardFolds: Int = 0,
     val walkForwardWins: Int = 0,
-    val walkForwardGain: Double = Double.NaN,
-    val walkForwardWorstGain: Double = Double.NaN,
+    val walkForwardGain: Double = 0.0,
+    val walkForwardWorstGain: Double = 0.0,
+    val hasWalkForward: Boolean = false,
     val measuredAtMs: Long = 0L,
     val verdictFa: String = "",
     val walkForwardVerdictFa: String = "",
 ) {
     val isMeasured: Boolean get() = samples > 0 && measuredAtMs > 0L
+
+    /**
+     * عدد قابل استناد یا `NaN` برای «نامعلوم».
+     *
+     * چرا NaN ذخیره نمی‌شود: `kotlinx.serialization` به‌طور پیش‌فرض NaN را رد می‌کند و همان
+     * باعث شد بستهٔ دانش/پشتیبان با خطای `JsonEncodingException` شکست بخورد. عدد نامعلوم
+     * در فایل با پرچم `has*` نشان داده می‌شود، نه با NaN.
+     */
+    val brierOrNaN: Double get() = if (hasBrier) brier else Double.NaN
+    val oosBrierOrNaN: Double get() = if (hasOosBrier) oosBrier else Double.NaN
+    val walkForwardGainOrNaN: Double get() = if (hasWalkForward) walkForwardGain else Double.NaN
+    val walkForwardWorstGainOrNaN: Double get() = if (hasWalkForward) walkForwardWorstGain else Double.NaN
 }
 
 data class NeuralLearningStateSummary(
@@ -4303,18 +4319,22 @@ class NeuralSelfLearningEngine(
             "درون‌نمونه Brier ${if (inSample.brier.isFinite()) String.format(Locale.US, "%.3f", inSample.brier) else "—"}"
 
         // ── ۴) پایدارسازیِ سنجش (با خروج از اپ پاک نشود) ──────────────────────────
+        fun finiteOrZero(v: Double): Double = if (v.isFinite()) v else 0.0
         val snapshot = NeuralJournalCalibrationSnapshot(
             samples = samples.size,
             wins = samples.count { it.won },
-            baseWinRatePct = inSample.baseWinRatePct,
-            brier = inSample.brier,
-            brierBaseline = inSample.brierBaseline,
+            baseWinRatePct = finiteOrZero(inSample.baseWinRatePct),
+            brier = finiteOrZero(inSample.brier),
+            brierBaseline = finiteOrZero(inSample.brierBaseline),
+            hasBrier = inSample.brier.isFinite(),
             oosSamples = outOfSample.oosSamples,
-            oosBrier = outOfSample.oosBrier,
+            oosBrier = finiteOrZero(outOfSample.oosBrier),
+            hasOosBrier = outOfSample.oosBrier.isFinite(),
             walkForwardFolds = walkForward.usableFolds,
             walkForwardWins = walkForward.winsAgainstBaseline,
-            walkForwardGain = walkForward.meanGain,
-            walkForwardWorstGain = walkForward.worstGain,
+            walkForwardGain = finiteOrZero(walkForward.meanGain),
+            walkForwardWorstGain = finiteOrZero(walkForward.worstGain),
+            hasWalkForward = walkForward.usableFolds > 0,
             measuredAtMs = nowMs,
             verdictFa = inSample.verdictFa,
             walkForwardVerdictFa = walkForward.verdictFa,
