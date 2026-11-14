@@ -73,6 +73,8 @@ data class RiskCalculationResult(
     val liquidationBufferR: Double = 0.0,
     /** دلیل انتخاب اهرم (سقف مرجع / سقف ضدلیکویید / نیاز مارجین). */
     val leverageReasonFa: String = "",
+    /** کارمزد + اسپرد رفت‌وبرگشت همان حجم (دلار). */
+    val roundTripFeeUsd: Double = 0.0,
     /** ۱R به‌صورت درصدی از قیمت ورود. */
     val stopPctOfPrice: Double = 0.0,
     /** فاصلهٔ حد سود به‌صورت درصدی از قیمت ورود. */
@@ -83,7 +85,16 @@ data class RiskCalculationResult(
     val planNoteFa: String = "",
 ) {
     val totalRoundTripFeeUsd: Double
-        get() = commissionUsd + spreadCostUsd
+        get() = if (roundTripFeeUsd > 0.0) roundTripFeeUsd else commissionUsd + spreadCostUsd
+
+    /**
+     * R خالص = سود خالص در TP ÷ زیان خالص در SL.
+     *
+     * این عدد همان چیزی است که واقعاً به حساب می‌رسد؛ `riskReward` خامِ قیمتی است و
+     * کارمزد در آن دیده نمی‌شود. هرجا کاربر «۱٫۵ تا ۳R» می‌خواهد، ملاک همین است.
+     */
+    val netRiskReward: Double
+        get() = if (netLossAtSlUsd > 1e-9) netProfitAtTpUsd / netLossAtSlUsd else 0.0
 
     fun buildVenueRulesSummaryFa(): String =
         VenueSpecs.of(symbol).buildRulesSummaryFa(entry, positionUnits)
@@ -256,12 +267,18 @@ object RiskAndCalendarEngine {
         val perUnitStopUsd = PaperOrderRules.quotePnlToUsd(symbol, stopDistance, entry)
         if (!perUnitStopUsd.isFinite() || perUnitStopUsd <= 1e-9) return null
 
-        val rawUnits = riskBudgetUsd / perUnitStopUsd
+        val spec = VenueSpecs.of(symbol)
+        // ── بودجهٔ ریسک، **خالص** است: همان چیزی که وقتی حد ضرر بخورد از حساب کم می‌شود ──
+        // قبلاً حجم فقط از فاصلهٔ حد ضرر ساخته می‌شد و کارمزد/اسپرد بیرون می‌ماند، پس زیان
+        // واقعی از مبلغ تنظیم‌شده بیشتر بود و «سود در TP» هم به همان اندازه باد می‌کرد.
+        // کارمزد رفت‌وبرگشت با حجم خطی است، پس «کارمزد هر واحد» ثابت است و معادله ساده می‌شود:
+        //   units × (زیان هر واحد در SL + کارمزد هر واحد) = بودجهٔ ریسک
+        val feePerUnitUsd = spec.totalRoundTripFeeUsd(entry, 1.0).coerceAtLeast(0.0)
+        val rawUnits = riskBudgetUsd / (perUnitStopUsd + feePerUnitUsd)
         val positionUnits = round4(max(0.0001, rawUnits))
         val unitLabel = PaperOrderRules.unitFor(symbol)
         val (standardLots, lotDesc) = computeStandardLots(symbol, positionUnits, unitLabel)
-
-        val spec = VenueSpecs.of(symbol)
+        val roundTripFeeUsd = round2(positionUnits * feePerUnitUsd)
         val notionalUsd = PaperOrderRules.quotePnlToUsd(symbol, positionUnits * entry, entry)
         // اهرم دیگر یک عدد ثابت نیست: از فاصلهٔ حد ضرر، هزینهٔ رفت‌وبرگشت و مارجین نگهداری محاسبه می‌شود
         // تا لیکوییدیشن همیشه حداقل ۲.۵R دورتر از حد ضرر بماند.
@@ -287,16 +304,36 @@ object RiskAndCalendarEngine {
         val commissionUsd = spec.commissionUsd(entry, positionUnits) * 2.0
         val spreadCostUsd = spec.spreadCostUsd(entry, positionUnits)
 
-        val riskReward = targetDistance / stopDistance
-        val exactProfitAtTpUsd = riskBudgetUsd * riskReward
-        val exactLossAtSlUsd = riskBudgetUsd
+        // ── هدف: R خالص باید همان R پلن بماند ─────────────────────────────────────
+        // کارمزد از سود TP کم می‌شود؛ اگر فاصلهٔ هدف را به‌اندازهٔ همان کارمزد بزرگ نکنیم،
+        // «۱٫۵R» در عمل ۱٫۴۸R می‌شود. افزایش در حد چند سنت است و از سقف ۳R بیرون نمی‌زند.
+        val perUnitTargetUsd = PaperOrderRules.quotePnlToUsd(symbol, targetDistance, entry)
+        val netFeeUsd = positionUnits * feePerUnitUsd
+        val feeAsPriceDistance = if (perUnitTargetUsd > 1e-12 && targetDistance > 0.0) {
+            netFeeUsd / positionUnits * (targetDistance / perUnitTargetUsd)
+        } else {
+            0.0
+        }
+        val maxTargetDistance = stopDistance * MAX_ALLOWED_RISK_REWARD
+        val minTargetDistance = stopDistance * MIN_REQUIRED_RISK_REWARD
+        val adjustedTargetDistance = (targetDistance + feeAsPriceDistance)
+            .coerceIn(minTargetDistance.coerceAtMost(targetDistance), maxTargetDistance)
+        val dirSign = if (inferredAction == SignalAction.BUY) 1.0 else -1.0
+        val adjustedTakeProfit = TradePlanGuard.roundToTick(symbol, entry + dirSign * adjustedTargetDistance)
+
+        val riskReward = adjustedTargetDistance / stopDistance
+        val grossProfitAtTp = positionUnits * PaperOrderRules.quotePnlToUsd(symbol, adjustedTargetDistance, entry)
+        val grossLossAtSl = positionUnits * perUnitStopUsd
+        val exactProfitAtTpUsd = (grossProfitAtTp - netFeeUsd).coerceAtLeast(0.0)
+        val exactLossAtSlUsd = grossLossAtSl + netFeeUsd
 
         return RiskCalculationResult(
             symbol = symbol,
             action = inferredAction,
             entry = entry,
             stopLoss = stopLoss,
-            takeProfit = takeProfit,
+            // هدفِ ذخیره‌شده همان هدفی است که کارمزد در آن حساب شده است (نه عدد خام پلن).
+            takeProfit = adjustedTakeProfit,
             accountBalance = accountBalance,
             riskPercent = round2(effectiveRiskPct),
             riskBudgetUsd = round2(riskBudgetUsd),
@@ -312,9 +349,11 @@ object RiskAndCalendarEngine {
             marginRequiredUsd = round2(marginRequiredUsd),
             commissionUsd = round2(commissionUsd),
             spreadCostUsd = round2(spreadCostUsd),
-            grossProfitAtTpUsd = round2(exactProfitAtTpUsd),
+            roundTripFeeUsd = roundTripFeeUsd,
+            grossProfitAtTpUsd = round2(grossProfitAtTp),
             netProfitAtTpUsd = round2(exactProfitAtTpUsd),
-            grossLossAtSlUsd = round2(exactLossAtSlUsd),
+            grossLossAtSlUsd = round2(grossLossAtSl),
+            // زیان خالص = بودجهٔ ریسکِ تنظیم‌شده (کارمزد و اسپرد داخلش هست).
             netLossAtSlUsd = round2(exactLossAtSlUsd),
             liquidationPrice = leverageDecision.liquidationPrice,
             liquidationBufferR = leverageDecision.liquidationBufferR,

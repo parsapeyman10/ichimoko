@@ -421,6 +421,16 @@ fun SettingsScreen(
                         color = AurumColors.TextMuted,
                         modifier = Modifier.padding(top = 6.dp),
                     )
+                    // دامنهٔ دلاری هدف، از همان مبلغ ریسک: ۱٫۵R تا ۳R
+                    Text(
+                        text = "هدف هر معامله: از " +
+                            String.format(Locale.US, "$%.2f", activeRiskUsd * 1.5) + " (۱٫۵R) تا " +
+                            String.format(Locale.US, "$%.2f", activeRiskUsd * 3.0) + " (۳R) — سود خالص بعد از کارمزد",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Green,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
