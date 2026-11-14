@@ -874,7 +874,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
      */
     private fun neuralDepthMultiplier(
         report: com.aurum.edge.core.StrategyEvaluationReport,
-        tick: com.aurum.edge.domain.PriceTick,
+        tick: com.aurum.edge.core.PriceTick,
         cfg: com.aurum.edge.core.AppSettings,
     ): Double {
         val closedWithRisk = trades.value.count {
