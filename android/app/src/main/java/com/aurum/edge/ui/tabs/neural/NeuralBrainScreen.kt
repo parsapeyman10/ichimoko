@@ -1400,7 +1400,7 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🎛️ تیونینگ مدل‌های مشمول یادگیری عصبی (روش‌های BTC و پارسا مستثنا هستند)",
+                        text = "🎛️ تیونینگ ${com.aurum.edge.core.BitcoinStrategyModel.neuralLearningModels.size} مدلِ مشمول یادگیری عصبی",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -1414,7 +1414,7 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🧠 آموزش روی مدل‌های مشمول یادگیری و همهٔ نمادها · BTC/پارسا مستثنا هستند",
+                        text = "🧠 آموزش روی ${com.aurum.edge.core.BitcoinStrategyModel.neuralLearningModels.size} مدلِ مشمول یادگیری و ${com.aurum.edge.core.V1Universe.allSymbols.size} نماد",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -1423,7 +1423,8 @@ fun NeuralBrainScreen(
                     text = "هر روشِ مشمول یادگیری عصبی و هر نماد از معاملات خودش یاد می‌گیرد؛ اگر دادهٔ خودش کم باشد، تجربهٔ " +
                         "بقیهٔ استراتژی‌ها و نمادهای هم‌دسته هم به آموزشش اضافه می‌شود. شخصیت هر نماد " +
                         "(روندسواری، نویز شدوی، اعتبار شکست و حد ضرر مناسبش) جداگانه آموخته و در تصمیم‌گیری اعمال می‌شود. " +
-                        "با هر معاملهٔ بسته‌شده، این آموزش خودکار تکرار می‌شود. روش مستقل BTC و استراتژی پارسا عمداً از شمارش، یادگیری، پیش‌بینی و تیونینگ عصبی بیرون هستند.",
+                        "با هر معاملهٔ بسته‌شده، این آموزش خودکار تکرار می‌شود. هر مدلی که در فهرست استراتژی‌های فعال باشد مشمول یادگیری عصبی است؛ " +
+                        "اگر مدلی بعداً از دامنهٔ یادگیری بیرون گذاشته شود، شمارش‌ها خودشان با آن هم‌تراز می‌شوند (عدد دستی نیست).",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
