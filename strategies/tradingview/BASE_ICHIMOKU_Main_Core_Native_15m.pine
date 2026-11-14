@@ -1,7 +1,9 @@
 //@version=5
 // BASE Main-Core native 15m. Every calculation below uses the chart's closed 15m bars only.
 // Historical Strategy Tester simulation only; no exchange, alert execution, or real-order API.
-strategy("BASE Main-Core native 15m | Trend Origin", overlay=true, initial_capital=1000, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission.percent, commission_value=0.105, pyramiding=0, process_orders_on_close=false, max_lines_count=500)
+// XAU/USD reference model: $0.035/oz commission each side (=0.00086% near $4,075)
+// plus $0.12/oz round-trip spread (= six $0.01 ticks on each side in Strategy Tester).
+strategy("BASE Main-Core native 15m | Trend Origin", overlay=true, initial_capital=1000, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission.percent, commission_value=0.00086, slippage=6, pyramiding=0, process_orders_on_close=false, max_lines_count=500)
 
 // ── Native 15m configuration ────────────────────────────────────────────────
 int TENKAN = input.int(9, "Tenkan", minval=2)
@@ -23,7 +25,10 @@ float minVolumeRatio20 = input.float(0.60, "Minimum volume / SMA20", minval=0.40
 float maxAdverseWickRatio = input.float(0.45, "Maximum adverse wick ratio", minval=0.28, maxval=0.60, step=0.01)
 float maxSniperDistanceAtr = input.float(0.35, "Maximum sniper-pocket distance (ATR)", minval=0.20, maxval=0.55, step=0.01)
 float slBufferAtr = input.float(0.25, "Structural SL buffer (ATR)", minval=0.15, maxval=0.55, step=0.01)
-float roundTripCostPct = input.float(0.0021, "Round-trip cost fraction", minval=0.0, step=0.0001)
+float minStopPct = input.float(0.0009, "Minimum structural stop fraction (XAU reference)", minval=0.0001, maxval=0.0050, step=0.0001)
+float maxStopPct = input.float(0.0055, "Maximum structural stop fraction (XAU reference)", minval=0.0010, maxval=0.0200, step=0.0001)
+// $0.19/oz ÷ $4,075 = 0.0000466: two $0.035 commissions plus $0.12 spread.
+float roundTripCostPct = input.float(0.0000466, "Round-trip cost fraction (XAU reference)", minval=0.0, step=0.000001)
 
 // This script deliberately has no request.security, resampling, or non-15m source.
 bool chartIs15m = timeframe.isminutes and timeframe.multiplier == 15
@@ -131,8 +136,11 @@ float distanceToSniperAtr15 = math.abs(close - sniperOptimal15) / math.max(atr15
 float distanceFromTenkanAtr15 = math.abs(close - tenkan15) / math.max(atr15, syminfo.mintick)
 bool c16 = distanceToSniperAtr15 <= maxSniperDistanceAtr and distanceFromTenkanAtr15 <= maxSniperDistanceAtr + 0.50
 
-float stopFloor15 = math.max(close * 0.0025, atr15 * 0.80)
-float stopCeiling15 = math.max(stopFloor15, atr15 * 2.10)
+// Native XAU/USD corridor from Main: max(0.09% of price, 0.80 ATR) through
+// min(0.55% of price, 2.10 ATR). The previous crypto-sized 0.25% floor, paired
+// with a 0.21% cost input, made condition 17 a permanent hard veto on this chart.
+float stopFloor15 = math.max(close * minStopPct, atr15 * 0.80)
+float stopCeiling15 = math.max(stopFloor15, math.min(close * maxStopPct, atr15 * 2.10))
 float sweepShield15 = atr15 * (slBufferAtr + (isLong ? lowerWick15 : upperWick15) * 0.16)
 float pivotLow15 = ta.pivotlow(low, 2, 2)
 float pivotHigh15 = ta.pivothigh(high, 2, 2)
@@ -166,8 +174,9 @@ float stopPrice15 = isLong ? close - stopDistance15 : close + stopDistance15
 float targetDistance15 = stopDistance15 * targetRr
 float targetPrice15 = isLong ? close + targetDistance15 : close - targetDistance15
 float executionCost15 = close * roundTripCostPct
+float costToRiskRatio15 = executionCost15 / math.max(stopDistance15, syminfo.mintick)
 bool c12 = targetRr >= 1.50 and targetRr <= 3.00 and targetDistance15 >= executionCost15 * 2.0
-bool c17 = executionCost15 / math.max(stopDistance15, syminfo.mintick) <= 0.45
+bool c17 = costToRiskRatio15 <= 0.45
 
 // The BASE book gate: hard regime vetoes plus independently scored quality and entry layers.
 float regimeScore = (c1 ? 1.0 : 0.0) + (c3 ? 1.0 : 0.0) + (c4 ? 1.0 : 0.0) + (c6 ? 1.0 : 0.0) + (c17 ? 1.0 : 0.0)
@@ -291,7 +300,7 @@ if strategy.closedtrades > observedClosedTrades
     observedClosedTrades := strategy.closedtrades
 
 // A compact audit panel is diagnostic only; the strategy deliberately draws no entry markers.
-var table dashboard = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 75), border_width=1)
+var table dashboard = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 75), border_width=1)
 if barstate.islast
     table.cell(dashboard, 0, 0, "BASE MAIN-CORE")
     table.cell(dashboard, 1, 0, "NATIVE 15m")
@@ -309,5 +318,7 @@ if barstate.islast
     table.cell(dashboard, 1, 6, str.tostring(passedCount) + " / 17")
     table.cell(dashboard, 0, 7, "Book gate")
     table.cell(dashboard, 1, 7, str.tostring(bookPct, "#.0") + "%", text_color=bookFires ? color.lime : color.orange)
-    table.cell(dashboard, 0, 8, "Status")
-    table.cell(dashboard, 1, 8, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : blockedBySameTrend ? "WAIT: LEG RESET" : strictSignal ? "STRICT SIGNAL" : hardVetoPassed ? "WAITING" : "HARD VETO", text_color=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 or blockedBySameTrend ? color.yellow : strictSignal ? color.lime : hardVetoPassed ? color.yellow : color.red)
+    table.cell(dashboard, 0, 8, "Cost / 1R")
+    table.cell(dashboard, 1, 8, str.tostring(costToRiskRatio15 * 100.0, "#.1") + "%", text_color=c17 ? color.lime : color.red)
+    table.cell(dashboard, 0, 9, "Status")
+    table.cell(dashboard, 1, 9, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : blockedBySameTrend ? "WAIT: LEG RESET" : strictSignal ? "STRICT SIGNAL" : hardVetoPassed ? "WAITING" : "HARD VETO", text_color=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 or blockedBySameTrend ? color.yellow : strictSignal ? color.lime : hardVetoPassed ? color.yellow : color.red)

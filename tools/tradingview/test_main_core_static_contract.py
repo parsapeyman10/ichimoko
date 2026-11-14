@@ -52,6 +52,13 @@ class MainCoreNative15StaticContractTests(unittest.TestCase):
         ):
             self.assertIn(token, self.code)
 
+    def test_xau_reference_cost_does_not_create_a_permanent_execution_veto(self) -> None:
+        self.assertIn("commission_value=0.00086, slippage=6", self.code)
+        self.assertIn('input.float(0.0000466, "Round-trip cost fraction (XAU reference)"', self.code)
+        self.assertIn("float stopFloor15 = math.max(close * minStopPct, atr15 * 0.80)", self.code)
+        self.assertIn("float costToRiskRatio15", self.code)
+        self.assertNotIn("input.float(0.0021, \"Round-trip cost fraction\"", self.code)
+
     def test_uses_main_trigger_families_not_the_old_twenty_bar_breakout(self) -> None:
         for trigger in ("triggerGenesis", "triggerPullback", "triggerBreakout", "triggerContinuation"):
             self.assertIn(trigger, self.code)
