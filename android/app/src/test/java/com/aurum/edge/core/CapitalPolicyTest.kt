@@ -57,7 +57,11 @@ class CapitalPolicyTest {
             withFixedAmount.riskBudgetUsd,
             1e-9,
         )
-        assertTrue("درصد معتبر نباید اصلاحی داشته باشد", percentOnly.sanitized().fixes.isEmpty())
+        // تنها اصلاح مجاز، بالا بردن مبلغ ثابتِ صفر تا کف `$0.50` است؛ درصد دست‌نخورده می‌ماند.
+        assertTrue(
+            "درصد معتبر نباید اصلاح شود",
+            percentOnly.sanitized().fixes.all { it.code == "fixed_risk_below_min" },
+        )
     }
 
     @Test
