@@ -55,9 +55,9 @@
 - رشد قیمت **ابر را ایجاد نمی‌کند**؛ SSA/SSB از قیمت‌های گذشتهٔ 9/26/52 محاسبه و 26 کندل جلوتر نمایش داده می‌شوند. پس Kumo شیب‌دارِ سبز تأیید و نقشهٔ مانع آینده است، نه علت رشد قیمت.
 - ترتیب `Price > Tenkan > Kijun > Kumo` همان Sanyaku صعودی است و همراه با شیب رو به بالای Kumo، مومنتوم ساختاری را تأیید می‌کند.
 - Kumo باریک به‌تنهایی «پیش‌بینی رشد خوب» نیست؛ حتی support آینده را ضعیف‌تر می‌کند. ولی وقتی **سبز، رو به بالا، غیرصفر، همراه با Sanyaku و کندل‌های progressive** باشد، به‌صورت عملی یعنی مانع Kumo نزدیک در جهت معامله کم است. Pine آن را با بازهٔ قابل‌تنظیم `0.02..0.80 ATR` می‌سنجد، نه با قضاوت بصری.
-- Chikou open-space به‌تنهایی کافی نیست. برای این مدل باید در سه کندل اخیر برای نخستین‌بار از corridor کندل/TK/Kumo آزاد شده باشد. این همان «آزادشدن اول» مورد اشارهٔ شماست و جلوی ورودهای دیرهنگام را می‌گیرد.
+- Chikou open-space به‌تنهایی کافی نیست. «آزادشدن اول» یک **رویداد** است: در لحظه‌ای که Chikou از corridor کندل/TK/Kumo بیرون می‌آید، setup برای یک پنجرهٔ تأیید کوتاه arm می‌شود. در این مدت کندل‌های progressive و Kijun SL می‌توانند یک یا چند کندل بعد کامل شوند؛ بنابراین مجبور نیستند غیرواقعی در یک کندل جمع شوند.
 
-دو گیت آخر نیز اجباری‌اند: `Future Kumo = RISING + THIN` و `Chikou = FRESH RELEASE`. اگر Chikou باز باشد ولی آزادشدن آن قدیمی باشد، dashboard `OPEN BUT OLD` نشان می‌دهد و معامله‌ای باز نمی‌شود.
+دو گیت آخر نیز اجباری‌اند: `Future Kumo = RISING + THIN` و `Chikou = FRESH RELEASE/ARMED`. مقدار پیش‌فرض پنجرهٔ تأیید چهار کندل است. اگر Chikou باز باشد ولی release window تمام شده باشد، dashboard `OPEN BUT MATURE` و status `MATURE LEG: NO NEW ENTRY` نشان می‌دهد. این خطا نیست: حرکت در آن لحظه دیر شده و strategy عمداً دوباره وارد نمی‌شود.
 
 ## Main-Core منتقل‌شده از مرجع
 
@@ -83,7 +83,7 @@
 | 16 | Sniper pocket | فاصله از pocket مبتنی بر Tenkan و 55٪ بدنهٔ کندل |
 | 17 | اقتصاد اجرا | نسبت هزینهٔ رفت‌وبرگشت به 1R حداکثر 0.45R |
 
-گیت نهایی از مرجع Main-Core الگو می‌گیرد: شرط‌های **1، 3، 4، 6 و 17 وتوی سخت** هستند؛ سپس لایهٔ quality و trigger هرکدام باید حداقل 70٪ و امتیاز کل حداقل 80٪ بگیرند. علاوه‌بر آن، بنا بر الگوی فلش، `Future Kumo = RISING + THIN`، `Chikou = FRESH RELEASE`، `Progressive Impulse` و `Kijun SL` معتبر چهار وتوی سخت اضافه هستند. به همین علت strategy صرفاً به‌خاطر یک TK cross یا یک شکست سطح وارد نمی‌شود.
+گیت نهایی از مرجع Main-Core الگو می‌گیرد: شرط‌های **1، 3، 4، 6 و 17 وتوی سخت** هستند؛ سپس لایهٔ quality و trigger هرکدام باید حداقل 70٪ و امتیاز کل حداقل 80٪ بگیرند. علاوه‌بر آن، بنا بر الگوی فلش، `Future Kumo = RISING + THIN`، `Chikou = FRESH RELEASE/ARMED`، `Progressive Impulse` و `Kijun SL` معتبر چهار وتوی سخت اضافه هستند. به همین علت strategy صرفاً به‌خاطر یک TK cross یا یک شکست سطح وارد نمی‌شود.
 
 ## حد ضرر، حد سود و lifecycle
 
@@ -124,8 +124,8 @@ S-point/time guard در Pine فقط بخش قابل‌محاسبه با کندل
 2. کل فایل `.pine` را در Pine Editor paste و `Add to chart` کنید.
 3. dashboard باید `15m OK` و سپس `READY` نشان دهد.
 4. برای chart XAUUSD تصویر، Inputs باید این مقادیر را نشان دهد: `Target R:R = 2.25`، `Round-trip cost fraction = 0.0000466`، `Minimum structural stop fraction = 0.0009` و `Maximum structural stop fraction = 0.0055`. اگر Pine تنظیمات قبلی را حفظ کرد، این موارد را دستی reset کنید.
-5. برای الگوی فلش، defaults این‌ها هستند: `Minimum body ratio = 0.22`، `Maximum progressive candle overlap = 0.10 ATR`، `Maximum thin future Kumo = 0.80 ATR`، `Fresh Chikou-release window = 3 bars`، `Kijun history bars = 20`، `Minimum historical Kijun touches = 2` و `Maximum Kijun SL distance = 1.35 ATR`.
-6. dashboard باید هم‌زمان `Future Kumo = RISING + THIN`، `Chikou = FRESH RELEASE`، `Impulse = PROGRESSIVE`، `Kijun SL = HISTORICAL + NEAR` و `Cost / 1R` سبز و حداکثر `45.0%` را نشان دهد؛ در غیر این صورت ورود عمداً veto می‌شود.
+5. برای الگوی فلش، defaults این‌ها هستند: `Minimum body ratio = 0.22`، `Maximum progressive candle overlap = 0.10 ATR`، `Maximum thin future Kumo = 0.80 ATR`، `Chikou-release confirmation window = 4 bars`، `Kijun history bars = 20`، `Minimum historical Kijun touches = 2` و `Maximum Kijun SL distance = 1.35 ATR`.
+6. dashboard باید در پنجرهٔ setup هم‌زمان `Future Kumo = RISING + THIN`، `Chikou = FRESH RELEASE` یا `ARMED: n LEFT`، `Impulse = PROGRESSIVE`، `Kijun SL = HISTORICAL + NEAR` و `Cost / 1R` سبز و حداکثر `45.0%` را نشان دهد؛ در غیر این صورت ورود عمداً veto می‌شود.
 7. برای broker/نماد دیگر، commission، slippage، این مقادیر و هزینهٔ واقعی همان venue را تنظیم و سپس backtest را روی ساعت معاملاتی و بازهٔ واقعی خودتان انجام دهید.
 
 این محیط به TradingView متصل نیست؛ بنابراین syntax/اجرای نهایی باید در Pine Editor خودتان compile شود. تا قبل از آن، این فایل فقط static-reviewed است. لطفاً اگر Pine Editor خطا داد، متن خطا و شمارهٔ خط را بفرستید تا دقیق اصلاح شود.

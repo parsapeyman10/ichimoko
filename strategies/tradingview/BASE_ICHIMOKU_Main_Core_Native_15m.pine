@@ -21,7 +21,7 @@ float maxKijunExtensionAtr = input.float(1.80, "Max Kijun extension (ATR)", minv
 float breakoutBufferAtr = input.float(0.15, "Kumo/flat SSB breakout buffer (ATR)", minval=0.05, maxval=0.35, step=0.01)
 float minFutureKumoThicknessAtr = input.float(0.05, "Minimum future Kumo thickness (ATR)", minval=0.02, maxval=0.18, step=0.01)
 float maxTrendOriginKumoThicknessAtr = input.float(0.80, "Maximum thin future Kumo thickness (ATR)", minval=0.20, maxval=1.50, step=0.05)
-int freshChikouReleaseBars = input.int(3, "Fresh Chikou-release window (bars)", minval=1, maxval=3)
+int chikouConfirmationWindowBars = input.int(4, "Chikou-release confirmation window (bars)", minval=1, maxval=6)
 float minEfficiencyRatio = input.float(0.20, "Minimum ER14", minval=0.14, maxval=0.45, step=0.01)
 float minVolumeRatio20 = input.float(0.60, "Minimum volume / SMA20", minval=0.40, maxval=1.15, step=0.01)
 float maxAdverseWickRatio = input.float(0.45, "Maximum adverse wick ratio", minval=0.28, maxval=0.60, step=0.01)
@@ -79,8 +79,20 @@ float chikouCorridorHigh15 = math.max(ta.highest(high[DISPLACEMENT - 7], 7), mat
 float chikouCorridorLow15 = math.min(ta.lowest(low[DISPLACEMENT - 7], 7), math.min(ta.lowest(kumoBottom15[DISPLACEMENT - 7], 7), ta.lowest(tkBottom15[DISPLACEMENT - 7], 7)))
 bool chikouBullishOpen15 = close > chikouCorridorHigh15
 bool chikouBearishOpen15 = close < chikouCorridorLow15
-bool chikouBullishFreshRelease15 = chikouBullishOpen15 and (not chikouBullishOpen15[1] or (freshChikouReleaseBars >= 2 and not chikouBullishOpen15[2]) or (freshChikouReleaseBars >= 3 and not chikouBullishOpen15[3]))
-bool chikouBearishFreshRelease15 = chikouBearishOpen15 and (not chikouBearishOpen15[1] or (freshChikouReleaseBars >= 2 and not chikouBearishOpen15[2]) or (freshChikouReleaseBars >= 3 and not chikouBearishOpen15[3]))
+// A Chikou release is an event. It arms the origin setup for a few closed 15m bars
+// so the line release, progressive candles, and valid Kijun stop may confirm in sequence.
+bool newChikouBullishRelease15 = chikouBullishOpen15 and not chikouBullishOpen15[1]
+bool newChikouBearishRelease15 = chikouBearishOpen15 and not chikouBearishOpen15[1]
+var int bullChikouReleaseBar15 = na
+var int bearChikouReleaseBar15 = na
+if newChikouBullishRelease15
+    bullChikouReleaseBar15 := bar_index
+if newChikouBearishRelease15
+    bearChikouReleaseBar15 := bar_index
+bool chikouBullishReleaseArmed15 = chikouBullishOpen15 and not na(bullChikouReleaseBar15) and bar_index - bullChikouReleaseBar15 <= chikouConfirmationWindowBars
+bool chikouBearishReleaseArmed15 = chikouBearishOpen15 and not na(bearChikouReleaseBar15) and bar_index - bearChikouReleaseBar15 <= chikouConfirmationWindowBars
+int bullChikouReleaseAge15 = not na(bullChikouReleaseBar15) ? bar_index - bullChikouReleaseBar15 : na
+int bearChikouReleaseAge15 = not na(bearChikouReleaseBar15) ? bar_index - bearChikouReleaseBar15 : na
 float chikouResistancePeak15 = ta.highest(close[1], KIJUN)
 float chikouSupportTrough15 = ta.lowest(close[1], KIJUN)
 
@@ -116,7 +128,8 @@ bool bullishBias = close > kumoTop15
 bool bearishBias = close < kumoBottom15
 bool isLong = bullishBias and not bearishBias ? true : bearishBias and not bullishBias ? false : tenkan15 >= kijun15
 bool progressiveImpulse15 = isLong ? (bullProgressStep0 and bullProgressStep1) : (bearProgressStep0 and bearProgressStep1)
-bool chikouFreshRelease15 = isLong ? chikouBullishFreshRelease15 : chikouBearishFreshRelease15
+bool chikouReleaseArmed15 = isLong ? chikouBullishReleaseArmed15 : chikouBearishReleaseArmed15
+int chikouReleaseAge15 = isLong ? bullChikouReleaseAge15 : bearChikouReleaseAge15
 bool futureKumoStableThin15 = futureKumoThicknessAtr15 >= 0.02 and futureKumoThicknessAtr15 <= maxTrendOriginKumoThicknessAtr
 bool c1 = isLong ? bullishBias : bearishBias
 bool c2 = isLong ? (close > tenkan15 and tenkan15 >= kijun15 and kijun15 > kumoTop15) : (close < tenkan15 and tenkan15 <= kijun15 and kijun15 < kumoBottom15)
@@ -199,14 +212,15 @@ float triggerPct = triggerScore / 6.6 * 100.0
 float bookPct = (regimeScore + qualityScore + triggerScore) / 16.8 * 100.0
 // User-selected trend-origin gates: a fresh Chikou release, a rising-but-not-wide Kumo,
 // no nested/retracing impulse, and no distant/non-historical Kijun stop.
-bool hardVetoPassed = c1 and c3 and c4 and c6 and c17 and chikouFreshRelease15 and futureKumoTrendOrigin15 and progressiveImpulse15 and kijunStopGeometry15
+bool hardVetoPassed = c1 and c3 and c4 and c6 and c17 and chikouReleaseArmed15 and futureKumoTrendOrigin15 and progressiveImpulse15 and kijunStopGeometry15
 bool bookFires = hardVetoPassed and qualityPct >= 70.0 and triggerPct >= 70.0 and bookPct >= 80.0
 int passedCount = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0) + (c6 ? 1 : 0) + (c7 ? 1 : 0) + (c8 ? 1 : 0) + (c9 ? 1 : 0) + (c10 ? 1 : 0) + (c11 ? 1 : 0) + (c12 ? 1 : 0) + (c13 ? 1 : 0) + (c14 ? 1 : 0) + (c15 ? 1 : 0) + (c16 ? 1 : 0) + (c17 ? 1 : 0)
 
 bool strictSignal = dataReady and triggerFired and bookFires
 string triggerName = triggerGenesis ? "EARLY KATANA" : triggerBreakout ? "VALIDATED BREAKOUT" : triggerPullback ? "PULLBACK BOUNCE" : triggerContinuation ? "SANYAKU CORE" : "-"
 string phaseName = phaseGenesis15 ? "GENESIS" : phaseCore15 ? "CORE" : "BLOCKED"
-string hardVetoReason = not chikouFreshRelease15 ? "VETO: CHIKOU NOT FRESH" : not futureKumoTrendOrigin15 ? "VETO: KUMO WIDE/TWIST" : not progressiveImpulse15 ? "VETO: NESTED/RETRACE" : not kijunStopGeometry15 ? "VETO: KIJUN SL" : not c17 ? "VETO: COST / 1R" : "HARD VETO"
+bool chikouMatureLeg15 = c6 and not chikouReleaseArmed15
+string hardVetoReason = chikouMatureLeg15 ? "MATURE LEG: NO NEW ENTRY" : not chikouReleaseArmed15 ? "VETO: CHIKOU NOT ARMED" : not futureKumoTrendOrigin15 ? "VETO: KUMO WIDE/TWIST" : not progressiveImpulse15 ? "VETO: NESTED/RETRACE" : not kijunStopGeometry15 ? "VETO: KIJUN SL" : not c17 ? "VETO: COST / 1R" : "HARD VETO"
 
 // ── Smart exit: structural deterioration only; there is no bar-count time stop ─
 bool tkGapContracting15 = tkGapAtr15 < priorTkGapAtr15
@@ -332,7 +346,7 @@ if barstate.islast
     table.cell(dashboard, 0, 6, "Future Kumo")
     table.cell(dashboard, 1, 6, futureKumoTrendOrigin15 ? "RISING + THIN" : "WIDE / TWIST", text_color=futureKumoTrendOrigin15 ? color.lime : color.red)
     table.cell(dashboard, 0, 7, "Chikou")
-    table.cell(dashboard, 1, 7, chikouFreshRelease15 ? "FRESH RELEASE" : c6 ? "OPEN BUT OLD" : "BLOCKED", text_color=chikouFreshRelease15 ? color.lime : color.red)
+    table.cell(dashboard, 1, 7, chikouReleaseArmed15 ? (chikouReleaseAge15 == 0 ? "FRESH RELEASE" : "ARMED: " + str.tostring(chikouConfirmationWindowBars - chikouReleaseAge15) + " LEFT") : c6 ? "OPEN BUT MATURE" : "BLOCKED", text_color=chikouReleaseArmed15 ? color.lime : c6 ? color.orange : color.red)
     table.cell(dashboard, 0, 8, "Impulse")
     table.cell(dashboard, 1, 8, progressiveImpulse15 ? "PROGRESSIVE" : "NESTED/RETRACE", text_color=progressiveImpulse15 ? color.lime : color.red)
     table.cell(dashboard, 0, 9, "Kijun SL")
