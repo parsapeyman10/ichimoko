@@ -2515,9 +2515,20 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                         append("\n")
                     }
                 }
+                append("\n")
+                append(com.aurum.edge.core.NeuralCalibration.summaryFa(report.walkForward))
+                if (report.walkForward.folds.isNotEmpty()) {
+                    append("\n")
+                    report.walkForward.folds.forEach { fold ->
+                        append("• فولد ${fold.fold}: آموزش ${fold.trainSamples} · آزمون ${fold.testSamples} · ")
+                        append("Brier ${fold.brier} در برابر پایه ${fold.brierBaseline} · واقعی ${fold.baseWinRatePct}٪ ")
+                        append("در برابر پیش‌بینی ${fold.meanPredictedPct}٪")
+                        append("\n")
+                    }
+                }
                 if (report.withStateData < report.usableSamples) {
-                    append("ℹ️ ${report.usableSamples - report.withStateData} نمونهٔ قدیمی فیلد حالت بازار ندارد ")
-                    append("(قبل از این نسخه ثبت شده‌اند)؛ هشت ویژگی حالت آن‌ها صفر/بی‌طرف شمرده شد، نه حدس.")
+                    append("ℹ️ ${report.usableSamples - report.withStateData} نمونه هیچ حالت بازاری نداشت ")
+                    append("(نه در خود معامله و نه در کندل‌های ذخیره‌شده)؛ هشت ویژگی حالت آن‌ها بی‌طرف شمرده شد، نه حدس.")
                 }
             }.trim()
             _neuralJournalCalibrationFa.value = detail

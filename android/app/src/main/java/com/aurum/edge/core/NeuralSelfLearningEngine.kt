@@ -389,6 +389,8 @@ data class NeuralNetworkPersistedState(
     val latestNewsSnapshot: NeuralMacroNewsSnapshot = NeuralMacroNewsSnapshot(),
     val liveMarketAttributions: Map<String, NeuralMarketCausalAttribution> = emptyMap(),
     val autoTunedParameters: NeuralAutoTunedParameters = NeuralAutoTunedParameters(),
+    /** آخرین سنجش صادقانه از ژورنال (پایدار؛ با خروج از اپ پاک نمی‌شود). */
+    val lastJournalCalibration: NeuralJournalCalibrationSnapshot = NeuralJournalCalibrationSnapshot(),
 )
 
 data class NeuralCategorySummary(
@@ -463,6 +465,49 @@ data class NeuralTradeForensicsSummary(
     val actionableTradingRulesFa: List<String> = emptyList(),
 )
 
+/**
+ * آخرین سنجش صادقانهٔ شبکه از ژورنال — پایدارشده در حافظه.
+ *
+ * چرا ذخیره می‌شود: قبلاً عدد سنجش فقط در حافظهٔ صفحه بود و با بستن اپ پاک می‌شد؛ یعنی
+ * کاربر نمی‌توانست بفهمد «آخرین آموزش» چقدر قابل استناد بود. مقدارهای همین کلاس از
+ * اجرای واقعی می‌آیند و هیچ‌کدام مقدار پیش‌فرض تزئینی ندارد.
+ */
+@Serializable
+data class NeuralJournalCalibrationSnapshot(
+    val samples: Int = 0,
+    val wins: Int = 0,
+    val baseWinRatePct: Double = 0.0,
+    val brier: Double = 0.0,
+    val brierBaseline: Double = 0.0,
+    /** آیا Brier واقعاً محاسبه شد؟ (سه رقم اعشار صفر یک عدد معتبر است، پس پرچم لازم است.) */
+    val hasBrier: Boolean = false,
+    val oosSamples: Int = 0,
+    val oosBrier: Double = 0.0,
+    val hasOosBrier: Boolean = false,
+    val walkForwardFolds: Int = 0,
+    val walkForwardWins: Int = 0,
+    val walkForwardGain: Double = 0.0,
+    val walkForwardWorstGain: Double = 0.0,
+    val hasWalkForward: Boolean = false,
+    val measuredAtMs: Long = 0L,
+    val verdictFa: String = "",
+    val walkForwardVerdictFa: String = "",
+) {
+    val isMeasured: Boolean get() = samples > 0 && measuredAtMs > 0L
+
+    /**
+     * عدد قابل استناد یا `NaN` برای «نامعلوم».
+     *
+     * چرا NaN ذخیره نمی‌شود: `kotlinx.serialization` به‌طور پیش‌فرض NaN را رد می‌کند و همان
+     * باعث شد بستهٔ دانش/پشتیبان با خطای `JsonEncodingException` شکست بخورد. عدد نامعلوم
+     * در فایل با پرچم `has*` نشان داده می‌شود، نه با NaN.
+     */
+    val brierOrNaN: Double get() = if (hasBrier) brier else Double.NaN
+    val oosBrierOrNaN: Double get() = if (hasOosBrier) oosBrier else Double.NaN
+    val walkForwardGainOrNaN: Double get() = if (hasWalkForward) walkForwardGain else Double.NaN
+    val walkForwardWorstGainOrNaN: Double get() = if (hasWalkForward) walkForwardWorstGain else Double.NaN
+}
+
 data class NeuralLearningStateSummary(
     val architectureNameFa: String = "FT-Attention + SwiGLU Residual + AdamW + Causal News + CEM Auto-Tuner",
     val totalLearnedTrades: Int = 0,
@@ -504,6 +549,8 @@ data class NeuralLearningStateSummary(
     val liveMarketAttributions: List<NeuralMarketCausalAttribution> = emptyList(),
     val autoTunedParameters: NeuralAutoTunedParameters = NeuralAutoTunedParameters(),
     val currentTrainingPhaseBadgeFa: String = "فاز ۱: یادگیری علیت بازار و اخبار + تیونینگ خودکار پارامترها",
+    /** آخرین سنجش ژورنالی (Brier/OOS/گام‌به‌گام) — پایدارشده. */
+    val lastJournalCalibration: NeuralJournalCalibrationSnapshot = NeuralJournalCalibrationSnapshot(),
 )
 
 data class NeuralSignalEvaluation(
@@ -570,7 +617,7 @@ class NeuralSelfLearningEngine(
     companion object {
         const val WARMUP_TARGET_TRADES: Int = 10_000
         /**
-         * بُعد بردار ویژگی: ۲۴ ویژگی «هویت/ساختار» + ۸ ویژگی «وضعیت بازار».
+         * بُعد بردار ویژگی: ۱۶ ویژگی «هویت/ساختار» + ۸ ویژگی «وضعیت بازار» = ۲۴.
          *
          * ۱۶ تای اول دست‌نخورده مانده‌اند تا دانش ذخیره‌شده معنا را از دست ندهد؛ هشت ویژگی
          * تازه (`NeuralStateFeatures`) در انتها اضافه شده‌اند و وزن اولیه‌شان صفر است، پس
@@ -579,6 +626,14 @@ class NeuralSelfLearningEngine(
         const val INPUT_DIM: Int = 24
         /** بُعد نسخهٔ پیشین — فقط برای مهاجرت وزن‌ها. */
         const val LEGACY_INPUT_DIM: Int = 16
+        /**
+         * بازهٔ ویژگی‌هایی که «حالت واقعی بازار» هستند (فاز، ER، ATR٪، فاصله کیجون، ابر، حجم).
+         *
+         * سشن (۲۲) و R:R پلن (۲۳) از این بازه بیرون‌اند: سشن از ساعت ورود می‌آید و برای هر
+         * معامله‌ای که زمان داشته باشد مقدار دارد، و R:R یک ویژگی «پلن» است نه حالت بازار.
+         * شمردن آن‌ها باعث می‌شد «نمونهٔ دارای حالت» باد کند و عدد صادق نباشد.
+         */
+        val MARKET_STATE_FEATURE_RANGE: IntRange = LEGACY_INPUT_DIM until (LEGACY_INPUT_DIM + 6)
         const val HIDDEN_DIM: Int = 16
 
         /**
@@ -997,6 +1052,7 @@ class NeuralSelfLearningEngine(
             liveMarketAttributions = sortedAttributions,
             autoTunedParameters = ensuredAutoTuned,
             currentTrainingPhaseBadgeFa = phaseBadgeFa,
+            lastJournalCalibration = cur.lastJournalCalibration,
         )
     }
 
@@ -2231,6 +2287,10 @@ class NeuralSelfLearningEngine(
         return Triple(features, signatureKey, descFa)
     }
 
+    /** آیا بردار ویژگی برای این نمونه حالت واقعی بازار دارد (بی‌طرفی صرف = نه). */
+    private fun hasMarketStateFeatures(features: List<Double>): Boolean =
+        MARKET_STATE_FEATURE_RANGE.any { idx -> features.getOrElse(idx) { 0.0 } != 0.0 }
+
     private fun swish(x: Double): Double = x / (1.0 + exp(-x.coerceIn(-20.0, 20.0)))
     private fun sigmoid(x: Double): Double = 1.0 / (1.0 + exp(-x.coerceIn(-20.0, 20.0)))
 
@@ -2722,6 +2782,13 @@ class NeuralSelfLearningEngine(
         conditionKeyOverride: String? = null,
         /** توضیح شرط وقتی ویژگی‌ها از بیرون می‌آیند (بدون بازخوانی دوبارهٔ کندل‌ها). */
         conditionDescFaOverride: String? = null,
+        /**
+         * خواندن حافظهٔ کندل برای «عیب‌یابی کندلی» باخت‌ها.
+         *
+         * در ارزیابی‌های آموزشی (بیرون‌نمونه/گام‌به‌گام) خاموش می‌شود: آن تحلیل فقط متن درس را
+         * غنی می‌کند و روی وزن‌ها اثری ندارد، ولی برای هر باخت یک خواندن دیسک لازم دارد.
+         */
+        deepForensics: Boolean = true,
     ) {
         if (!BitcoinStrategyModel.fromId(trade.strategyId).neuralLearningEnabled) return
         val pnl = trade.pnlUsd ?: return
@@ -2750,7 +2817,7 @@ class NeuralSelfLearningEngine(
         val sigKey = conditionKeyOverride?.takeIf { it.isNotBlank() } ?: noteConditionKey ?: extractedKey
 
         // تحلیل خطای پس از خروج از روی کندل‌های ذخیره‌شده ۱ ماهه در حافظه گوشی (Mistake Forensics Feedback)
-        val vaultMistake = if (!won) {
+        val vaultMistake = if (!won && deepForensics) {
             runCatching {
                 com.aurum.edge.data.PhoneStorageVaultManager.analyzeLosingTradeMistakeFromVault(trade)
             }.getOrNull()
@@ -4092,6 +4159,8 @@ class NeuralSelfLearningEngine(
         val withStateData: Int,
         val trainedAtMs: Long,
         val summaryFa: String,
+        /** اعتبارسنجی گام‌به‌گام؛ تنها شاهد پایدارِ «یادگیری واقعی است یا نه». */
+        val walkForward: NeuralWalkForwardReport = NeuralWalkForwardReport(),
     )
 
     /**
@@ -4133,6 +4202,8 @@ class NeuralSelfLearningEngine(
     fun trainFromJournal(
         closedTrades: List<PaperTrade>,
         oosFraction: Double = NeuralCalibration.DEFAULT_OOS_FRACTION,
+        /** تعداد فولدهای اعتبارسنجی گام‌به‌گام؛ ۰ = خاموش. */
+        walkForwardFolds: Int = 3,
         nowMs: Long = System.currentTimeMillis(),
     ): JournalTrainingReport {
         val usableClosed = closedTrades.filter {
@@ -4165,9 +4236,9 @@ class NeuralSelfLearningEngine(
         val early = samples.take(cut)
         val late = samples.drop(cut)
         val savedState = persistedState
-        val oosPoints = try {
-            persistedState = createFreshInitializedState()
-            early.forEach { s ->
+
+        fun trainOn(subset: List<JournalTrainingSample>) {
+            subset.forEach { s ->
                 learnFromClosedTradeInternal(
                     trade = s.trade,
                     report = null,
@@ -4175,24 +4246,53 @@ class NeuralSelfLearningEngine(
                     featuresOverride = s.features.toDoubleArray(),
                     conditionKeyOverride = s.conditionKey,
                     conditionDescFaOverride = s.conditionDescFa,
+                    // ارزیابی فقط وزن‌ها را می‌سنجد؛ خواندن حافظهٔ کندل برای هر باخت لازم نیست.
+                    deepForensics = false,
                 )
             }
-            late.map { s ->
-                NeuralCalibrationPoint(
-                    predictedWinProb = predictWinProbability(
-                        features = s.features,
-                        strategyId = s.trade.strategyId,
-                        symbol = s.trade.symbol,
-                    ),
-                    won = s.won,
-                    stateCode = s.stateCode,
-                    atMs = s.atMs,
-                )
-            }
+        }
+
+        fun pointOf(s: JournalTrainingSample): NeuralCalibrationPoint = NeuralCalibrationPoint(
+            predictedWinProb = predictWinProbability(
+                features = s.features,
+                strategyId = s.trade.strategyId,
+                symbol = s.trade.symbol,
+            ),
+            won = s.won,
+            stateCode = s.stateCode,
+            atMs = s.atMs,
+        )
+
+        val oosPoints = try {
+            persistedState = createFreshInitializedState()
+            trainOn(early)
+            late.map { pointOf(it) }
         } finally {
             // هیچ‌کدام از اثرهای تمرین آزمایشی نباید در حافظهٔ واقعی بماند.
             persistedState = savedState
         }
+
+        // ── ۱-ب) اعتبارسنجی گام‌به‌گام (Walk-Forward) ─────────────────────────────
+        // یک تقسیم ۷۰/۳۰ فقط یک شاهد است. این‌جا هر فولد روی «گذشته تا آن لحظه» آموزش
+        // می‌بیند و روی بازهٔ بعدی سنجیده می‌شود — همان چیزی که در معاملهٔ واقعی رخ می‌دهد.
+        val foldPoints = ArrayList<List<NeuralCalibrationPoint>>()
+        val requestedFolds = walkForwardFolds.coerceIn(0, 5)
+        val minPerFold = NeuralCalibration.MIN_FOLD_TEST_SAMPLES
+        if (requestedFolds > 0 && samples.size >= (requestedFolds + 1) * minPerFold) {
+            try {
+                for (k in 1..requestedFolds) {
+                    val trainEnd = samples.size * k / (requestedFolds + 1)
+                    val testEnd = samples.size * (k + 1) / (requestedFolds + 1)
+                    if (trainEnd < 5 || testEnd <= trainEnd) continue
+                    persistedState = createFreshInitializedState()
+                    trainOn(samples.subList(0, trainEnd))
+                    foldPoints += samples.subList(trainEnd, testEnd).map { pointOf(it) }
+                }
+            } finally {
+                persistedState = savedState
+            }
+        }
+        val walkForward = NeuralCalibration.evaluateWalkForward(foldPoints)
 
         // ── ۲) یادگیری واقعی روی همهٔ نمونه‌ها (دفتر و شمارنده هم به‌روز می‌شوند) ─────
         val beforeLearned = persistedState.totalLearnedTrades
@@ -4200,27 +4300,14 @@ class NeuralSelfLearningEngine(
         val newlyLearned = persistedState.totalLearnedTrades - beforeLearned
 
         // ── ۳) سنجش درون‌نمونه‌ای با شبکهٔ نهایی ──────────────────────────────────
-        val inSamplePoints = samples.map { s ->
-            NeuralCalibrationPoint(
-                predictedWinProb = predictWinProbability(
-                    features = s.features,
-                    strategyId = s.trade.strategyId,
-                    symbol = s.trade.symbol,
-                ),
-                won = s.won,
-                stateCode = s.stateCode,
-                atMs = s.atMs,
-            )
-        }
+        val inSamplePoints = samples.map { pointOf(it) }
         val inSample = NeuralCalibration.evaluate(inSamplePoints, oosFraction)
         val outOfSample = NeuralCalibration.evaluate(oosPoints, oosFraction)
         val ece = NeuralCalibration.expectedCalibrationError(inSamplePoints)
 
-        val withState = samples.count { s ->
-            val st = NeuralStateFeatures.fromTrade(s.trade)
-            st.trendPhaseCode.isNotBlank() || st.er14 != null || st.atrPctOfPrice != null ||
-                st.volumeRatio20 != null
-        }
+        // شمارش صادقانهٔ نمونه‌هایی که مدل برایشان «حالت بازار» واقعاً داشت. بردار ۱۶..۲۳ هم
+        // حالتِ ذخیره‌شدهٔ خود معامله را می‌بیند و هم حالتِ بازسازی‌شده از کندل‌های ذخیره‌شده.
+        val withState = samples.count { s -> hasMarketStateFeatures(s.features) }
         val oosText = if (outOfSample.brier.isFinite()) {
             String.format(Locale.US, "OOS Brier %.3f در برابر پایه %.3f", outOfSample.brier, outOfSample.brierBaseline)
         } else {
@@ -4228,7 +4315,31 @@ class NeuralSelfLearningEngine(
         }
         val summary = "🧠 آموزش از ژورنال: ${samples.size} نمونهٔ واقعی (${samples.count { it.won }} برد / " +
             "${samples.count { !it.won }} باخت) · $newlyLearned تازه آموخته شد · $oosText · " +
+            "گام‌به‌گام: ${walkForward.verdictFa} · " +
             "درون‌نمونه Brier ${if (inSample.brier.isFinite()) String.format(Locale.US, "%.3f", inSample.brier) else "—"}"
+
+        // ── ۴) پایدارسازیِ سنجش (با خروج از اپ پاک نشود) ──────────────────────────
+        fun finiteOrZero(v: Double): Double = if (v.isFinite()) v else 0.0
+        val snapshot = NeuralJournalCalibrationSnapshot(
+            samples = samples.size,
+            wins = samples.count { it.won },
+            baseWinRatePct = finiteOrZero(inSample.baseWinRatePct),
+            brier = finiteOrZero(inSample.brier),
+            brierBaseline = finiteOrZero(inSample.brierBaseline),
+            hasBrier = inSample.brier.isFinite(),
+            oosSamples = outOfSample.oosSamples,
+            oosBrier = finiteOrZero(outOfSample.oosBrier),
+            hasOosBrier = outOfSample.oosBrier.isFinite(),
+            walkForwardFolds = walkForward.usableFolds,
+            walkForwardWins = walkForward.winsAgainstBaseline,
+            walkForwardGain = finiteOrZero(walkForward.meanGain),
+            walkForwardWorstGain = finiteOrZero(walkForward.worstGain),
+            hasWalkForward = walkForward.usableFolds > 0,
+            measuredAtMs = nowMs,
+            verdictFa = inSample.verdictFa,
+            walkForwardVerdictFa = walkForward.verdictFa,
+        )
+        persistState(persistedState.copy(lastJournalCalibration = snapshot))
 
         return JournalTrainingReport(
             journalClosedTrades = usableClosed.size,
@@ -4243,6 +4354,7 @@ class NeuralSelfLearningEngine(
             withStateData = withState,
             trainedAtMs = nowMs,
             summaryFa = summary,
+            walkForward = walkForward,
         )
     }
 
