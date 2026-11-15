@@ -205,6 +205,25 @@ val BitcoinStrategyModel.isDrivePdfStrategy: Boolean
     get() = false
 
 fun BitcoinStrategyModel.driveBookPlaybook(): DriveBookPlaybookSpec = when (this) {
+    KANE_ML_FIB_SYNERGY -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "kane_median_line_fibonacci_synergy.py (پورت کتاب Median Line and Fibonacci Synergy)",
+        authorAndEdition = "$badgeFa — $authorRefFa",
+        ichimokuSettingsFa = "بدون ایچیموکو: ساختار روی ۴ ساعته، تریگر روی ۱ ساعته",
+        auxiliaryIndicatorsFa = "زیگزاگ علّی ۱٫۶/۴٫۵ ATR + الگوی ABCD + گروه‌بندی فیبوناچی " +
+            "+ خانواده‌های خط میانه (BIG / ABCD-ML / ABCD-MS / ADJ / TL / OFF) + EMA 5/13",
+        entryChecklistStepsFa = listOf(
+            "۱. ADCD معتبر با BC/AB بین ۰٫۳۸۲ و ۱٫۲۷۲ و روند X→H حداقل ۶ ATR",
+            "۲. گروه‌بندی فیبوناچی ناحیهٔ PTA (هم‌زمان عدد pattern و position) و پهنای مجاز ۰٫۸ ATR",
+            "۳. برخورد خطوط چند خانواده با ناحیه + «دیده‌شدن» ست + هم‌زمانی زمانی و امتیاز ≥ ۷ از ۱۰",
+            "۴. لمس ناحیه و سپس تریگر اجباری EMA 5/13 در حداکثر ۱۲ کندل (بدون fade)",
+        ),
+        stopLossFormulaFa = "کف بعد از لمس (یا کف ناحیه) منهای ۰٫۳۵×ATR؛ سقف ریسک ۳٫۵ ATR",
+        takeProfitAndExitRulesFa = "هدف ۱٫۲۷۲ اکستنشن ساق CD با خروج پله‌ای ۵۰٪ و تریل ۲ ATR؛ " +
+            "قفل قرارداد این اپ: R بین ۱٫۵ و ۳٫۰ (کف/سقف گزارش‌شده در چک‌لیست)",
+        specialEdgeAdvantageFa = summaryFa,
+    )
+
     else -> DriveBookPlaybookSpec(
         strategyId = id,
         bookFileTitle = authorRefFa,
