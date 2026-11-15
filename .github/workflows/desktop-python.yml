@@ -1,0 +1,30 @@
+name: Desktop Python Cross-Platform
+
+on:
+  push:
+    paths:
+      - 'windows/**'
+      - '.github/workflows/desktop-python.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - '.github/workflows/desktop-python.yml'
+  workflow_dispatch:
+
+jobs:
+  portable-source-check:
+    name: ${{ matrix.os }} source check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Portable compile and deterministic tests
+        run: python windows/build_desktop.py --check

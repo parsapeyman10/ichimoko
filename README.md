@@ -7,9 +7,9 @@
 3. **ژورنال و ریسک (`JournalRiskScreen`)** — مدیریت سرمایه و سقف ضرر روزانه/کلی، ماشین‌حساب خودکار حجم/لات و نسبت R:R، ثبت معامله با رصد خودکار قیمت لحظه‌ای برای برخورد به TP/SL، و تقویم ماهانهٔ سود و زیان بر اساس روز
 4. **بروزرسانی (`UpdateScreen`)** — بررسی، دانلود و نصب مستقیم نسخه‌های جدید APK از داخل برنامه
 
-## اپلیکیشن ویندوز Aurum Edge — Python خالص
+## اپلیکیشن desktop Aurum Edge — Python خالص و چندسکویی
 
-نسخهٔ desktop اصلی ویندوز در [`windows/README.md`](windows/README.md) کاملاً با **Python + Tkinter** پیاده‌سازی شده است؛ هیچ فایل C++، Qt، CMake، Ninja یا Visual Studio در این deliverable وجود ندارد. برنامه CSV/چارت، بک‌تست Ichimoku baseline، ژورنال SQLite، تقویم، ریسک، NeoWave، Neural Lab، quote عمومیِ صرفاً مشاهده‌ای و بررسی دستی Release را ارائه می‌دهد. برای ساخت EXE محلی در Windows، فایل [`windows/build_windows.bat`](windows/build_windows.bat) را اجرا کنید. این برنامه historical-analysis و paper-journal است و سفارش واقعی نمی‌فرستد.
+نسخهٔ desktop اصلی در [`windows/README.md`](windows/README.md) کاملاً با **Python + Tkinter** برای Windows، macOS و Linux پیاده‌سازی شده است؛ هیچ فایل C++، Qt، CMake، Ninja یا Visual Studio در این deliverable وجود ندارد. برنامه CSV/چارت، بک‌تست Ichimoku baseline، ژورنال SQLite، تقویم، ریسک، NeoWave، Neural Lab، quote عمومیِ صرفاً مشاهده‌ای و بررسی دستی Release را ارائه می‌دهد. برای Windows فایل [`windows/build_windows.bat`](windows/build_windows.bat) و برای macOS/Linux فایل [`windows/build_desktop.sh`](windows/build_desktop.sh) را اجرا کنید. هر سیستم‌عامل باید artifact native خود را بسازد؛ یک EXE واحد قابل اجرای همهٔ سیستم‌عامل‌ها نیست. این برنامه historical-analysis و paper-journal است و سفارش واقعی نمی‌فرستد.
 
 ## ابزار مستقل بک‌تست native 15m — Python خالص
 

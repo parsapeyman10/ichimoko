@@ -1,15 +1,15 @@
-# Aurum Edge Windows — معماری Python
+# Aurum Edge Desktop — معماری Python چندسکویی
 
-> نام فایل برای سازگاری با لینک‌های قبلی حفظ شده است؛ محتوای Windows دیگر native C++/Qt نیست.
+> نام فایل برای سازگاری با لینک‌های قبلی حفظ شده است؛ desktop app دیگر native C++/Qt نیست و source مشترک آن روی Windows، macOS و Linux اجرا می‌شود.
 
 ## تصمیم فنی
 
 - **زبان و runtime:** Python 3.11+ و کتابخانهٔ استاندارد
 - **رابط:** Tkinter / ttk و Canvas داخلی برای candle chart
-- **Build:** `windows\build_windows.bat` با PyInstaller؛ بدون Qt، CMake، Ninja یا Visual Studio
+- **Build:** `windows\build_windows.bat` در Windows و `windows/build_desktop.sh` در macOS/Linux با PyInstaller؛ بدون Qt، CMake، Ninja یا Visual Studio
 - **دادهٔ محلی:** `sqlite3` استاندارد Python برای ژورنال و `csv` استاندارد برای import/export
 - **اجرای موازی:** `threading.Thread` برای خواندن CSV، بک‌تست، quote و بررسی update تا UI قفل نشود
-- **بسته‌بندی:** EXE تک‌فایلی محلی با PyInstaller؛ خروجی build در Git نگه‌داری نمی‌شود
+- **بسته‌بندی:** artifact تک‌فایلی native هر host با PyInstaller؛ خروجی build در Git نگه‌داری نمی‌شود
 
 ## مسیر داده
 
@@ -28,9 +28,11 @@ CSV candle / bid-ask → Parse + Validation → Candle Series → Ichimoku 8/24/
 | `windows/aurum_core.py` | modelهای داده، CSV، Ichimoku، بک‌تست، ریسک، NeoWave، Neural Lab، SQLite و export |
 | `windows/aurum_edge.py` | رابط Tkinter، چارت Canvas، tabهای کاربردی و workerهای UI |
 | `windows/test_aurum_core.py` | تست‌های deterministic بدون نیاز به display |
-| `windows/run_windows.bat` | اجرای source با Python نصب‌شده |
-| `windows/build_windows.bat` | بررسی پیش‌نیاز، اجرای تست و ساخت EXE |
-| `.github/workflows/windows-python.yml` | CI Python-only روی Windows برای compile check و core tests |
+| `windows/run_windows.bat` | اجرای source با Python نصب‌شده در Windows |
+| `windows/run_desktop.sh` | اجرای source در macOS/Linux |
+| `windows/build_desktop.py` | builder مشترک؛ فقط artifact native همان host را می‌سازد |
+| `windows/build_windows.bat` / `windows/build_desktop.sh` | wrapper ساخت برای Windows / macOS و Linux |
+| `.github/workflows/desktop-python.yml` | CI Python-only روی Windows، macOS و Linux برای compile check و core tests |
 
 ## ویژگی‌های قابل استفاده
 
@@ -52,4 +54,4 @@ CSV candle / bid-ask → Parse + Validation → Candle Series → Ichimoku 8/24/
 2. PDF ساده عمداً با فونت استاندارد PDF تولید می‌شود تا dependency runtime اضافه نشود.
 3. Neural Lab فقط یک گزارش آموزشی deterministic است؛ نه اعتبارسنجی out-of-sample و نه بهینه‌ساز پارامتر.
 4. quote عمومی قیمت قابل اجرا نیست و نباید مبنای سفارش واقعی باشد.
-5. EXE باید روی Windows با اجرای `windows\build_windows.bat` ساخته و تست شود؛ محیط فعلی لینوکس فایل EXE ویندوزی تولید یا اجرا نکرده است.
+5. PyInstaller cross-compile نمی‌کند: EXE باید روی Windows، binary مک روی macOS و binary لینوکس روی Linux با builder همان host ساخته و تست شود. محیط فعلی لینوکس artifact ویندوزی یا macOS تولید/اجرا نمی‌کند.

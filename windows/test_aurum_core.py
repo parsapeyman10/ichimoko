@@ -22,14 +22,18 @@ from aurum_core import (
 
 
 class AurumPythonCoreTests(unittest.TestCase):
-    def test_build_batch_passes_pyinstaller_the_application_source(self) -> None:
-        batch = (Path(__file__).resolve().parent / "build_windows.bat").read_text(encoding="utf-8")
-        invocation = next(line.strip() for line in batch.splitlines() if line.strip().startswith("python -m PyInstaller"))
-        self.assertIn('pushd "%SCRIPT_DIR%"', batch)
-        self.assertIn('--paths "."', invocation)
-        self.assertIn('"aurum_edge.py"', invocation)
-        self.assertNotIn('--paths "%SCRIPT_DIR%"', invocation)
-        self.assertFalse(invocation.endswith("^"))
+    def test_cross_platform_build_wrappers_pass_the_application_source(self) -> None:
+        root = Path(__file__).resolve().parent
+        batch = (root / "build_windows.bat").read_text(encoding="utf-8")
+        builder = (root / "build_desktop.py").read_text(encoding="utf-8")
+        shell = (root / "build_desktop.sh").read_text(encoding="utf-8")
+        self.assertIn("build_desktop.py", batch)
+        self.assertIn('"--paths", "."', builder)
+        self.assertIn("APP_SOURCE.name", builder)
+        self.assertIn("platform.system", builder)
+        self.assertIn("build_desktop.py", shell)
+        self.assertIn('"$@"', shell)
+        self.assertNotIn('--paths "%SCRIPT_DIR%"', batch)
 
     def bars(self, count: int = 120) -> list[Candle]:
         output: list[Candle] = []

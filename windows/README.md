@@ -1,66 +1,102 @@
-# Aurum Edge — Windows Desktop (Python)
+# Aurum Edge Desktop — Python Cross-Platform
 
-نسخهٔ Windows اکنون کاملاً با **Python 3.11+ و Tkinter** ساخته می‌شود. پیاده‌سازی قبلی C++/Qt، CMake، Ninja و Visual Studio از این deliverable حذف شده‌اند.
+اپلیکیشن desktop با **Python 3.11+ و Tkinter** یک source مشترک برای Windows، macOS و Linux دارد. Qt، CMake، Ninja و Visual Studio لازم نیستند.
 
-## قابلیت‌های برنامه
+> فایل اجرایی یکسانِ قابل اجرا روی همهٔ سیستم‌عامل‌ها وجود ندارد. PyInstaller باید روی هر سیستم‌عامل مقصد اجرا شود: Windows برای EXE ویندوز، macOS برای binary مک، و Linux برای binary لینوکس.
+
+## قابلیت‌ها
 
 - بارگذاری و ممیزی CSV کندلی یا bid/ask با پاک‌سازی timestamp تکراری و OHLC نامعتبر
-- چارت candle داخلی با Tkinter، آرشیو CSV/JSON و بدون وابستگی به مرورگر
-- بک‌تست deterministic `Ichimoku 8/24/72 TK-cross baseline` با ورود کندل بعدی، Fee، Slippage، SL-first و Trend Runner
+- candle chart با Tkinter Canvas و archive در قالب CSV/JSON
+- بک‌تست deterministic `Ichimoku 8/24/72 TK-cross baseline` با Fee، Slippage، SL-first و Trend Runner
 - ماشین‌حساب ریسک، حجم، margin، liquidation تقریبی و TradePlanGuard
 - ژورنال SQLite محلی، تقویم ماهانه و خروجی CSV/JSON/PDF ساده
-- تحلیل NeoWave مبتنی بر pivotهای ATR و گزارش Neural Lab جدا از خروجی بک‌تست
-- دریافت اختیاری quote عمومی و بررسی دستی GitHub Release؛ هیچ API key، اتصال حساب، route سفارش یا نصب خودکار ندارد
+- NeoWave، Neural Lab جدا از بک‌تست، quote عمومی صرفاً مشاهده‌ای و بررسی دستی Release
 
-> این برنامه ابزار تحلیل تاریخی و Paper Trading است؛ توصیهٔ سرمایه‌گذاری، تضمین سود یا ارسال سفارش واقعی نیست.
+ژورنال به‌صورت محلی در مسیر مناسب هر OS ذخیره می‌شود:
 
-## اجرای مستقیم source
+| سیستم‌عامل | مسیر دادهٔ محلی |
+|---|---|
+| Windows | `%APPDATA%\AurumEdgePython` |
+| macOS | `~/Library/Application Support/AurumEdgePython` |
+| Linux | `$XDG_DATA_HOME/AurumEdgePython` یا `~/.local/share/AurumEdgePython` |
 
-Windows 10/11 و Python 3.11 یا جدیدتر از [python.org](https://www.python.org/downloads/windows/) لازم است. هنگام نصب Python گزینهٔ **Add Python to PATH** را فعال کنید.
+این برنامه ابزار تحلیل تاریخی و Paper Trading است؛ API key، حساب کارگزاری یا ارسال سفارش واقعی ندارد.
 
-روی این فایل دوبارکلیک کنید:
+## اجرای source
 
-```text
-windows\run_windows.bat
-```
+Tkinter باید همراه Python نصب باشد:
 
-Tkinter همراه نصب رسمی Python ویندوز است و برای اجرای source نیازی به `pip install` نیست.
+| سیستم‌عامل | دستور |
+|---|---|
+| Windows | `windows\run_windows.bat` |
+| macOS / Linux | `sh windows/run_desktop.sh` |
 
-## ساخت EXE با BAT
+در Ubuntu/Debian، اگر `tkinter` وجود ندارد، بستهٔ distro مانند `python3-tk` را نصب کنید. روی Python رسمی Windows و Python.org برای macOS، Tkinter معمولاً همراه runtime است.
 
-برای ساخت فایل اجرایی Windows فقط این فایل را اجرا کنید:
+## ساخت native artifact
 
-```text
+### Windows
+
+روی این فایل دوبارکلیک کنید یا در Command Prompt اجرا کنید:
+
+```bat
 windows\build_windows.bat
 ```
 
-Batch به‌ترتیب زیر عمل می‌کند:
-
-1. Python 3.11+ و Tkinter را بررسی می‌کند؛
-2. تست‌های deterministic core را اجرا می‌کند؛
-3. یک virtual environment محلی `.build-venv` می‌سازد؛
-4. فقط `PyInstaller` را در همان محیط نصب می‌کند؛
-5. برنامه را به EXE تک‌فایلی تبدیل می‌کند.
-
-خروجی محلی در این مسیر است:
+خروجی:
 
 ```text
-windows\dist-local\Aurum_Edge_Windows.exe
+windows\dist-local\windows\Aurum_Edge_Windows.exe
 ```
 
-فولدرهای build و فایل EXE توسط `.gitignore` نادیده گرفته می‌شوند و نباید commit شوند.
+### macOS و Linux
 
-## اجرای تست‌ها
+ابتدا executable permission بدهید (یک‌بار):
 
-از ریشهٔ repository:
-
-```bat
-python windows\test_aurum_core.py
+```sh
+chmod +x windows/build_desktop.sh windows/run_desktop.sh windows/build_macos.command
 ```
 
-## محدودیت‌های مدل
+سپس:
 
-- مسیر tick واقعی داخل کندل وجود ندارد؛ در برخورد هم‌زمان SL و TP، SL برای محافظه‌کاری مقدم است.
+```sh
+sh windows/build_desktop.sh
+```
+
+روی macOS می‌توانید `windows/build_macos.command` را نیز اجرا کنید. خروجی‌ها:
+
+```text
+windows/dist-local/macos/Aurum_Edge_macOS
+windows/dist-local/linux/Aurum_Edge_Linux
+```
+
+همهٔ wrapperها به `windows/build_desktop.py` می‌رسند. این builder:
+
+1. Python 3.11+ و sourceها را اعتبارسنجی می‌کند؛
+2. برای ساخت واقعی، Tkinter را بررسی می‌کند؛
+3. تست‌های deterministic را اجرا می‌کند؛
+4. یک virtual environment محلی می‌سازد؛
+5. فقط PyInstaller را در همان محیط نصب می‌کند؛
+6. artifact native مربوط به همان host را می‌سازد.
+
+برای بررسی portable source بدون ساخت artifact:
+
+```sh
+python windows/build_desktop.py --check
+```
+
+## تست‌ها
+
+```sh
+python windows/test_aurum_core.py
+```
+
+CI روی Windows، macOS و Linux، compile-check و تست core را اجرا می‌کند.
+
+## محدودیت‌ها
+
+- مسیر tick واقعی داخل کندل وجود ندارد؛ برخورد هم‌زمان SL/TP با SL-first مدل می‌شود.
 - quote عمومی ممکن است با قیمت قابل اجرا اختلاف داشته باشد.
-- Neural Lab فقط گزارش آموزشی deterministic و in-sample است؛ پارامترهای بک‌تست را تغییر نمی‌دهد و OOS یا سودآوری را تضمین نمی‌کند.
-- PDF خروجی یک گزارش متنی ساده با فونت استاندارد PDF است تا برنامه در زمان اجرا dependency خارجی نداشته باشد.
+- Neural Lab فقط گزارش آموزشی deterministic و in-sample است؛ OOS یا سودآوری تضمین نمی‌کند.
+- PDF خروجی یک گزارش متنی ساده با فونت استاندارد PDF است تا dependency runtime اضافه نشود.

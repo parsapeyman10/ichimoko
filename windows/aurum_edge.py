@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Aurum Edge Windows desktop application — pure Python/Tkinter edition.
+"""Aurum Edge desktop application — pure Python/Tkinter edition.
 
-This is the runtime replacement for the previous C++/Qt program.  It is designed
-to run from source with CPython or be packaged into a single Windows executable by
-build_windows.bat.  It is strictly a historical-analysis and paper-journal app.
+The same source runs on Windows, macOS and Linux. Build an artifact on each host
+with build_desktop.py (or the host wrapper); PyInstaller does not cross-compile.
+This is strictly a historical-analysis and paper-journal app.
 """
 
 from __future__ import annotations
@@ -49,8 +49,18 @@ from aurum_core import (
 )
 
 APP_TITLE = "Aurum Edge — Python Desktop"
-APP_VERSION = "0.2.0-python"
+APP_VERSION = "0.3.0-cross-platform"
 BG, PANEL, TEXT, MUTED, GREEN, RED, ACCENT = "#0c1220", "#131d30", "#e5ecf7", "#91a0b8", "#29c995", "#ff6580", "#67a5ff"
+UI_FONT = "Segoe UI" if os.name == "nt" else "Helvetica Neue" if sys.platform == "darwin" else "DejaVu Sans"
+
+
+def application_data_root() -> Path:
+    """Return an OS-appropriate writable location for the local SQLite journal."""
+    if os.name == "nt":
+        return Path(os.getenv("APPDATA") or Path.home()) / "AurumEdgePython"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "AurumEdgePython"
+    return Path(os.getenv("XDG_DATA_HOME") or (Path.home() / ".local" / "share")) / "AurumEdgePython"
 
 
 class AurumEdgeApp:
@@ -66,8 +76,7 @@ class AurumEdgeApp:
         self.neowave: NeoWaveVerdict | None = None
         self.status = StringVar(value="آماده — این ابزار سفارش واقعی ارسال نمی‌کند.")
         self.data_label = StringVar(value="CSV بارگذاری نشده")
-        data_root = Path(os.getenv("APPDATA") or Path.home()) / "AurumEdgePython"
-        self.journal = JournalStore(data_root / "journal.sqlite")
+        self.journal = JournalStore(application_data_root() / "journal.sqlite")
         self._setup_style()
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self._close)
@@ -80,19 +89,19 @@ class AurumEdgeApp:
         except Exception: pass
         style.configure("TFrame", background=BG)
         style.configure("Card.TFrame", background=PANEL)
-        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
+        style.configure("TLabel", background=BG, foreground=TEXT, font=(UI_FONT, 10))
         style.configure("Card.TLabel", background=PANEL, foreground=TEXT)
-        style.configure("Header.TLabel", background=BG, foreground=ACCENT, font=("Segoe UI", 18, "bold"))
+        style.configure("Header.TLabel", background=BG, foreground=ACCENT, font=(UI_FONT, 18, "bold"))
         style.configure("Muted.TLabel", background=BG, foreground=MUTED)
         style.configure("TButton", padding=(10, 6))
         style.configure("TNotebook", background=BG, borderwidth=0)
         style.configure("TNotebook.Tab", padding=(14, 8), background=PANEL, foreground=TEXT)
         style.map("TNotebook.Tab", background=[("selected", ACCENT)], foreground=[("selected", BG)])
         style.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=TEXT, rowheight=26)
-        style.configure("Treeview.Heading", background="#1b2c49", foreground=TEXT, font=("Segoe UI", 9, "bold"))
+        style.configure("Treeview.Heading", background="#1b2c49", foreground=TEXT, font=(UI_FONT, 9, "bold"))
         style.map("Treeview", background=[("selected", "#244b78")])
         style.configure("TLabelframe", background=BG, foreground=ACCENT)
-        style.configure("TLabelframe.Label", background=BG, foreground=ACCENT, font=("Segoe UI", 10, "bold"))
+        style.configure("TLabelframe.Label", background=BG, foreground=ACCENT, font=(UI_FONT, 10, "bold"))
 
     def _build(self) -> None:
         header = ttk.Frame(self.root, padding=(16, 12), style="Card.TFrame")
@@ -236,7 +245,7 @@ class AurumEdgeApp:
             "• فقط Python استاندارد + Tkinter در runtime؛ Qt، CMake، Ninja و Visual Studio لازم نیست.\n"
             "• CSV و journal روی دستگاه باقی می‌مانند؛ برنامه API key نگه نمی‌دارد.\n"
             "• در برخورد هم‌زمان SL و TP، مدل بک‌تست SL را مقدم می‌دارد.\n"
-            "• ساخت EXE فقط با build_windows.bat و PyInstaller انجام می‌شود؛ فایل ناشناس دانلود یا نصب خودکار نمی‌شود."
+            "• ساخت artifact native با build_windows.bat در Windows یا build_desktop.sh در macOS/Linux انجام می‌شود؛ فایل ناشناس دانلود یا نصب خودکار نمی‌شود."
         )
         ttk.Label(page, text=notes, justify="left", wraplength=1100).pack(anchor="w", pady=14)
         self.update_result = StringVar(value=f"نسخهٔ محلی: {APP_VERSION}")
@@ -281,7 +290,7 @@ class AurumEdgeApp:
     def _draw_chart(self) -> None:
         self.chart.delete("all")
         if not self.candles:
-            self.chart.create_text(max(1, self.chart.winfo_width() / 2), max(1, self.chart.winfo_height() / 2), text="CSV را بارگذاری کنید", fill=MUTED, font=("Segoe UI", 13))
+            self.chart.create_text(max(1, self.chart.winfo_width() / 2), max(1, self.chart.winfo_height() / 2), text="CSV را بارگذاری کنید", fill=MUTED, font=(UI_FONT, 13))
             return
         bars = self.candles[-1500:]; width, height = max(300, self.chart.winfo_width()), max(240, self.chart.winfo_height())
         left, right, top, bottom = 14, width - 72, 16, height - 22
@@ -289,7 +298,7 @@ class AurumEdgeApp:
         y = lambda price: bottom - (price - lowest) / spread * (bottom - top)
         for grid in range(5):
             yy = top + (bottom - top) * grid / 4; self.chart.create_line(left, yy, right, yy, fill="#1d2a40")
-            self.chart.create_text(right + 4, yy, text=f"{highest - spread * grid / 4:.5g}", fill=MUTED, anchor="w", font=("Segoe UI", 8))
+            self.chart.create_text(right + 4, yy, text=f"{highest - spread * grid / 4:.5g}", fill=MUTED, anchor="w", font=(UI_FONT, 8))
         step = (right - left) / len(bars); body = max(1, min(10, step * .68))
         for index, bar in enumerate(bars):
             x = left + (index + .5) * step; color = GREEN if bar.close >= bar.open else RED
