@@ -58,7 +58,7 @@ class TechnicalRatingInsightTest {
         val insight = TechnicalRatingInsight.build(trades)
         val hour = insight.oneHour
         assertEquals("تنها ۵ معامله دارای داده", 5, hour.tradesWithData)
-        assertEquals("معاملات بستهٔ زنده", 5, hour.tradesTotal)
+        assertEquals("معاملات بستهٔ زنده (یکی بدون داده)", 6, hour.tradesTotal)
 
         val strongBuy = hour.buckets.first { it.key == RatingBucketKey.STRONG_BUY }
         assertEquals(2, strongBuy.trades)

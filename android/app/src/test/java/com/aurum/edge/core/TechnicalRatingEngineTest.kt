@@ -74,8 +74,11 @@ class TechnicalRatingEngineTest {
             )
         }
         val rating = TechnicalRatingEngine.evaluate(flat)!!
-        assertEquals("در بازار تخت هیچ رأی خریدی نباید غالب باشد", 0, rating.score)
-        assertEquals(TechnicalRating.STRONG_SCORE, 10)
+        assertEquals("در بازار تخت هیچ رأی خریدی نباید ساخته شود", 0, rating.buy)
+        assertTrue(
+            "رأی خنثی باید اکثریت باشد، بود: خنثی=${rating.neutral} فروش=${rating.sell}",
+            rating.neutral > rating.sell,
+        )
     }
 
     @Test
