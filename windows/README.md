@@ -80,6 +80,20 @@ windows/dist-local/linux/Aurum_Edge_Linux
 5. فقط PyInstaller را در همان محیط نصب می‌کند؛
 6. artifact native مربوط به همان host را می‌سازد.
 
+اگر Tkinter فقط داخل `.build-venv` خراب باشد، builder آن environment تولیدی را یک‌بار خودکار حذف و دوباره می‌سازد. برای اجبار به بازسازی از ابتدا نیز می‌توانید اجرا کنید:
+
+```sh
+python windows/build_desktop.py --recreate-venv
+```
+
+در Windows همین گزینه از طریق BAT نیز قابل ارسال است:
+
+```bat
+windows\build_windows.bat --recreate-venv
+```
+
+اگر **host Python** هنگام `import tkinter` با `0xC0000005` یا access violation crash کند، مشکل از نصب Python/Tcl-Tk ویندوز است، نه source برنامه. Python رسمی 64-bit را از Apps/Installer با گزینهٔ Repair اصلاح یا دوباره نصب کنید (Tcl/Tk فعال باشد)، سپس builder را دوباره اجرا کنید.
+
 برای بررسی portable source بدون ساخت artifact:
 
 ```sh

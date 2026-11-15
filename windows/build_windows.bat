@@ -20,7 +20,7 @@ if not defined PYTHON_CMD (
 
 pushd "%SCRIPT_DIR%"
 if errorlevel 1 goto :failed
-%PYTHON_CMD% build_desktop.py
+%PYTHON_CMD% build_desktop.py %*
 set "BUILD_EXIT_CODE=%ERRORLEVEL%"
 popd
 

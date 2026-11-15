@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import venv
@@ -66,11 +67,28 @@ def run_core_checks(python: Path) -> None:
     run([str(python), TEST_SOURCE.name])
 
 
-def assert_tkinter(python: Path) -> None:
-    run([str(python), "-c", "import tkinter; print('Tkinter is available for the desktop build.')"])
+def assert_tkinter(python: Path, label: str) -> None:
+    command = [str(python), "-c", "import tkinter; print('Tkinter is available for the desktop build.')"]
+    printable = subprocess.list2cmdline(command) if os.name == "nt" else " ".join(command)
+    print(f"\n> {printable}")
+    completed = subprocess.run(command, cwd=APP_DIR, check=False)
+    if not completed.returncode:
+        return
+    access_violation = completed.returncode in {3221225477, -1073741819}
+    if access_violation:
+        raise BuildError(
+            f"Tkinter crashed in {label} (Windows access violation 0xC0000005). "
+            "If this is the local build environment, it can be recreated automatically. "
+            "If it is the host Python, repair or reinstall the official 64-bit Python with Tcl/Tk enabled, "
+            "then rerun the build."
+        )
+    raise BuildError(f"Tkinter is unavailable in {label} (exit code {completed.returncode}). Install Python with Tcl/Tk enabled.")
 
 
-def prepare_environment() -> Path:
+def prepare_environment(*, recreate: bool = False) -> Path:
+    if recreate and VENV_DIR.exists():
+        print("=== Recreating the local build virtual environment ===")
+        shutil.rmtree(VENV_DIR)
     python = executable_in(VENV_DIR)
     if not python.is_file():
         print("=== Creating local build virtual environment ===")
@@ -79,6 +97,19 @@ def prepare_environment() -> Path:
     if not python.is_file():
         raise BuildError("The local virtual environment did not provide a Python executable.")
     return python
+
+
+def prepare_tkinter_environment(*, recreate: bool = False) -> Path:
+    """Recreate a stale venv once when host Python's Tkinter itself is healthy."""
+    python = prepare_environment(recreate=recreate)
+    try:
+        assert_tkinter(python, "the local build environment")
+        return python
+    except BuildError as first_error:
+        print(f"Local build environment Tkinter check failed: {first_error}", file=sys.stderr)
+        python = prepare_environment(recreate=True)
+        assert_tkinter(python, "the recreated local build environment")
+        return python
 
 
 def package(python: Path, host: str) -> Path:
@@ -100,6 +131,7 @@ def package(python: Path, host: str) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build/check the cross-platform Aurum Edge desktop app.")
     parser.add_argument("--check", action="store_true", help="Run portable source checks only; do not create a venv or package an app.")
+    parser.add_argument("--recreate-venv", action="store_true", help="Discard the generated local build venv before packaging.")
     arguments = parser.parse_args()
     try:
         validate_source()
@@ -112,8 +144,9 @@ def main() -> int:
             print("=== CHECK PASSED ===")
             return 0
         host = host_key()
-        python = prepare_environment()
-        assert_tkinter(python)
+        print("=== Checking Tkinter in the host Python ===")
+        assert_tkinter(Path(sys.executable), "the host Python")
+        python = prepare_tkinter_environment(recreate=arguments.recreate_venv)
         print("=== Running deterministic Python core tests ===")
         run_core_checks(python)
         print("=== Installing the local packaging dependency ===")
