@@ -121,6 +121,19 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     private val _isBackfilling = MutableStateFlow(false)
     val isBackfilling: StateFlow<Boolean> = _isBackfilling.asStateFlow()
 
+    /**
+     * سنجش تکنیکال زندهٔ همهٔ نمادها (۱ ساعته و ۴ ساعته). فقط برای نمایش و ثبت روی معاملهٔ
+     * بعدی؛ در هیچ تصمیمی استفاده نمی‌شود.
+     */
+    private val _technicalRatings =
+        MutableStateFlow<Map<String, com.aurum.edge.core.SymbolTechnicalRating>>(emptyMap())
+    val technicalRatings: StateFlow<Map<String, com.aurum.edge.core.SymbolTechnicalRating>> =
+        _technicalRatings.asStateFlow()
+
+    /** وضعیت به‌روزرسانی دیتای آفلاین همهٔ نمادها (۰ تا ۱۵). */
+    private val _offlineSync = MutableStateFlow(OfflineSyncProgress())
+    val offlineSync: StateFlow<OfflineSyncProgress> = _offlineSync.asStateFlow()
+
     private val _aiChecking = MutableStateFlow(false)
     val aiChecking: StateFlow<Boolean> = _aiChecking.asStateFlow()
 
@@ -600,6 +613,70 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 }
             } finally {
                 _isBackfilling.value = false
+            }
+        }
+    }
+
+    /**
+     * به‌روزرسانی **دیتای آفلاین همهٔ ۱۵ نماد** با یک دکمه.
+     *
+     * برای هر نماد: کندل‌های ساعات قطعی بازیابی و بازپخش می‌شوند (همان مسیر
+     * [backfillSingleSymbolInternal]) و کندل‌های ۱ ساعته/۴ ساعته هم به‌صورت اجباری تازه
+     * می‌شوند تا سنجش تکنیکال و لایه‌های استراتژی داده‌ی به‌روز داشته باشند. پیشرفت هر
+     * نماد در [offlineSync] منتشر می‌شود و در پایان یک پیام خلاصه می‌آید.
+     */
+    fun refreshOfflineDataForAllSymbols(hoursOverride: Int? = null) {
+        if (_offlineSync.value.running) return
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val symbols = com.aurum.edge.core.V1Universe.allSymbols
+            var done = 0
+            var failed = 0
+            _offlineSync.value = OfflineSyncProgress(running = true, done = 0, total = symbols.size, currentSymbol = symbols.firstOrNull().orEmpty())
+            for (symbol in symbols) {
+                _offlineSync.value = _offlineSync.value.copy(currentSymbol = symbol)
+                var anyOk = false
+                runCatching { backfillSingleSymbolInternal(symbol, hoursOverride) }
+                    .onSuccess { if (it != null) anyOk = true }
+                val bars1h = runCatching {
+                    LiveQuoteFetcher.fetchTimeframeCandles(
+                        symbolInput = symbol,
+                        interval = Interval.H1,
+                        limit = 120,
+                        forceNetwork = true,
+                    )
+                }.getOrNull()?.first.orEmpty()
+                val bars4h = runCatching {
+                    LiveQuoteFetcher.fetchTimeframeCandles(
+                        symbolInput = symbol,
+                        interval = Interval.H4,
+                        limit = 120,
+                        forceNetwork = true,
+                    )
+                }.getOrNull()?.first.orEmpty()
+                if (bars1h.isNotEmpty() || bars4h.isNotEmpty()) anyOk = true
+                if (bars1h.isNotEmpty() || bars4h.isNotEmpty()) {
+                    val rating1h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(bars1h)
+                    val rating4h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(bars4h)
+                    _technicalRatings.value = _technicalRatings.value + (
+                        symbol to com.aurum.edge.core.SymbolTechnicalRating(
+                            oneHour = rating1h ?: com.aurum.edge.core.TechnicalRating.UNKNOWN,
+                            fourHour = rating4h ?: com.aurum.edge.core.TechnicalRating.UNKNOWN,
+                        )
+                    )
+                }
+                if (!anyOk) failed++
+                done++
+                _offlineSync.value = _offlineSync.value.copy(done = done, failed = failed)
+            }
+            _offlineSync.value = _offlineSync.value.copy(
+                running = false,
+                currentSymbol = "",
+                finishedAt = System.currentTimeMillis(),
+            )
+            _toast.value = if (failed == 0) {
+                "✅ دیتای آفلاین هر ${symbols.size} نماد به‌روز شد"
+            } else {
+                "⚠️ دیتای ${symbols.size - failed} نماد به‌روز شد · $failed نماد پاسخ نداد (بازار بسته یا شبکه)"
             }
         }
     }
@@ -2062,6 +2139,20 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             nowMillis = now,
             forceNetwork = forceNetwork,
         )?.first.orEmpty()
+
+        // ── سنجش تکنیکال ۱ ساعته و ۴ ساعتهٔ همین نماد (فقط داده، بدون اثر در تصمیم) ──
+        runCatching {
+            val rating1h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(bars1h)
+            val rating4h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(bars4h)
+            if (rating1h != null || rating4h != null) {
+                _technicalRatings.value = _technicalRatings.value + (
+                    symbol to com.aurum.edge.core.SymbolTechnicalRating(
+                        oneHour = rating1h ?: com.aurum.edge.core.TechnicalRating.UNKNOWN,
+                        fourHour = rating4h ?: com.aurum.edge.core.TechnicalRating.UNKNOWN,
+                    )
+                )
+            }
+        }
 
         val existingTick = _liveTicks.value[symbol]
         val liveTick = if (existingTick != null && (now - existingTick.at) <= 20_000L) {
@@ -3618,3 +3709,20 @@ private data class NeuralCopySection(
     val titleFa: String,
     val lines: List<String>,
 )
+
+/**
+ * پیشرفت «به‌روزرسانی دیتای آفلاین همهٔ نمادها».
+ *
+ * [done] از [total] نماد پردازش شده، [failed] تعداد نمادهایی که هیچ داده‌ای برنگرداندند، و
+ * [currentSymbol] نمادی است که همین حالا در حال دریافت است.
+ */
+data class OfflineSyncProgress(
+    val running: Boolean = false,
+    val done: Int = 0,
+    val total: Int = 0,
+    val currentSymbol: String = "",
+    val failed: Int = 0,
+    val finishedAt: Long = 0L,
+) {
+    val percent: Int get() = if (total <= 0) 0 else (done * 100 / total).coerceIn(0, 100)
+}

@@ -1988,6 +1988,10 @@ internal fun OfflineGapBackfillCard(
     summary: CandleBackfillSummary?,
     isBackfilling: Boolean,
     onSyncGap: (Int?) -> Unit,
+    /** پیشرفت به‌روزرسانی دیتای آفلاین همهٔ نمادها (۰ تا ۱۵). */
+    allProgress: com.aurum.edge.ui.shell.OfflineSyncProgress = com.aurum.edge.ui.shell.OfflineSyncProgress(),
+    /** شروع به‌روزرسانی دیتای آفلاین برای همهٔ نمادها؛ `null` = دکمه ساخته نشود. */
+    onSyncAll: (() -> Unit)? = null,
 ) {
     SectionCard(
         title = "🔄 بازیابی دیتای ساعات قطعی (Backfill)",
@@ -1999,6 +2003,38 @@ internal fun OfflineGapBackfillCard(
             )
         },
     ) {
+        if (onSyncAll != null) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Button(
+                    onClick = { onSyncAll() },
+                    enabled = !allProgress.running && !isBackfilling,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Gold,
+                        contentColor = Color.Black,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = if (allProgress.running) {
+                            "در حال به‌روزرسانی ${allProgress.done}/${allProgress.total} · ${allProgress.currentSymbol}"
+                        } else {
+                            "🔄 به‌روزرسانی دیتای آفلاین همهٔ ${if (allProgress.total > 0) allProgress.total else 15} نماد"
+                        },
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                if (allProgress.running || allProgress.finishedAt > 0L) {
+                    Text(
+                        text = "${allProgress.percent}% · موفق ${allProgress.done - allProgress.failed} · ناموفق ${allProgress.failed}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+            }
+        }
         if (summary != null) {
             Column(
                 modifier = Modifier
@@ -2185,6 +2221,11 @@ private fun AutoMonitoredOpenTradesCard(
                                 text = "🏦 ${trade.buildVenueRulesAndFeesSummaryFa()}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextSecondary,
+                            )
+                            Text(
+                                text = "🧭 سنجش تکنیکال ورود · ۱H: ${trade.tech1hFa} (${trade.tech1hLabelFa}) · ۴H: ${trade.tech4hFa} (${trade.tech4hLabelFa})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Purple,
                             )
                         }
 

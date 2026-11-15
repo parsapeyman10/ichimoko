@@ -205,12 +205,27 @@ class JournalStore(
             rrBreakdownFa = rrBreakdownFa,
             stateInputs = stateInputs ?: com.aurum.edge.core.NeuralStateInputs(entryTimeMs = now),
         )
+        // ── سنجش تکنیکال در لحظهٔ ورود (فقط داده؛ هیچ اثری در تصمیم ندارد) ─────────
+        // از کش کندل‌های ۱ ساعته و ۴ ساعتهٔ همین نماد خوانده می‌شود. اگر کندلی در کش نبود،
+        // عدد `-1` ثبت می‌شود (نامعلوم) — هیچ عدد ساختگی ساخته نمی‌شود.
+        val rating1h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(
+            com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H1),
+        )
+        val rating4h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(
+            com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H4),
+        )
         val trade = rawTrade.copy(
             tradeNumber = nextTradeNum,
             preEntry3CandleCategoryCode = pre3Context.categoryCode,
             preEntry3CandleCategoryFa = pre3Context.categoryBadgeFa,
             preEntry3CandleSummaryFa = pre3Context.summaryFa,
             preEntry3Candles = pre3Context.candles,
+            tech1hBuy = rating1h?.buy ?: -1,
+            tech1hNeutral = rating1h?.neutral ?: -1,
+            tech1hSell = rating1h?.sell ?: -1,
+            tech4hBuy = rating4h?.buy ?: -1,
+            tech4hNeutral = rating4h?.neutral ?: -1,
+            tech4hSell = rating4h?.sell ?: -1,
         )
         persist( listOf(trade) + _trades.value )
         // OPEN snapshot generation is scheduled by the ViewModel after this synchronous journal

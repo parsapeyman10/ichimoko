@@ -252,6 +252,17 @@ data class PaperTrade(
     val stateDistKijunAtr: Double = -1.0,
     val stateKumoThicknessAtr: Double = -1.0,
     val stateVolumeRatio20: Double = -1.0,
+
+    // ── سنجش تکنیکال در لحظهٔ ورود (فقط داده — هیچ اثری در تصمیم ندارد) ──────────
+    // تعداد رأی‌های «خرید / خنثی / فروش» نوار سنجش تکنیکال در تایم‌فریم ۱ ساعته و ۴ ساعته.
+    // مقدار `-1` یعنی داده کافی نبود (کندل‌های آن تایم‌فریم در کش نبودند) — عدد ساختگی
+    // جای آن نمی‌نشیند. از این داده برای سنجش «نرخ برد در هر وضعیت بازار» استفاده می‌شود.
+    val tech1hBuy: Int = -1,
+    val tech1hNeutral: Int = -1,
+    val tech1hSell: Int = -1,
+    val tech4hBuy: Int = -1,
+    val tech4hNeutral: Int = -1,
+    val tech4hSell: Int = -1,
 ) {
     val displayTradeNumber: Int
         get() = if (tradeNumber > 0) tradeNumber else ((kotlin.math.abs(id.hashCode()) % 9000) + 1)
@@ -262,6 +273,32 @@ data class PaperTrade(
     val assetClass: AssetClass get() = AssetClass.of(symbol)
 
     val riskPerOz: Double get() = kotlin.math.abs(entry - (initialStopLoss ?: stopLoss))
+
+    /** متن خوانای سنجش تکنیکال ۱ ساعته در لحظهٔ ورود؛ «—» یعنی داده نبود. */
+    val tech1hFa: String
+        get() = techText(tech1hBuy, tech1hNeutral, tech1hSell)
+
+    /** متن خوانای سنجش تکنیکال ۴ ساعته در لحظهٔ ورود؛ «—» یعنی داده نبود. */
+    val tech4hFa: String
+        get() = techText(tech4hBuy, tech4hNeutral, tech4hSell)
+
+    /** برچسب وضعیت (خرید قوی/خرید/خنثی/فروش/فروش قوی) برای تایم‌فریم ۱ ساعته. */
+    val tech1hLabelFa: String
+        get() = techLabel(tech1hBuy, tech1hSell)
+
+    /** برچسب وضعیت برای تایم‌فریم ۴ ساعته. */
+    val tech4hLabelFa: String
+        get() = techLabel(tech4hBuy, tech4hSell)
+
+    private fun techText(buy: Int, neutral: Int, sell: Int): String =
+        if (buy < 0 || neutral < 0 || sell < 0 || buy + neutral + sell <= 0) {
+            "—"
+        } else {
+            "$buy خرید · $neutral خنثی · $sell فروش"
+        }
+
+    private fun techLabel(buy: Int, sell: Int): String =
+        if (buy < 0 || sell < 0 || buy + sell <= 0) "—" else TechnicalRatingInsight.bucketOf(buy, sell).titleFa
     val effectiveOptimalRr: Double
         get() = if (optimalRiskReward >= 1.5) optimalRiskReward.coerceIn(1.5, 3.0) else riskReward.coerceIn(1.5, 3.0)
 

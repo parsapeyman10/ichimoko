@@ -63,6 +63,7 @@ import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.SelectableStrategyItem
 import com.aurum.edge.ui.components.StatTile
+import com.aurum.edge.ui.tabs.journal.TechnicalRatingCard
 import com.aurum.edge.ui.theme.AurumColors
 import java.util.Locale
 import kotlin.math.abs
@@ -85,6 +86,8 @@ fun SettingsScreen(
     val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
     val backfillSummaries by viewModel.backfillSummaries.collectAsStateWithLifecycle()
     val isBackfilling by viewModel.isBackfilling.collectAsStateWithLifecycle()
+    val offlineSync by viewModel.offlineSync.collectAsStateWithLifecycle()
+    val technicalRatings by viewModel.technicalRatings.collectAsStateWithLifecycle()
     val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
@@ -663,6 +666,13 @@ fun SettingsScreen(
                     summary = backfillSummaries[activeSymbol],
                     isBackfilling = isBackfilling,
                     onSyncGap = { hours -> viewModel.syncAllOpenAndActiveSymbolsGap(hoursOverride = hours, notifyOnSuccess = true) },
+                    allProgress = offlineSync,
+                    onSyncAll = { viewModel.refreshOfflineDataForAllSymbols() },
+                )
+                TechnicalRatingCard(
+                    symbols = com.aurum.edge.core.V1Universe.allSymbols,
+                    ratings = technicalRatings,
+                    trades = trades,
                 )
                 SectionCard(
                     title = "🗄️ داده و نگهداری",
