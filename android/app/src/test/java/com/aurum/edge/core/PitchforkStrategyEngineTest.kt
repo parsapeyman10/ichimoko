@@ -81,13 +81,15 @@ class PitchforkStrategyEngineTest {
             assertEquals(high[pivot.index], pivot.price, 1e-12)
             for (j in pivot.index - 3..pivot.index + 3) {
                 if (j == pivot.index) continue
-                assertTrue("سقف باید اکستریم پنجره باشد", high[j] < pivot.price)
+                if (j < pivot.index) assertTrue("چپ سقف باید اکیداً پایین‌تر باشد", high[j] < pivot.price)
+                else assertTrue("راست سقف باید پایین‌تر-یا-مساوی باشد", high[j] <= pivot.price)
             }
         }
         lows.forEach { pivot ->
             for (j in pivot.index - 3..pivot.index + 3) {
                 if (j == pivot.index) continue
-                assertTrue("کف باید اکستریم پنجره باشد", low[j] > pivot.price)
+                if (j < pivot.index) assertTrue("چپ کف باید اکیداً بالاتر باشد", low[j] > pivot.price)
+                else assertTrue("راست کف باید بالاتر-یا-مساوی باشد", low[j] >= pivot.price)
             }
         }
     }

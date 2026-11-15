@@ -147,11 +147,13 @@ object PitchforkStrategyEngine {
         for (i in k until high.size - k) {
             var isHigh = true
             var isLow = true
+            // عیناً مثل `argmax(window) == k` فایل مرجع: مرکز باید ماکسیمم باشد و **اولین** تکرار آن.
+            // یعنی سمت چپ اکیداً کوچک‌تر و سمت راست کوچک‌تر-یا-مساوی.
             for (j in i - k..i + k) {
                 if (j == i) continue
-                // مثل argmax/argmin فایل مرجع، برابری هم سوینگ را باطل می‌کند.
-                if (high[j] >= high[i]) isHigh = false
-                if (low[j] <= low[i]) isLow = false
+                val equalityAllowed = j > i
+                if (if (equalityAllowed) high[j] > high[i] else high[j] >= high[i]) isHigh = false
+                if (if (equalityAllowed) low[j] < low[i] else low[j] <= low[i]) isLow = false
                 if (!isHigh && !isLow) break
             }
             if (isHigh) highs.add(PitchforkPoint(i, high[i], i + k))
