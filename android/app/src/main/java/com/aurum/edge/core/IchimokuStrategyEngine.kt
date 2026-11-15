@@ -97,6 +97,29 @@ enum class BitcoinStrategyModel(
         hasHosoda = false,
         hasPeloille = true,
         baseOptimalRr = 1.95,
+    ),
+
+    // ── ۶. خط میانه و هم‌افزایی فیبوناچی (کین) ──────────────────────────────
+    /**
+     * این مدل هیچ‌کدام از چهار ستون ایچیموکو را به ارث نمی‌برد؛ یک موتور مستقل هندسی است.
+     * نامش همان نامی است که کاربر خواسته و شناسه‌اش (`id`) نیز همان است.
+     * یادگیری عصبی و تیونینگ خودکار برایش خاموش است تا پارامترهای ثابت تئوری دست‌نخورده بمانند.
+     */
+    KANE_ML_FIB_SYNERGY(
+        id = "kane_median_line_fibonacci_synergy",
+        titleFa = "kane_median_line_fibonacci_synergy — خط میانهٔ اندروز + هم‌افزایی فیبوناچی (کین)",
+        badgeFa = "مستقل · خط میانه/فیبو",
+        authorRefFa = "Jim Kane (Median Line and Fibonacci Synergy)",
+        summaryFa = "فورک خط میانهٔ اندروز از سه پیوت متناوب ساختار ۴ ساعته، ناحیهٔ معاملهٔ بالقوه از " +
+            "هم‌پوشانی موازی فورک با کلاستر فیبوناچی، ورود روی کندل تایید ۱ ساعته و اهداف خط میانه و " +
+            "موازی مقابل با قفل R در بازهٔ ۱٫۵ تا ۳٫۰.",
+        hasPatel = false,
+        hasTuttle = false,
+        hasHosoda = false,
+        hasPeloille = false,
+        baseOptimalRr = 2.0,
+        requiresExplicitOptIn = true,
+        neuralLearningEnabled = false,
     );
 
     /**
@@ -111,6 +134,7 @@ enum class BitcoinStrategyModel(
 
     val combinationCategoryFa: String
         get() = when (combinationCount) {
+            0 -> "استراتژی مستقل (خارج از مکتب ایچیموکو)"
             1 -> "تک‌استراتژی (۱گانه)"
             2 -> "ترکیب دوتایی (۲گانه)"
             3 -> "ترکیب سه‌تایی (۳گانه)"
@@ -654,6 +678,8 @@ enum class StrategyTriggerType(val titleFa: String) {
     SANYAKU_TK_CONTINUATION("ماشه ۳: ادامه موج سوم سانیاکو با تایید ۳ کندلی کارن پلویل"),
     COMPRESSION_EXPANSION_BREAKOUT("شکست انبساطی ناحیهٔ فشردگی (ورود مستقیم روی شکست)"),
     COMPRESSION_EXPANSION_RETEST("بازآزمایی موفق شکست ناحیهٔ فشردگی"),
+    MEDIAN_LINE_REJECTION("ماشه خط میانه ۱: رد در موازی فورک و بازگشت به خط میانه (کین)"),
+    MEDIAN_LINE_CONTINUATION("ماشه خط میانه ۲: پولبک به خط میانه در جهت فورک (کین)"),
     NONE("در انتظار ماشهٔ بسته‌شده"),
 }
 
@@ -2724,6 +2750,112 @@ object IchimokuStrategyEngine {
     /**
      * ارزیابی کامل هر یک از ۱۵ نماد داخل اپ (`V1Universe.allSymbols`) بر اساس تنها استراتژی فعال انتخاب‌شده.
      */
+    /**
+     * پل میان مدل `KANE_ML_FIB_SYNERGY` و گزارش استاندارد استراتژی.
+     *
+     * قواعد این تابع عمداً کم است: هیچ اورراید عصبی، هیچ تیونینگ نماد و هیچ گیت ایچیموکویی این‌جا
+     * اعمال نمی‌شود. فقط سه چیز از تنظیمات کاربر خوانده می‌شود: حداقل R (که هرگز زیر ۱٫۵ نمی‌رود)،
+     * بافر حد ضرر و حداقل نسبت کارایی. تایم‌فریم هم قفل است: ساختار ۴ ساعته، ورود ۱ ساعته.
+     */
+    fun evaluateKaneMedianLineReport(
+        activeModel: BitcoinStrategyModel,
+        config: BaseStrategyConfig,
+        macroCandles: List<Candle>,
+        entryCandles: List<Candle>,
+        macroSnapshot: IchimokuBarSnapshot?,
+        strategySnapshot: IchimokuBarSnapshot?,
+        triggerSnapshot: IchimokuBarSnapshot?,
+        livePriceOverride: Double?,
+        effectiveId: String,
+        effectiveTitle: String,
+        nowMillis: Long,
+        symbol: String,
+    ): StrategyEvaluationReport {
+        val onLockedTimeframes = config.macroInterval == Interval.H4 && config.strategyInterval == Interval.H1
+        if (!onLockedTimeframes || macroCandles.size < 60 || entryCandles.size < 30) {
+            val note = if (!onLockedTimeframes) {
+                "مدل کین فقط روی ساختار ۴ ساعته و ورود ۱ ساعته سنجیده می‌شود " +
+                    "(الان: ${config.macroInterval.label}/${config.strategyInterval.label})."
+            } else {
+                "کندل کافی برای فورک خط میانه نیست (${macroCandles.size} ساختار / ${entryCandles.size} ورود)."
+            }
+            return StrategyEvaluationReport(
+                symbol = symbol,
+                strategyId = effectiveId,
+                strategyTitleFa = effectiveTitle,
+                strategyBadgeFa = activeModel.badgeFa,
+                macroInterval = Interval.H4,
+                strategyInterval = Interval.H1,
+                triggerInterval = Interval.H1,
+                readiness = StrategyReadinessState.INSUFFICIENT_DATA,
+                action = SignalAction.NO_TRADE,
+                triggerType = StrategyTriggerType.NONE,
+                confidence = 0.0,
+                livePrice = livePriceOverride ?: entryCandles.lastOrNull()?.close ?: 0.0,
+                suggestedEntry = null,
+                suggestedStopLoss = null,
+                targetV = null,
+                targetN = null,
+                targetE = null,
+                primaryTakeProfit = null,
+                riskReward = null,
+                macroSnapshot = macroSnapshot,
+                strategySnapshot = strategySnapshot,
+                triggerSnapshot = triggerSnapshot,
+                waveProjection = null,
+                conditions = emptyList(),
+                summaryFa = note,
+                triggerBarTime = entryCandles.lastOrNull()?.time ?: 0L,
+                evaluatedAt = nowMillis,
+            )
+        }
+
+        val kaneConfig = KaneConfig(
+            minRiskReward = max(config.minRiskReward, 1.5),
+            slBufferAtr = config.slBufferAtr.coerceIn(0.15, 0.55),
+            minEfficiencyRatio = config.minEfficiencyRatio.coerceIn(0.14, 0.45),
+            entryMode = KaneEntryMode.BOTH,
+        )
+        val evaluation = KaneMedianLineEngine.evaluate(
+            macroCandles = macroCandles,
+            entryCandles = entryCandles,
+            config = kaneConfig,
+            livePriceOverride = livePriceOverride,
+        )
+
+        return StrategyEvaluationReport(
+            symbol = symbol,
+            strategyId = effectiveId,
+            strategyTitleFa = effectiveTitle,
+            strategyBadgeFa = activeModel.badgeFa,
+            macroInterval = Interval.H4,
+            strategyInterval = Interval.H1,
+            triggerInterval = Interval.H1,
+            readiness = evaluation.readiness,
+            action = evaluation.action,
+            triggerType = evaluation.triggerType,
+            confidence = evaluation.confidence,
+            livePrice = evaluation.livePrice,
+            suggestedEntry = evaluation.entry,
+            suggestedStopLoss = evaluation.stopLoss,
+            targetV = evaluation.medianLine.takeIf { it > 0.0 },
+            targetN = evaluation.upperParallel.takeIf { it > 0.0 },
+            targetE = evaluation.lowerParallel.takeIf { it > 0.0 },
+            primaryTakeProfit = evaluation.takeProfit,
+            riskReward = evaluation.riskReward,
+            macroSnapshot = macroSnapshot,
+            strategySnapshot = strategySnapshot,
+            triggerSnapshot = triggerSnapshot,
+            waveProjection = null,
+            conditions = evaluation.conditions,
+            summaryFa = evaluation.summaryFa,
+            triggerBarTime = evaluation.triggerBarTime,
+            evaluatedAt = nowMillis,
+            optimalRiskReward = evaluation.riskReward,
+            entryPathFa = evaluation.entryPathFa,
+        )
+    }
+
     fun evaluateBitcoinStrategy(
         activeModel: BitcoinStrategyModel,
         config: BaseStrategyConfig,
@@ -2793,6 +2925,26 @@ object IchimokuStrategyEngine {
                 summaryFa = "در حال تکمیل کندل‌های ۳ تایم‌فریم (${config.macroInterval.label}/${config.strategyInterval.label}/${config.triggerInterval.label}) برای $normalizedSymbol...",
                 triggerBarTime = trigSnap?.time ?: 0L,
                 evaluatedAt = nowMillis,
+            )
+        }
+
+        // ── مدل مستقل «خط میانهٔ اندروز + هم‌افزایی فیبوناچی» (کین) ──
+        // این مدل منطق ایچیموکوی خودش را ندارد؛ سنجشش کاملاً در KaneMedianLineEngine انجام می‌شود
+        // و همین‌جا قبل از هر اورراید/فیلتر ایچیموکو برمی‌گردد تا هیچ شرط ایچیموکویی روی آن اثر نگذارد.
+        if (activeModel == BitcoinStrategyModel.KANE_ML_FIB_SYNERGY) {
+            return evaluateKaneMedianLineReport(
+                activeModel = activeModel,
+                config = config,
+                macroCandles = alignedMacroCandles,
+                entryCandles = alignedStrategyCandles,
+                macroSnapshot = macroSnap,
+                strategySnapshot = stratSnap,
+                triggerSnapshot = trigSnap,
+                livePriceOverride = livePriceOverride,
+                effectiveId = effectiveId,
+                effectiveTitle = effectiveTitle,
+                nowMillis = nowMillis,
+                symbol = normalizedSymbol,
             )
         }
 
