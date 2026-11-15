@@ -714,8 +714,6 @@ jobs:
       - name: Keep the default-branch manifest on the newest release
         if: steps.guard.outputs.ready == 'true' && steps.publish.outcome == 'success' && steps.collect.outputs.tag != ''
         env:
-          TAG: ${{ steps.collect.outputs.tag }}
-        env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.collect.outputs.tag }}
         run: |
