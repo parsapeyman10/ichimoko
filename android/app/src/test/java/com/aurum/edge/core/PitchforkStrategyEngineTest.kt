@@ -25,15 +25,26 @@ class PitchforkStrategyEngineTest {
     private fun candle(index: Int, open: Double, high: Double, low: Double, close: Double, stepMs: Long = 4 * 3_600_000L) =
         Candle(index.toLong() * stepMs, open, high, low, close, 1_000.0, true)
 
-    /** سری با رژیم‌های متناوب (مثل دادهٔ نمایشی فایل مرجع) تا هر دو استراتژی فرصت داشته باشند. */
-    private fun regimeSeries(bars: Int, amplitude: Double = 0.006, seedShift: Double = 0.0): List<Candle> {
+    /** مولد شبه‌تصادفی قطعی (همان LCG که با فایل مرجع صحت‌سنجی شد). */
+    private class Lcg(seed: Long) {
+        private var state = if (seed == 0L) 7L else seed
+        fun next(): Double {
+            state = (1_103_515_245L * state + 12_345L) % (1L shl 31)
+            return state.toDouble() / (1L shl 31).toDouble()
+        }
+    }
+
+    /** سری با رژیم‌های متناوب + نویز قطعی، مثل دادهٔ نمایشی فایل مرجع. */
+    private fun regimeSeries(bars: Int, amplitude: Double = 0.007, seedShift: Double = 0.0): List<Candle> {
         val out = mutableListOf<Candle>()
+        val rnd = Lcg(7L + (seedShift * 1000).toLong())
         var close = 100.0
         var previous = 100.0
         for (i in 0 until bars) {
             val drift = sin(i * PI / 37.0 + seedShift) * amplitude
             val wave = sin(i * PI / 11.0) * amplitude * 0.5
-            close = previous * (1.0 + drift + wave)
+            val noise = (rnd.next() - 0.5) * 0.004
+            close = previous * (1.0 + drift + wave + noise)
             val open = previous
             val high = maxOf(open, close) * 1.002
             val low = minOf(open, close) * 0.998
@@ -181,6 +192,23 @@ class PitchforkStrategyEngineTest {
         assertEquals(direct.riskReward, report.riskReward)
         assertNotNull(report.summaryFa)
         assertTrue(report.summaryFa.isNotBlank())
+    }
+
+    @Test
+    fun aSignalOnTheLastBarBecomesActionableAndIsCausal() {
+        val candles = regimeSeries(2500)
+        val signals = PitchforkStrategyEngine.generateSignals(candles)
+        assertTrue("موتور باید ستاپ بسازد", signals.isNotEmpty())
+
+        // بریدن سری دقیقاً روی کندل سیگنال باید همان سیگنال را بازتولید کند (بدون نگاه به آینده)
+        // و همان لحظه باید قابل معامله باشد.
+        val reproduced = signals.take(4).any { signal ->
+            val evaluation = PitchforkStrategyEngine.evaluate(candles.take(signal.bar + 1))
+            evaluation.isActionable &&
+                (evaluation.action == SignalAction.BUY) == (signal.side == 1) &&
+                (evaluation.kind == signal.kind)
+        }
+        assertTrue("سیگنال باید روی همان کندل بازتولید و قابل معامله شود", reproduced)
     }
 
     @Test
