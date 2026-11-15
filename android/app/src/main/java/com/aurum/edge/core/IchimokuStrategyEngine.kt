@@ -205,7 +205,7 @@ val BitcoinStrategyModel.isDrivePdfStrategy: Boolean
     get() = false
 
 fun BitcoinStrategyModel.driveBookPlaybook(): DriveBookPlaybookSpec = when (this) {
-    KANE_ML_FIB_SYNERGY -> DriveBookPlaybookSpec(
+    BitcoinStrategyModel.KANE_ML_FIB_SYNERGY -> DriveBookPlaybookSpec(
         strategyId = id,
         bookFileTitle = "kane_median_line_fibonacci_synergy.py (پورت کتاب Median Line and Fibonacci Synergy)",
         authorAndEdition = "$badgeFa — $authorRefFa",
