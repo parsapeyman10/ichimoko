@@ -78,11 +78,15 @@ python -m pip install --upgrade "pyinstaller>=6.0,<7.0"
 if errorlevel 1 goto :failed
 
 echo === Packaging one-file Windows application ===
-rem Keep this invocation on one physical CMD line. A trailing-space caret can silently
-rem drop the final positional script argument, which makes PyInstaller report that
-rem its required scriptname is missing.
-python -m PyInstaller --noconfirm --clean --onefile --windowed --name "Aurum_Edge_Windows" --paths "%SCRIPT_DIR%" --distpath "%DIST_DIR%" --workpath "%WORK_DIR%" --specpath "%SPEC_DIR%" "%APP_FILE%"
+rem %%~dp0 ends with a backslash. Passing that value inside quotes to a Python
+rem executable can escape the closing quote, swallowing the positional script name.
+rem Build from the application directory and use dot/source literals instead.
+pushd "%SCRIPT_DIR%"
 if errorlevel 1 goto :failed
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name "Aurum_Edge_Windows" --paths "." --distpath "%DIST_DIR%" --workpath "%WORK_DIR%" --specpath "%SPEC_DIR%" "aurum_edge.py"
+set "PYINSTALLER_EXIT_CODE=%ERRORLEVEL%"
+popd
+if not "%PYINSTALLER_EXIT_CODE%"=="0" goto :failed
 
 echo.
 echo === SUCCESS ===

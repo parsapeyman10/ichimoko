@@ -25,7 +25,10 @@ class AurumPythonCoreTests(unittest.TestCase):
     def test_build_batch_passes_pyinstaller_the_application_source(self) -> None:
         batch = (Path(__file__).resolve().parent / "build_windows.bat").read_text(encoding="utf-8")
         invocation = next(line.strip() for line in batch.splitlines() if line.strip().startswith("python -m PyInstaller"))
-        self.assertIn('"%APP_FILE%"', invocation)
+        self.assertIn('pushd "%SCRIPT_DIR%"', batch)
+        self.assertIn('--paths "."', invocation)
+        self.assertIn('"aurum_edge.py"', invocation)
+        self.assertNotIn('--paths "%SCRIPT_DIR%"', invocation)
         self.assertFalse(invocation.endswith("^"))
 
     def bars(self, count: int = 120) -> list[Candle]:
