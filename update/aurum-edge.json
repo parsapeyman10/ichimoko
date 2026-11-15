@@ -1,16 +1,20 @@
 {
   "applicationId": "com.aurum.edge",
-  "versionCode": 796,
-  "versionName": "3.9.87",
-  "tagName": "v3.9.87",
-  "commitSha": "cd5db03798a58fab0f280d899eb2197373705ca4",
-  "publishedAt": "2026-11-14T20:20:22Z",
-  "artifactName": "AurumEdge-v3.9.87.apk",
+  "versionCode": 798,
+  "versionName": "3.9.89",
+  "tagName": "v3.9.89",
+  "commitSha": "593ea3066c35146f26ffa82b9d7a1a285a6b6ee4",
+  "publishedAt": "2026-11-15T18:43:12Z",
+  "artifactName": "AurumEdge-v3.9.89.apk",
   "notes": "Aurum Edge Android APK built by the versioned GitHub Actions workflow. The in-app updater verifies package name, signing certificate, versionCode, size and SHA-256 before opening Android Installer.",
-  "apkUrl": "https://github.com/parsapeyman10/ichimoko/releases/download/v3.9.87/AurumEdge-v3.9.87.apk",
-  "sha256": "9e45b398be4ab7e820656fc9df12726d8105ab9ca8db6764de9a497a281fa559",
-  "sizeBytes": 12713017,
+  "apkUrl": "https://github.com/parsapeyman10/ichimoko/releases/download/v3.9.89/AurumEdge-v3.9.89.apk",
+  "sha256": "bee52b56aebbb3ce9e537d16e36ad0dc8afc0f88ed5753dbf6468eefc81b477a",
+  "sizeBytes": 12745785,
   "signerSha256": "137f3f98f6c85fdd8671d1d2099b095ed82f3f91594ac9e7b1ba22c264ed4a04",
   "minSdk": 26,
-  "targetSdk": 35
+  "targetSdk": 35,
+  "supportedAbis": [
+    "arm64-v8a",
+    "armeabi-v7a"
+  ]
 }
