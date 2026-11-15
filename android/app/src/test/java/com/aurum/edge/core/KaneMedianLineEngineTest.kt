@@ -80,7 +80,8 @@ class KaneMedianLineEngineTest {
         val up = set.first { it.name == "UP" }
         val lo = set.first { it.name == "LO" }
 
-        assertEquals(0.5, ml.slope, 1e-9)
+        // شیب = (وسط قیمت P2-P3 منهای P1) تقسیم بر فاصلهٔ زمانی = (۱۱۵−۱۰۰)/۱۵.
+        assertEquals(1.0, ml.slope, 1e-9)
         // خط میانه دقیقاً از وسط P2–P3 می‌گذرد.
         assertEquals((120.0 + 110.0) / 2.0, ml.y(15.0), 1e-9)
         // موازی‌ها از خود P2 و P3 می‌گذرند.
