@@ -110,9 +110,10 @@ enum class BitcoinStrategyModel(
         titleFa = "kane_median_line_fibonacci_synergy — خط میانهٔ اندروز + هم‌افزایی فیبوناچی (کین)",
         badgeFa = "مستقل · خط میانه/فیبو",
         authorRefFa = "Jim Kane (Median Line and Fibonacci Synergy)",
-        summaryFa = "فورک خط میانهٔ اندروز از سه پیوت متناوب ساختار ۴ ساعته، ناحیهٔ معاملهٔ بالقوه از " +
-            "هم‌پوشانی موازی فورک با کلاستر فیبوناچی، ورود روی کندل تایید ۱ ساعته و اهداف خط میانه و " +
-            "موازی مقابل با قفل R در بازهٔ ۱٫۵ تا ۳٫۰.",
+        summaryFa = "پورت کامل فایل مرجع kane_median_line_fibonacci_synergy.py: زیگزاگ علّی، الگوی ABCD، " +
+            "گروه‌بندی فیبوناچی برای ناحیهٔ PTA، همهٔ خانواده‌های خط میانه (استاندارد، Modified Schiff، " +
+            "Adjusted، روند/کلون، Offset)، امتیاز Synergy ۱ تا ۱۰، تریگر اجباری EMA 5/13 و هدف ۱٫۲۷۲ " +
+            "اکستنشن با قفل R در بازهٔ ۱٫۵ تا ۳٫۰.",
         hasPatel = false,
         hasTuttle = false,
         hasHosoda = false,
@@ -2772,7 +2773,7 @@ object IchimokuStrategyEngine {
         symbol: String,
     ): StrategyEvaluationReport {
         val onLockedTimeframes = config.macroInterval == Interval.H4 && config.strategyInterval == Interval.H1
-        if (!onLockedTimeframes || macroCandles.size < 60 || entryCandles.size < 30) {
+        if (!onLockedTimeframes || macroCandles.size < KaneConfig().minMacroBars || entryCandles.size < KaneConfig().minEntryBars) {
             val note = if (!onLockedTimeframes) {
                 "مدل کین فقط روی ساختار ۴ ساعته و ورود ۱ ساعته سنجیده می‌شود " +
                     "(الان: ${config.macroInterval.label}/${config.strategyInterval.label})."
@@ -2812,9 +2813,6 @@ object IchimokuStrategyEngine {
 
         val kaneConfig = KaneConfig(
             minRiskReward = max(config.minRiskReward, 1.5),
-            slBufferAtr = config.slBufferAtr.coerceIn(0.15, 0.55),
-            minEfficiencyRatio = config.minEfficiencyRatio.coerceIn(0.14, 0.45),
-            entryMode = KaneEntryMode.BOTH,
         )
         val evaluation = KaneMedianLineEngine.evaluate(
             macroCandles = macroCandles,
@@ -2838,9 +2836,9 @@ object IchimokuStrategyEngine {
             livePrice = evaluation.livePrice,
             suggestedEntry = evaluation.entry,
             suggestedStopLoss = evaluation.stopLoss,
-            targetV = evaluation.medianLine.takeIf { it > 0.0 },
-            targetN = evaluation.upperParallel.takeIf { it > 0.0 },
-            targetE = evaluation.lowerParallel.takeIf { it > 0.0 },
+            targetV = evaluation.zoneLow.takeIf { it > 0.0 },
+            targetN = evaluation.zoneHigh.takeIf { it > 0.0 },
+            targetE = null,
             primaryTakeProfit = evaluation.takeProfit,
             riskReward = evaluation.riskReward,
             macroSnapshot = macroSnapshot,

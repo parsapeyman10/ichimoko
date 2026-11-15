@@ -6,135 +6,119 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sign
 
 /**
- * استراتژی «خط میانه و هم‌افزایی فیبوناچی» به سبک کین (`kane_median_line_fibonacci_synergy`).
+ * پورت Kotlin از فایل مرجع کاربر: `kane_median_line_fibonacci_synergy.py`
+ * (Jim Kane — *Median Line and Fibonacci Synergy*).
  *
- * چه چیزی از کتاب کین گرفته شده و چه چیزی نه — صریح و قابل حسابرسی:
- * **گرفته شده:** ایدهٔ هم‌افزایی (وقتی خط میانهٔ اندروز، موازی‌های آن و کلاستر فیبوناچی به یک ناحیهٔ
- * واحد اشاره کنند، آن ناحیه «ناحیهٔ معاملهٔ بالقوه» است)، و ساخت فورک از سه پیوت متناوب
- * (`P1` تا وسط `P2-P3`، سپس موازی از `P2` و `P3`).
- * **گرفته نشده:** قواعد اختصاصی کتاب کین منتشر نشده‌اند (کتاب چاپی و خصوصی است)، پس این‌جا یک
- * نسخهٔ **مکانیزهٔ شفاف** پیاده شده است: تمام تصمیم‌ها از هندسه و آستانه‌های ثابت ATR می‌آیند، انتخاب
- * پیوت قطعی است (فراکتال + برجستگی ATR + تناوب)، و هر معامله سه‌گانهٔ پیوت خودش را ثبت می‌کند تا
- * بعداً قابل حسابرسی باشد. هیچ پارامتری برای یک نماد خاص تیون نمی‌شود.
+ * این فایل عیناً همان زنجیرهٔ تصمیم فایل پایتون را پیاده می‌کند:
+ * زیگزاگ علّی → الگوی ABCD → گروه‌بندی فیبوناچی برای ساخت ناحیهٔ PTA → ساخت همهٔ خانواده‌های خط
+ * (ست بزرگ، ست روی خود ABCD استاندارد و Modified Schiff، ست Adjusted، خطوط روند/کلون، Offset ها) →
+ * شمارش برخورد خطوط با PTA + «دیده‌شدن» ست + هم‌زمانی زمانی → امتیاز ۱..۱۰ → آستانهٔ ۷ →
+ * انتظار برای لمس ناحیه → تریگر اجباری EMA 5/13 → حد ضرر و هدف ۱٫۲۷۲ اکستنشن.
  *
- * این موتور **خالص** است: فقط کندل و تنظیمات می‌گیرد و نتیجه می‌دهد؛ نه به شبکه، نه به ژورنال و نه
- * به لایهٔ عصبی وابسته نیست. قرارداد پول (`$۵` دقیق و `R × $۵`) در لایهٔ اجرا اعمال می‌شود، نه این‌جا.
+ * تفاوت‌های عمدی با فایل پایتون (همه در چک‌لیست و خلاصهٔ فارسی هم گزارش می‌شوند):
+ * ۱) قرارداد پول این اپ: R حداقل ۱٫۵ و حداکثر ۳٫۰ (فایل مرجع `min_rr = 1.0` دارد). اگر هدف هندسی
+ *    کمتر از ۱٫۵R بدهد، هدف روی ۱٫۵R بسته می‌شود و همین در چک‌لیست نوشته می‌شود؛ اگر بیشتر از ۳R
+ *    باشد روی ۳R بریده می‌شود.
+ * ۲) ضریب حجم `_scale` فایل مرجع (۰٫۵ / ۱٫۰ / ۱٫۲۵ بر اساس امتیاز) اعمال **نمی‌شود**، چون ریسک هر
+ *    معامله در این اپ باید دقیقاً ۵ دلار بماند. امتیاز فقط برای اولویت‌بندی و نمایش استفاده می‌شود.
+ * ۳) ساختار (زیگزاگ/ست/امتیاز) روی تایم‌فریم ۴ ساعته و تریگر/حد ضرر روی ۱ ساعته محاسبه می‌شود.
  */
-enum class KaneEntryMode(val labelFa: String) {
-    PARALLEL_REJECTION("رد در موازی مقابل و بازگشت به خط میانه"),
-    MEDIAN_CONTINUATION("پولبک به خط میانه در جهت فورک"),
-    BOTH("هر دو حالت (هر کدام اول فعال شود)"),
-}
-
-/** یک پیوت تأییدشدهٔ ساختار (سقف یا کف) روی تایم‌فریم ساختار. */
 data class KanePivot(
     val index: Int,
-    val time: Long,
     val price: Double,
     val isHigh: Boolean,
-) {
-    val labelFa: String get() = if (isHigh) "سقف" else "کف"
-}
-
-/**
- * فورک خط میانهٔ اندروز: خط میانه از `P1` و از وسط `P2-P3` می‌گذرد؛ دو موازی با همان شیب از
- * `P2` و `P3` کشیده می‌شوند.
- */
-data class KaneFork(
-    val p1: KanePivot,
-    val p2: KanePivot,
-    val p3: KanePivot,
-    val slopePerBar: Double,
-) {
-    val midIndex: Double get() = (p2.index + p3.index) / 2.0
-    val midPrice: Double get() = (p2.price + p3.price) / 2.0
-
-    /** فورک صعودی یعنی `P1` یک کف بوده و ساختار سقف-کف-سقف بالا رفته است. */
-    val isBullishStructure: Boolean get() = !p1.isHigh
-
-    fun medianAt(index: Int): Double = p1.price + slopePerBar * (index - p1.index)
-
-    fun lineThrough(pivot: KanePivot, index: Int): Double =
-        pivot.price + slopePerBar * (index - pivot.index)
-
-    fun upperAt(index: Int): Double = max(lineThrough(p2, index), lineThrough(p3, index))
-
-    fun lowerAt(index: Int): Double = min(lineThrough(p2, index), lineThrough(p3, index))
-
-    val anchorsFa: String
-        get() = "P1 ${p1.labelFa} #${p1.index} · P2 ${p2.labelFa} #${p2.index} · P3 ${p3.labelFa} #${p3.index}"
-}
-
-/** یک سطح فیبوناچی روی موج `P2-P3` با برچسب فارسی. */
-data class KaneFibLevel(val labelFa: String, val price: Double)
-
-object KaneFibonacci {
-    /**
-     * سطوح فیبوناچی موج `P2-P3` به‌صورت متقارن:
-     * سه اصلاح داخل موج (۳۸٫۲٪، ۵۰٪، ۶۱٫۸٪) و اکستنشن‌های ۱۲۷٫۲٪ و ۱۶۱٫۸٪ در **هر دو جهت**
-     * (بالای سقف موج و پایین کف موج). دلیل تقارن: در فورک صعودی، هم رد در موازی بالا (اکستنشن بالای
-     * موج) و هم پولبک به خط میانه (باند اصلاح) باید بتوانند هم‌افزایی فیبوناچی بسازند.
-     */
-    fun levels(p2Price: Double, p3Price: Double): List<KaneFibLevel> {
-        val high = max(p2Price, p3Price)
-        val low = min(p2Price, p3Price)
-        val range = high - low
-        if (range <= 0.0) return emptyList()
-        return listOf(
-            KaneFibLevel("اصلاح ۳۸٫۲٪", low + range * 0.382),
-            KaneFibLevel("اصلاح ۵۰٪", low + range * 0.5),
-            KaneFibLevel("اصلاح ۶۱٫۸٪", low + range * 0.618),
-            KaneFibLevel("اکستنشن ۱۲۷٫۲٪ بالا", high + range * 0.272),
-            KaneFibLevel("اکستنشن ۱۶۱٫۸٪ بالا", high + range * 0.618),
-            KaneFibLevel("اکستنشن ۱۲۷٫۲٪ پایین", low - range * 0.272),
-            KaneFibLevel("اکستنشن ۱۶۱٫۸٪ پایین", low - range * 0.618),
-        )
-    }
-
-    /** «هم‌افزایی» = حداقل یک سطح داخل باند تلورانس حول ناحیهٔ لمس. */
-    fun cluster(levels: List<KaneFibLevel>, target: Double, tolerance: Double): List<KaneFibLevel> =
-        levels.filter { abs(it.price - target) <= tolerance }
-
-    /** باند اصلاح ۳۸٫۲٪ تا ۶۱٫۸٪ موج؛ ناحیه‌ای که خط میانه معمولاً داخلش می‌افتد. */
-    fun retracementZone(p2Price: Double, p3Price: Double): ClosedFloatingPointRange<Double>? {
-        val high = max(p2Price, p3Price)
-        val low = min(p2Price, p3Price)
-        val range = high - low
-        if (range <= 0.0) return null
-        return (low + range * 0.382)..(low + range * 0.618)
-    }
-}
-
-/** تنظیمات ثابت موتور خط میانه–فیبوناچی. تمام مقادیر از تئوری آمده‌اند، نه از بهینه‌سازی. */
-data class KaneConfig(
-    val pivotLeft: Int = 3,
-    val pivotRight: Int = 3,
-    val minPivotProminenceAtr: Double = 0.8,
-    val minPivotSeparationBars: Int = 6,
-    /** تلورانس لمس خط/موازی روی تایم‌فریم ورود. */
-    val touchToleranceAtr: Double = 0.25,
-    /** باند هم‌افزایی فیبوناچی. */
-    val fibClusterToleranceAtr: Double = 0.15,
-    /** حداقل هم‌راستایی فیبوناچی برای تأیید ناحیهٔ معامله؛ ۲ مورد یا بیشتر «هم‌افزایی قوی» است. */
-    val minFibConfluence: Int = 1,
-    val minWickRatio: Double = 0.35,
-    val slBufferAtr: Double = 0.25,
-    val maxStopAtr: Double = 3.0,
-    val minStopAtr: Double = 0.30,
-    val minEfficiencyRatio: Double = 0.20,
-    val minRoomToMedianAtr: Double = 0.50,
-    val minRiskReward: Double = 1.5,
-    val maxRiskReward: Double = 3.0,
-    val maxForkFadeAtr: Double = 1.0,
-    val minSlopeAtrPerBar: Double = 0.02,
-    val entryMode: KaneEntryMode = KaneEntryMode.BOTH,
-    val minMacroBars: Int = 60,
-    val minEntryBars: Int = 30,
+    /** باری که پیوت بدون نگاه به آینده تأیید می‌شود. */
+    val confirmIndex: Int,
 )
 
-/** نتیجهٔ کامل سنجش یک نماد با موتور خط میانه–فیبوناچی. */
+/** یک خط از یک ست: `y = slope * x + intercept`. */
+data class KaneLine(
+    val slope: Double,
+    val intercept: Double,
+    val name: String,
+    val family: String,
+    var weight: Double,
+    val setId: Int,
+) {
+    fun y(x: Double): Double = slope * x + intercept
+}
+
+/** یک عدد فیبوناچی در ناحیهٔ PTA؛ `kind` یا `pat` است یا `pos`. */
+data class KaneFibNumber(
+    val price: Double,
+    val label: String,
+    val kind: String,
+    val preferred: Boolean,
+)
+
+/** ستاپ کامل یک طرف (خرید/فروش) در لحظهٔ تأیید نقطهٔ C. */
+data class KaneSetup(
+    val side: Int,
+    val barIndex: Int,
+    val a: KanePivot,
+    val b: KanePivot,
+    val c: KanePivot,
+    val x: KanePivot,
+    val impulseHigh: Double,
+    val zoneLow: Double,
+    val zoneHigh: Double,
+    val windowStart: Double,
+    val windowEnd: Double,
+    val expireBar: Int,
+    val rating: Double,
+    val partsFa: Map<String, Double>,
+    val groupLabelsFa: List<String>,
+    val familyBest: Map<String, Double>,
+    val timeScore: Double,
+    val abBars: Int,
+    val atr: Double,
+)
+
+/** پارامترهای موتور؛ نام‌ها همان نام‌های فایل مرجع پایتون هستند. */
+data class KaneConfig(
+    val atrLength: Int = 14,
+    val zzSmall: Double = 1.6,
+    val zzBig: Double = 4.5,
+    val emaFast: Int = 5,
+    val emaSlow: Int = 13,
+    val trendMinAtr: Double = 6.0,
+    val bcMin: Double = 0.382,
+    val bcMax: Double = 1.272,
+    val projectionRatios: List<Double> = listOf(1.000, 1.128, 1.272),
+    val extensionRatios: List<Double> = listOf(1.272, 1.460),
+    val positionPreferred: List<Double> = listOf(0.300, 0.382, 0.447),
+    val positionOther: List<Double> = listOf(0.500, 0.618, 0.685, 0.786),
+    val groupToleranceAtr: Double = 0.8,
+    val zonePadAtr: Double = 0.15,
+    val hitToleranceAtr: Double = 0.35,
+    val seenToleranceAtr: Double = 0.35,
+    val slopeMinAtr: Double = 0.01,
+    val slopeMaxAtr: Double = 1.50,
+    val adjustedPairs: Int = 3,
+    val bigSets: Int = 3,
+    val minRating: Double = 7.0,
+    val perfectCap: Double = 9.75,
+    val allowCountertrend: Boolean = false,
+    val maxWaitMultiplier: Double = 3.0,
+    val invalidAtr: Double = 1.0,
+    val maxTriggerBars: Int = 12,
+    val crossLookback: Int = 3,
+    val stopAtr: Double = 0.35,
+    val maxRiskAtr: Double = 3.5,
+    val targetExtension: Double = 1.272,
+    val maxHoldBars: Int = 250,
+    /** قرارداد این اپ: کف و سقف R. */
+    val minRiskReward: Double = 1.5,
+    val maxRiskReward: Double = 3.0,
+    /** با بودجهٔ کندل این اپ (حدود ۱۳۰ کندل ۴ ساعته) آستانه روی ۱۲۰ تنظیم شده است. */
+    val minMacroBars: Int = 120,
+    val minEntryBars: Int = 40,
+)
+
+/** نتیجهٔ سنجش یک نماد در این لحظه. */
 data class KaneEvaluation(
     val action: SignalAction = SignalAction.NO_TRADE,
     val readiness: StrategyReadinessState = StrategyReadinessState.INSUFFICIENT_DATA,
@@ -147,139 +131,522 @@ data class KaneEvaluation(
     val conditions: List<StrategyConditionCheck> = emptyList(),
     val summaryFa: String = "",
     val entryPathFa: String = "",
-    val fork: KaneFork? = null,
-    val atrMacro: Double = 0.0,
-    val atrEntry: Double = 0.0,
-    val medianLine: Double = 0.0,
-    val upperParallel: Double = 0.0,
-    val lowerParallel: Double = 0.0,
-    val fibMatchesFa: List<String> = emptyList(),
-    val modeUsed: KaneEntryMode? = null,
+    val rating: Double = 0.0,
+    val zoneLow: Double = 0.0,
+    val zoneHigh: Double = 0.0,
+    val ratingPartsFa: Map<String, Double> = emptyMap(),
     val triggerBarTime: Long = 0L,
     val livePrice: Double = 0.0,
+    val contractNoteFa: String = "",
 )
 
 object KaneMedianLineEngine {
 
-    // ───────────────────────── ابزارهای خالص ─────────────────────────
+    // ───────────────────────── ابزارهای عددی ─────────────────────────
 
-    /** میانگین دامنهٔ واقعی (ATR) سادهٔ `period` کندل آخر. */
-    fun averageTrueRange(candles: List<Candle>, period: Int = 14): Double {
-        if (candles.size < 2 || period < 1) return 0.0
-        val from = max(1, candles.size - period)
-        var sum = 0.0
-        var count = 0
-        for (i in from until candles.size) {
-            val previousClose = candles[i - 1].close
-            val trueRange = max(
+    fun ewma(values: DoubleArray, span: Int): DoubleArray {
+        if (values.isEmpty()) return values
+        val alpha = 2.0 / (span + 1.0)
+        val out = DoubleArray(values.size)
+        out[0] = values[0]
+        for (i in 1 until values.size) out[i] = out[i - 1] + alpha * (values[i] - out[i - 1])
+        return out
+    }
+
+    /** ATR به سبک فایل مرجع: میانگین نمایی دامنهٔ واقعی با `alpha = 1/length`. */
+    fun atrSeries(candles: List<Candle>, length: Int): DoubleArray {
+        if (candles.isEmpty()) return DoubleArray(0)
+        val tr = DoubleArray(candles.size)
+        for (i in candles.indices) {
+            val previousClose = if (i == 0) candles[0].close else candles[i - 1].close
+            tr[i] = max(
                 candles[i].high - candles[i].low,
                 max(abs(candles[i].high - previousClose), abs(candles[i].low - previousClose)),
             )
-            sum += trueRange
-            count++
         }
-        return if (count == 0) 0.0 else sum / count
-    }
-
-    /** نسبت کارایی کافمن: حرکت خالص تقسیم بر مسیر طی‌شده. نزدیک ۱ یعنی روند، نزدیک ۰ یعنی نویز. */
-    fun efficiencyRatio(candles: List<Candle>, period: Int = 14): Double {
-        if (candles.size <= period) return 0.0
-        val last = candles.last().close
-        val first = candles[candles.size - 1 - period].close
-        var travelled = 0.0
-        for (i in (candles.size - period) until candles.size) {
-            travelled += abs(candles[i].close - candles[i - 1].close)
-        }
-        if (travelled <= 0.0) return 0.0
-        return abs(last - first) / travelled
+        val alpha = 1.0 / length.toDouble()
+        val out = DoubleArray(candles.size)
+        out[0] = tr[0]
+        for (i in 1 until candles.size) out[i] = out[i - 1] + alpha * (tr[i] - out[i - 1])
+        return out
     }
 
     /**
-     * تشخیص قطعی پیوت‌ها: فراکتال (`left` کندل چپ و `right` کندل راست)، سپس تناوب سقف/کف و
-     * حذف پیوت‌های کم‌برجسته‌تر از `minPivotProminenceAtr × ATR`. خروجی همیشه قطعی است و به
-     * ترتیب زمان برمی‌گردد.
+     * زیگزاگ علّی فایل مرجع (بدون نگاه به آینده): سوینگ وقتی تأیید می‌شود که قیمت به‌اندازهٔ
+     * `mult × ATR` از اکستریم برگردد؛ `confirmIndex` همان باری است که تأیید رخ داده.
      */
-    fun detectPivots(candles: List<Candle>, config: KaneConfig = KaneConfig(), atr: Double): List<KanePivot> {
-        if (candles.size < config.pivotLeft + config.pivotRight + 2 || atr <= 0.0) return emptyList()
-        val raw = mutableListOf<KanePivot>()
+    fun zigzag(high: DoubleArray, low: DoubleArray, atr: DoubleArray, mult: Double): List<KanePivot> {
+        val n = high.size
+        if (n < 3) return emptyList()
+        val pivots = mutableListOf<KanePivot>()
+        var direction = 0
+        var hi = high[0]
+        var hiIndex = 0
+        var lo = low[0]
+        var loIndex = 0
+        for (i in 1 until n) {
+            val threshold = mult * atr[i]
+            when (direction) {
+                0 -> {
+                    if (high[i] > hi) { hi = high[i]; hiIndex = i }
+                    if (low[i] < lo) { lo = low[i]; loIndex = i }
+                    if (high[i] - lo >= threshold && loIndex <= i) {
+                        pivots.add(KanePivot(loIndex, lo, false, i))
+                        direction = 1
+                        hi = high[i]
+                        hiIndex = i
+                    } else if (hi - low[i] >= threshold) {
+                        pivots.add(KanePivot(hiIndex, hi, true, i))
+                        direction = -1
+                        lo = low[i]
+                        loIndex = i
+                    }
+                }
+                1 -> {
+                    if (high[i] > hi) {
+                        hi = high[i]
+                        hiIndex = i
+                    } else if (hi - low[i] >= threshold) {
+                        pivots.add(KanePivot(hiIndex, hi, true, i))
+                        direction = -1
+                        lo = low[i]
+                        loIndex = i
+                    }
+                }
+                else -> {
+                    if (low[i] < lo) {
+                        lo = low[i]
+                        loIndex = i
+                    } else if (high[i] - lo >= threshold) {
+                        pivots.add(KanePivot(loIndex, lo, false, i))
+                        direction = 1
+                        hi = high[i]
+                        hiIndex = i
+                    }
+                }
+            }
+        }
+        return pivots
+    }
 
-        for (i in config.pivotLeft until candles.size - config.pivotRight) {
-            val bar = candles[i]
-            var isHigh = true
-            var isLow = true
-            for (offset in 1..config.pivotLeft) {
-                val other = candles[i - offset]
-                if (other.high >= bar.high) isHigh = false
-                if (other.low <= bar.low) isLow = false
+    /** آینه‌کردن برای فروش: همهٔ منطق فقط یک‌بار (خرید) نوشته می‌شود. */
+    private fun mirror(pivot: KanePivot, side: Int): KanePivot =
+        if (side == 1) pivot else pivot.copy(price = -pivot.price, isHigh = !pivot.isHigh)
+
+    private fun viewHigh(candles: List<Candle>, side: Int, index: Int): Double =
+        if (side == 1) candles[index].high else -candles[index].low
+
+    private fun viewLow(candles: List<Candle>, side: Int, index: Int): Double =
+        if (side == 1) candles[index].low else -candles[index].high
+
+    private fun viewClose(candles: List<Candle>, side: Int, index: Int): Double =
+        side * candles[index].close
+
+    // ───────────────────────── خطوط (فصل‌های ۱ تا ۶) ─────────────────────────
+
+    /** ML + موازی‌ها + division line + warning line. */
+    fun channelLines(slope: Double, upperIntercept: Double, lowerIntercept: Double, family: String, setId: Int): List<KaneLine> {
+        val up = max(upperIntercept, lowerIntercept)
+        val lo = min(upperIntercept, lowerIntercept)
+        val halfWidth = (up - lo) / 2.0
+        if (halfWidth < 1e-9) return emptyList()
+        val mid = (up + lo) / 2.0
+        val spec = listOf(
+            Triple("ML", mid, 1.0),
+            Triple("UP", up, 1.0),
+            Triple("LO", lo, 1.0),
+            Triple("DIV_U", mid + halfWidth / 2.0, 0.7),
+            Triple("DIV_L", mid - halfWidth / 2.0, 0.7),
+            Triple("DIV_UU", up + halfWidth / 2.0, 0.5),
+            Triple("DIV_LL", lo - halfWidth / 2.0, 0.5),
+            Triple("WARN_U1", up + halfWidth, 0.5),
+            Triple("WARN_L1", lo - halfWidth, 0.5),
+            Triple("WARN_U2", up + 2 * halfWidth, 0.4),
+            Triple("WARN_L2", lo - 2 * halfWidth, 0.4),
+        )
+        return spec.map { (name, intercept, weight) -> KaneLine(slope, intercept, name, family, weight, setId) }
+    }
+
+    /** ست استاندارد (خط میانه از P1 و وسط P2-P3) یا Modified Schiff (مبدأ = وسط P1-P2). */
+    fun medianSet(p1: KanePivot, p2: KanePivot, p3: KanePivot, family: String, setId: Int, schiff: Boolean = false): List<KaneLine> {
+        var x1 = p1.index.toDouble()
+        var y1 = p1.price
+        if (schiff) {
+            x1 = (p1.index + p2.index) / 2.0
+            y1 = (p1.price + p2.price) / 2.0
+        }
+        val xMid = (p2.index + p3.index) / 2.0
+        val yMid = (p2.price + p3.price) / 2.0
+        if (xMid <= x1) return emptyList()
+        val slope = (yMid - y1) / (xMid - x1)
+        if (!slope.isFinite()) return emptyList()
+        return channelLines(slope, p2.price - slope * p2.index, p3.price - slope * p3.index, family, setId)
+    }
+
+    /** ست Adjusted (فصل ۲): نقطهٔ ۱ «در فضا» است و C روی یکی از خطوط قفل می‌شود. */
+    fun adjustedSet(r2: KanePivot, r3: KanePivot, c: KanePivot, mode: String, setId: Int): List<KaneLine> {
+        val hiPoint = if (r2.price > r3.price) r2 else r3
+        val loPoint = if (r2.price > r3.price) r3 else r2
+        val x0: Double
+        val y0: Double
+        when (mode) {
+            "distal" -> { x0 = hiPoint.index.toDouble(); y0 = hiPoint.price }
+            "proximal" -> { x0 = loPoint.index.toDouble(); y0 = loPoint.price }
+            else -> {
+                x0 = (r2.index + r3.index) / 2.0
+                y0 = (r2.price + r3.price) / 2.0
             }
-            for (offset in 1..config.pivotRight) {
-                val other = candles[i + offset]
-                if (other.high > bar.high) isHigh = false
-                if (other.low < bar.low) isLow = false
+        }
+        val dx = c.index - x0
+        if (dx <= 0.0) return emptyList()
+        val slope = (c.price - y0) / dx
+        val upperIntercept = hiPoint.price - slope * hiPoint.index
+        val lowerIntercept = loPoint.price - slope * loPoint.index
+        if (upperIntercept <= lowerIntercept) return emptyList()
+        return channelLines(slope, upperIntercept, lowerIntercept, "ADJ", setId)
+    }
+
+    /** فصل ۶: خط روند بین دو اکستریم آخر + کلون موازی (sliding) روی اکستریم مقابل. */
+    fun trendLines(pivots: List<KanePivot>, initialSetId: Int): List<KaneLine> {
+        val out = mutableListOf<KaneLine>()
+        var setId = initialSetId
+        for (kind in listOf(true, false)) {
+            val sameKind = pivots.filter { it.isHigh == kind }.takeLast(3)
+            for (i in 0 until sameKind.size - 1) {
+                val a = sameKind[i]
+                val b = sameKind[i + 1]
+                if (b.index <= a.index) continue
+                val slope = (b.price - a.price) / (b.index - a.index)
+                out.add(KaneLine(slope, a.price - slope * a.index, "TL", "TL", 0.8, setId))
+                val opposite = pivots.filter { it.isHigh != kind && it.index in (a.index + 1) until b.index }
+                if (opposite.isNotEmpty()) {
+                    val reference = if (kind) opposite.minByOrNull { it.price }!! else opposite.maxByOrNull { it.price }!!
+                    out.add(KaneLine(slope, reference.price - slope * reference.index, "SLIDE", "TL", 0.6, setId))
+                }
+                setId += 1
             }
+        }
+        return out
+    }
+
+    /** فصل ۵: کلون موازی خطِ یک ست روی سوینگ‌هایی که روی هیچ خطی نیستند. */
+    fun slidingFromSlope(slope: Double, pivots: List<KanePivot>, lines: List<KaneLine>, atr: Double, setId: Int): List<KaneLine> {
+        val out = mutableListOf<KaneLine>()
+        for (pivot in pivots.takeLast(6)) {
+            val distance = lines.minOfOrNull { abs(pivot.price - it.y(pivot.index.toDouble())) } ?: Double.MAX_VALUE
+            if (distance > 0.3 * atr) {
+                out.add(KaneLine(slope, pivot.price - slope * pivot.index, "SLIDE", "TL", 0.6, setId))
+            }
+        }
+        return out
+    }
+
+    /** فصل ۴: displacement و reflection ست بر اساس «جا ماندن» قیمت از خطوط. */
+    fun offsetLines(lines: List<KaneLine>, pivots: List<KanePivot>, sinceIndex: Int, untilIndex: Int, atr: Double): List<KaneLine> {
+        if (lines.isEmpty()) return emptyList()
+        val base = lines.filter { it.name in listOf("ML", "UP", "LO", "DIV_U", "DIV_L") }
+        val up = lines.firstOrNull { it.name == "UP" }
+        val lo = lines.firstOrNull { it.name == "LO" }
+        if (base.isEmpty() || up == null || lo == null) return emptyList()
+        val halfWidth = abs(up.intercept - lo.intercept) / 2.0
+        val misses = mutableListOf<Double>()
+        for (pivot in pivots) {
+            if (pivot.index <= sinceIndex || pivot.index >= untilIndex) continue
+            val nearest = base.minByOrNull { abs(pivot.price - it.y(pivot.index.toDouble())) } ?: continue
+            val delta = pivot.price - nearest.y(pivot.index.toDouble())
+            if (abs(delta) >= 0.12 * atr && abs(delta) <= 0.5 * halfWidth) misses.add(delta)
+        }
+        val out = mutableListOf<KaneLine>()
+        for (delta in misses.takeLast(2)) {
+            for (tag in listOf("DISP", "REFL")) {
+                val sign = if (tag == "DISP") 1.0 else -1.0
+                for (line in lines) {
+                    out.add(
+                        KaneLine(
+                            line.slope,
+                            line.intercept + sign * delta,
+                            "${tag}_${line.name}",
+                            "OFF",
+                            0.6 * line.weight,
+                            line.setId,
+                        )
+                    )
+                }
+            }
+        }
+        return out
+    }
+
+    /** آیا خط در بازهٔ زمانی [x0,x1] از ناحیهٔ PTA می‌گذرد؟ اگر بله، زمان برخورد. */
+    fun lineHit(line: KaneLine, zoneLow: Double, zoneHigh: Double, x0: Double, x1: Double, tolerance: Double): Double? {
+        val y0 = line.y(x0)
+        val y1 = line.y(x1)
+        val lo = min(y0, y1)
+        val hi = max(y0, y1)
+        if (hi < zoneLow - tolerance || lo > zoneHigh + tolerance) return null
+        val mid = 0.5 * (zoneLow + zoneHigh)
+        val x = if (abs(line.slope) < 1e-12) 0.5 * (x0 + x1) else (mid - line.intercept) / line.slope
+        return min(max(x, x0), x1)
+    }
+
+    /** «دیده‌شدن» ست: چه نسبتی از سوینگ‌های قبلی خودشان را روی خطوط اصلی ست دیده‌اند. */
+    fun seenRatio(
+        lines: List<KaneLine>,
+        pivots: List<KanePivot>,
+        startIndex: Int,
+        endIndex: Int,
+        excluded: Set<Int>,
+        atr: Double,
+        toleranceAtr: Double,
+    ): Double {
+        val main = lines.filter { it.name in listOf("ML", "UP", "LO", "DIV_U", "DIV_L") }
+        if (main.isEmpty()) return 0.0
+        var count = 0
+        for (pivot in pivots) {
+            if (pivot.index <= startIndex || pivot.index > endIndex || pivot.index in excluded) continue
+            val nearest = main.minOf { abs(pivot.price - it.y(pivot.index.toDouble())) }
+            if (nearest <= toleranceAtr * atr) count++
+        }
+        return min(1.0, count / 3.0)
+    }
+
+    /** گروه‌بندی فیبوناچی: خوشه‌ای که هم عدد pattern دارد و هم عدد position. */
+    fun bestGroup(levels: List<KaneFibNumber>, tolerance: Double): List<KaneFibNumber>? {
+        if (levels.isEmpty()) return null
+        val sorted = levels.sortedBy { it.price }
+        var best: List<KaneFibNumber>? = null
+        var bestScore = Double.NEGATIVE_INFINITY
+        for (i in sorted.indices) {
+            val group = sorted.drop(i).takeWhile { it.price - sorted[i].price <= tolerance }
+            val kinds = group.map { it.kind }.toSet()
+            if (!kinds.contains("pat") || !kinds.contains("pos")) continue
+            val preferredBonus = if (group.any { it.preferred }) 0.5 else 0.0
+            val width = (group.last().price - group.first().price)
+            val score = group.size + preferredBonus - width
+            if (score > bestScore) {
+                bestScore = score
+                best = group
+            }
+        }
+        return best
+    }
+
+    // ───────────────────────── ساخت ستاپ ─────────────────────────
+
+    private fun contextDirection(
+        barIndex: Int,
+        bigPivots: List<KanePivot>,
+        closes: DoubleArray,
+        ema50: DoubleArray,
+        ema100: DoubleArray,
+        ema200: DoubleArray,
+    ): Int {
+        val confirmed = bigPivots.filter { it.confirmIndex <= barIndex }
+        val highs = confirmed.filter { it.isHigh }.takeLast(2)
+        val lows = confirmed.filter { !it.isHigh }.takeLast(2)
+        var structure = 0
+        if (highs.size == 2 && lows.size == 2) {
+            if (highs[1].price > highs[0].price && lows[1].price > lows[0].price) structure = 1
+            else if (highs[1].price < highs[0].price && lows[1].price < lows[0].price) structure = -1
+        }
+        val score = structure.toDouble() +
+            sign(closes[barIndex] - ema100[barIndex]) +
+            sign(ema50[barIndex] - ema200[barIndex])
+        return when {
+            score >= 2.0 -> 1
+            score <= -2.0 -> -1
+            else -> 0
+        }
+    }
+
+    private fun buildSetup(
+        side: Int,
+        barIndex: Int,
+        smallPivots: List<KanePivot>,
+        bigPivots: List<KanePivot>,
+        macro: List<Candle>,
+        atr: DoubleArray,
+        context: Int,
+        config: KaneConfig,
+    ): KaneSetup? {
+        val viewSmall = smallPivots.takeLast(14).map { mirror(it, side) }
+        if (viewSmall.size < 4) return null
+        val c = viewSmall[viewSmall.size - 1]
+        val b = viewSmall[viewSmall.size - 2]
+        val a = viewSmall[viewSmall.size - 3]
+        if (!c.isHigh || b.isHigh || !a.isHigh) return null
+
+        val atrNow = atr[barIndex]
+        if (atrNow <= 0.0) return null
+        val viewBig = bigPivots.map { mirror(it, side) }
+        val x = viewBig.lastOrNull { !it.isHigh && it.index < a.index } ?: return null
+        if (x.price >= b.price) return null
+
+        var impulseHigh = Double.NEGATIVE_INFINITY
+        for (i in x.index..c.index) impulseHigh = max(impulseHigh, viewHigh(macro, side, i))
+        val impulseLow = x.price
+
+        val ab = a.price - b.price
+        val bc = c.price - b.price
+        if (ab <= 0.0) return null
+        val bcRatio = bc / ab
+        if (bcRatio < config.bcMin || bcRatio > config.bcMax) return null
+        if (impulseHigh - impulseLow < config.trendMinAtr * atrNow) return null
+        if (context == -side && !config.allowCountertrend) return null
+
+        // (الف) ناحیهٔ PTA از گروه‌بندی فیبوناچی: اعداد pattern و اعداد position
+        val levels = mutableListOf<KaneFibNumber>()
+        for (ratio in config.projectionRatios) {
+            levels.add(KaneFibNumber(c.price - ratio * ab, "AB=CD ${ratioText(ratio)}", "pat", false))
+        }
+        for (ratio in config.extensionRatios) {
+            levels.add(KaneFibNumber(c.price - ratio * bc, "BCext ${ratioText(ratio)}", "pat", false))
+        }
+        for (ratio in config.positionPreferred) {
+            levels.add(KaneFibNumber(impulseHigh - ratio * (impulseHigh - impulseLow), "pos ${ratioText(ratio)}", "pos", true))
+        }
+        for (ratio in config.positionOther) {
+            levels.add(KaneFibNumber(impulseHigh - ratio * (impulseHigh - impulseLow), "pos ${ratioText(ratio)}", "pos", false))
+        }
+        val inRange = levels.filter { it.price > impulseLow && it.price < c.price }
+        val group = bestGroup(inRange, config.groupToleranceAtr * atrNow) ?: return null
+        val zoneLow = group.minOf { it.price } - config.zonePadAtr * atrNow
+        val zoneHigh = group.maxOf { it.price } + config.zonePadAtr * atrNow
+        val groupWidth = zoneHigh - zoneLow - 2 * config.zonePadAtr * atrNow
+
+        val abBars = max(1, b.index - a.index)
+        val windowStart = max(barIndex + 1.0, c.index + 0.5 * abBars)
+        val windowEnd = max(windowStart + 3.0, c.index + 2.0 * abBars + 5.0)
+        val tolerance = config.hitToleranceAtr * atrNow
+
+        // (ب) خطوط همهٔ خانواده‌ها
+        val lines = mutableListOf<KaneLine>()
+        var setId = 0
+        data class SetMeta(val family: String, val slope: Double, val start: Int, val third: Int, val excluded: Set<Int>, val lines: List<KaneLine>)
+        val metas = mutableMapOf<Int, SetMeta>()
+
+        fun addSet(candidate: List<KaneLine>, family: String, anchors: List<KanePivot>, startIndex: Int, thirdIndex: Int) {
+            if (candidate.isEmpty()) return
+            val slope = candidate[0].slope
+            val weighted = candidate.toMutableList()
+            if (!(abs(slope) >= config.slopeMinAtr * atrNow && abs(slope) <= config.slopeMaxAtr * atrNow)) {
+                weighted.forEach { it.weight *= 0.5 }
+            }
+            metas[setId] = SetMeta(family, slope, startIndex, thirdIndex, anchors.map { it.index }.toSet(), weighted)
+            lines.addAll(weighted)
+            setId += 1
+        }
+
+        val viewBigConfirmed = viewBig.filter { it.confirmIndex <= barIndex }
+        val bigWindowStart = max(0, viewBigConfirmed.size - 2 - config.bigSets)
+        for (j in bigWindowStart until max(bigWindowStart, viewBigConfirmed.size - 2)) {
+            if (j + 2 >= viewBigConfirmed.size) break
+            val p1 = viewBigConfirmed[j]
+            val p2 = viewBigConfirmed[j + 1]
+            val p3 = viewBigConfirmed[j + 2]
+            val set = medianSet(p1, p2, p3, "BIG", setId).toMutableList()
+            if (set.isNotEmpty() && set[0].slope < 0) set.forEach { it.weight *= 0.6 }
+            addSet(set, "BIG", listOf(p1, p2, p3), p1.index, p3.index)
+        }
+
+        addSet(medianSet(a, b, c, "ABCD_ML", setId), "ABCD_ML", listOf(a, b, c), a.index, c.index)
+        addSet(medianSet(a, b, c, "ABCD_MS", setId, schiff = true), "ABCD_MS", listOf(a, b, c), a.index, c.index)
+
+        val before = viewSmall.dropLast(1)
+        for (j in 0 until config.adjustedPairs) {
+            if (before.size < 2 + j) break
+            val r2 = before[before.size - 2 - j]
+            val r3 = before[before.size - 1 - j]
+            for (mode in listOf("distal", "proximal", "ml")) {
+                addSet(adjustedSet(r2, r3, c, mode, setId), "ADJ", listOf(r2, r3, c), r2.index, r3.index)
+            }
+        }
+
+        val trend = trendLines(viewSmall, 1000)
+        lines.addAll(trend)
+        for ((metaId, meta) in metas.entries.take(6)) {
+            lines.addAll(slidingFromSlope(meta.slope, viewSmall, meta.lines, atrNow, 2000 + metaId))
+        }
+        for ((_, meta) in metas) {
+            if (meta.family == "BIG" || meta.family == "ADJ") {
+                lines.addAll(offsetLines(meta.lines, viewSmall, meta.third, c.index, atrNow))
+            }
+        }
+
+        // (ج) برخورد خطوط با PTA + دیده‌شدن ست + هم‌زمانی زمانی
+        val seen = metas.mapValues { (_, meta) ->
+            seenRatio(meta.lines, viewSmall, meta.start, c.index, meta.excluded, atrNow, config.seenToleranceAtr)
+        }
+        val hits = mutableListOf<Pair<KaneLine, Double>>()
+        val familyBest = mutableMapOf<String, Double>()
+        for (line in lines) {
+            val hit = lineHit(line, zoneLow, zoneHigh, windowStart, windowEnd, tolerance) ?: continue
+            var weight = line.weight
+            val setIdOfLine = line.setId
+            val seenValue = seen[setIdOfLine]
+            if (seenValue != null) weight *= 0.5 + 0.5 * seenValue
+            hits.add(line to hit)
+            familyBest[line.family] = max(familyBest[line.family] ?: 0.0, weight)
+        }
+        if (hits.isEmpty()) return null
+
+        val timeWindow = max(3.0, 0.15 * abBars)
+        var bestCount = 0
+        var bestFamilies = 0
+        for ((x1, _) in hits.sortedBy { it.second }) {
+            val inWindow = hits.filter { abs(it.second - x1) <= timeWindow }
+            if (inWindow.size > bestCount) {
+                bestCount = inWindow.size
+                bestFamilies = inWindow.map { it.first.family }.toSet().size
+            }
+        }
+        val timeScore = when {
+            bestFamilies >= 2 && bestCount >= 3 -> 1.0
+            bestFamilies >= 2 -> 0.5
+            else -> 0.0
+        }
+
+        // (د) امتیاز ۱..۱۰ (مجموع وزن‌ها = ۱۰)
+        val parts = linkedMapOf<String, Double>()
+        val preferred = group.any { it.preferred }
+        parts["pattern"] = (if (preferred) 1.0 else 0.5) +
+            (if (bcRatio in 0.5..0.9) 0.5 else 0.3) +
+            (if ((c.index - b.index).toDouble() / abBars in 0.3..1.5) 0.5 else 0.0)
+        parts["grouping"] = min(0.9, 0.3 * (group.size - 1)) +
             when {
-                isHigh -> raw.add(KanePivot(i, bar.time, bar.high, true))
-                isLow -> raw.add(KanePivot(i, bar.time, bar.low, false))
+                groupWidth <= 0.5 * atrNow -> 0.6
+                groupWidth <= 1.0 * atrNow -> 0.3
+                else -> 0.0
             }
-        }
+        parts["big_set"] = 1.5 * (familyBest["BIG"] ?: 0.0)
+        parts["abcd_sets"] = min(2.0, (familyBest["ABCD_ML"] ?: 0.0) + (familyBest["ABCD_MS"] ?: 0.0))
+        parts["adjusted"] = 1.0 * (familyBest["ADJ"] ?: 0.0)
+        parts["tl_off_slide"] = 0.5 * max(familyBest["TL"] ?: 0.0, familyBest["OFF"] ?: 0.0)
+        parts["time"] = 1.0 * timeScore
+        parts["context"] = if (context == side) 0.5 else 0.0
+        val rating = min(10.0, parts.values.sum())
 
-        // تناوب: دو سقف پشت‌سرهم یعنی فقط بلندترین سقف معتبر است؛ دو کف پشت‌سرهم یعنی فقط پایین‌ترین کف.
-        val alternating = mutableListOf<KanePivot>()
-        for (pivot in raw) {
-            val previous = alternating.lastOrNull()
-            if (previous == null) {
-                alternating.add(pivot)
-                continue
-            }
-            if (previous.isHigh == pivot.isHigh) {
-                val keepNew = if (pivot.isHigh) pivot.price >= previous.price else pivot.price <= previous.price
-                if (keepNew) alternating[alternating.lastIndex] = pivot
-            } else {
-                if (pivot.index - previous.index >= config.minPivotSeparationBars) alternating.add(pivot)
-            }
-        }
-
-        // برجستگی: هر پیوت باید نسبت به پیوت مخالف قبلی خودش به‌اندازهٔ کافی دور باشد.
-        val threshold = config.minPivotProminenceAtr * atr
-        val prominent = mutableListOf<KanePivot>()
-        for (pivot in alternating) {
-            val reference = prominent.lastOrNull()
-            if (reference == null) {
-                prominent.add(pivot)
-            } else if (abs(pivot.price - reference.price) >= threshold) {
-                prominent.add(pivot)
-            }
-        }
-        return prominent
-    }
-
-    /** ساخت فورک از سه پیوت متناوب؛ اگر هندسه بی‌معنی باشد `null`. */
-    fun buildFork(p1: KanePivot, p2: KanePivot, p3: KanePivot): KaneFork? {
-        if (p1.isHigh == p2.isHigh || p2.isHigh == p3.isHigh) return null
-        val midIndex = (p2.index + p3.index) / 2.0
-        val midPrice = (p2.price + p3.price) / 2.0
-        val denominator = midIndex - p1.index
-        if (abs(denominator) < 0.5) return null
-        val slope = (midPrice - p1.price) / denominator
-        if (!slope.isFinite()) return null
-        return KaneFork(p1 = p1, p2 = p2, p3 = p3, slopePerBar = slope)
-    }
-
-    /**
-     * سطوح فیبوناچی که با ناحیهٔ لمس هم‌راستا شده‌اند: یا خود باند اصلاح ۳۸٫۲–۶۱٫۸٪، یا سطح
-     * مشخصی که داخل `tolerance` بیفتد. خروجی برچسب‌های فارسی برای نمایش در چک‌لیست است.
-     */
-    fun fibConfluence(fork: KaneFork, touchLevel: Double, tolerance: Double): List<String> {
-        if (touchLevel <= 0.0 || tolerance <= 0.0) return emptyList()
-        val labels = mutableListOf<String>()
-        val zone = KaneFibonacci.retracementZone(fork.p2.price, fork.p3.price)
-        if (zone != null && touchLevel in (zone.start - tolerance)..(zone.endInclusive + tolerance)) {
-            labels.add("باند اصلاح ۳۸٫۲–۶۱٫۸٪ موج P2–P3")
-        }
-        KaneFibonacci.levels(fork.p2.price, fork.p3.price)
-            .filter { abs(it.price - touchLevel) <= tolerance }
-            .forEach { labels.add("${it.labelFa} در ${priceText(it.price)}") }
-        return labels
+        return KaneSetup(
+            side = side,
+            barIndex = barIndex,
+            a = a,
+            b = b,
+            c = c,
+            x = x,
+            impulseHigh = impulseHigh,
+            zoneLow = zoneLow,
+            zoneHigh = zoneHigh,
+            windowStart = windowStart,
+            windowEnd = windowEnd,
+            expireBar = (barIndex + config.maxWaitMultiplier * abBars + 10).toInt(),
+            rating = rating,
+            partsFa = parts,
+            groupLabelsFa = group.map { it.label },
+            familyBest = familyBest,
+            timeScore = timeScore,
+            abBars = abBars,
+            atr = atrNow,
+        )
     }
 
     // ───────────────────────── سنجش کامل ─────────────────────────
@@ -290,343 +657,250 @@ object KaneMedianLineEngine {
         config: KaneConfig = KaneConfig(),
         livePriceOverride: Double? = null,
     ): KaneEvaluation {
-        val conditions = mutableListOf<StrategyConditionCheck>()
-        var order = 0
-        fun addCondition(titleFa: String, passed: Boolean, detailFa: String) {
-            order += 1
-            conditions.add(StrategyConditionCheck(index = order, titleFa = titleFa, passed = passed, detailFa = detailFa))
-        }
-
         if (macroCandles.size < config.minMacroBars || entryCandles.size < config.minEntryBars) {
             return KaneEvaluation(
                 readiness = StrategyReadinessState.INSUFFICIENT_DATA,
-                summaryFa = "برای فورک خط میانه به حداقل ${config.minMacroBars} کندل ساختار و " +
-                    "${config.minEntryBars} کندل ورود نیاز است (فعلی: ${macroCandles.size}/${entryCandles.size}).",
+                summaryFa = "برای زیگزاگ/ست‌های کین حداقل ${config.minMacroBars} کندل ساختار و " +
+                    "${config.minEntryBars} کندل ورود لازم است (فعلی: ${macroCandles.size}/${entryCandles.size}).",
                 livePrice = entryCandles.lastOrNull()?.close ?: 0.0,
             )
         }
 
-        val atrMacro = averageTrueRange(macroCandles)
-        val atrEntry = averageTrueRange(entryCandles)
-        if (atrMacro <= 0.0 || atrEntry <= 0.0) {
-            return KaneEvaluation(
-                readiness = StrategyReadinessState.INSUFFICIENT_DATA,
-                summaryFa = "ATR صفر یا نامعتبر است؛ فورک قابل محاسبه نیست.",
-                livePrice = entryCandles.last().close,
-            )
-        }
+        val macroAtr = atrSeries(macroCandles, config.atrLength)
+        val entryAtr = atrSeries(entryCandles, config.atrLength)
+        val highs = DoubleArray(macroCandles.size) { macroCandles[it].high }
+        val lows = DoubleArray(macroCandles.size) { macroCandles[it].low }
+        val closes = DoubleArray(macroCandles.size) { macroCandles[it].close }
 
-        val pivots = detectPivots(macroCandles, config, atrMacro)
-        val fork = if (pivots.size >= 3) {
-            buildFork(pivots[pivots.size - 3], pivots[pivots.size - 2], pivots[pivots.size - 1])
-        } else {
-            null
-        }
+        val small = zigzag(highs, lows, macroAtr, config.zzSmall)
+        val big = zigzag(highs, lows, macroAtr, config.zzBig)
+        val ema50 = ewma(closes, 50)
+        val ema100 = ewma(closes, 100)
+        val ema200 = ewma(closes, 200)
+        val barIndex = macroCandles.lastIndex
+        val context = contextDirection(barIndex, big, closes, ema50, ema100, ema200)
 
-        val bar = entryCandles.last()
-        val price = livePriceOverride?.takeIf { it.isFinite() && it > 0.0 } ?: bar.close
-        val macroIndex = macroCandles.lastIndex
+        val entryCloses = DoubleArray(entryCandles.size) { entryCandles[it].close }
+        val entryFast = ewma(entryCloses, config.emaFast)
+        val entrySlow = ewma(entryCloses, config.emaSlow)
+        val lastEntry = entryCandles.lastIndex
+        val livePrice = livePriceOverride?.takeIf { it.isFinite() && it > 0.0 }
 
-        if (fork == null) {
-            addCondition("ساختار ۴ ساعته: سه پیوت متناوب", false, "تعداد پیوت معتبر: ${pivots.size}")
-            return KaneEvaluation(
-                readiness = StrategyReadinessState.BLOCKED,
-                conditions = conditions,
-                summaryFa = "پیوت کافی برای ساخت فورک خط میانه پیدا نشد (${pivots.size} پیوت).",
-                atrMacro = atrMacro,
-                atrEntry = atrEntry,
-                livePrice = price,
-                triggerBarTime = bar.time,
-            )
-        }
+        var bestEvaluation: KaneEvaluation? = null
+        var bestRating = Double.NEGATIVE_INFINITY
+        var considered = 0
+        var ratingRejected = 0
 
-        val median = fork.medianAt(macroIndex)
-        val upper = fork.upperAt(macroIndex)
-        val lower = fork.lowerAt(macroIndex)
-        val slopeAtr = fork.slopePerBar / atrMacro
-        val efficiency = efficiencyRatio(macroCandles)
+        for (side in listOf(1, -1)) {
+            val setup = buildSetup(side, barIndex, small, big, macroCandles, macroAtr, context, config) ?: continue
+            val sideConditions = mutableListOf<StrategyConditionCheck>()
 
-        addCondition(
-            titleFa = "ساختار ۴ ساعته: سه پیوت متناوب",
-            passed = true,
-            detailFa = "${fork.anchorsFa} · شیب ${"%.3f".format(Locale.US, slopeAtr)} ATR/کندل",
-        )
-        addCondition(
-            titleFa = "شیب فورک معنادار است",
-            passed = abs(slopeAtr) >= config.minSlopeAtrPerBar,
-            detailFa = "|شیب| = ${"%.3f".format(Locale.US, abs(slopeAtr))} ATR/کندل · حداقل " +
-                "${"%.3f".format(Locale.US, config.minSlopeAtrPerBar)}",
-        )
-
-        val fadeTolerance = config.maxForkFadeAtr * atrMacro
-        val insideCorridor = price in (lower - fadeTolerance)..(upper + fadeTolerance)
-        addCondition(
-            titleFa = "فورک ابطال نشده (کلوز داخل کریدور)",
-            passed = insideCorridor,
-            detailFa = "قیمت ${priceText(price)} · موازی پایین ${priceText(lower)} · موازی بالا ${priceText(upper)}",
-        )
-        addCondition(
-            titleFa = "رژیم روند ۴ ساعته",
-            passed = efficiency >= config.minEfficiencyRatio,
-            detailFa = "ER₁₄ = ${"%.2f".format(Locale.US, efficiency)} · حداقل " +
-                "${"%.2f".format(Locale.US, config.minEfficiencyRatio)}",
-        )
-
-        // ── ناحیهٔ لمس و هم‌افزایی فیبوناچی ──
-        val tolerance = config.touchToleranceAtr * atrEntry
-        val touchedUpper = bar.high >= upper - tolerance
-        val touchedLower = bar.low <= lower + tolerance
-        val touchedMedian = bar.low <= median + tolerance && bar.high >= median - tolerance
-
-        val upperWick = if (bar.high - bar.low > 0.0) (bar.high - max(bar.open, bar.close)) / (bar.high - bar.low) else 0.0
-        val lowerWick = if (bar.high - bar.low > 0.0) (min(bar.open, bar.close) - bar.low) / (bar.high - bar.low) else 0.0
-
-        var action = SignalAction.NO_TRADE
-        var modeUsed: KaneEntryMode? = null
-        var structuralLevel = 0.0
-        var touchLevel = 0.0
-
-        if (config.entryMode != KaneEntryMode.MEDIAN_CONTINUATION && touchedUpper &&
-            bar.close < upper - 0.05 * atrEntry && upperWick >= config.minWickRatio
-        ) {
-            action = SignalAction.SELL
-            modeUsed = KaneEntryMode.PARALLEL_REJECTION
-            touchLevel = upper
-            structuralLevel = max(bar.high, upper)
-        } else if (config.entryMode != KaneEntryMode.MEDIAN_CONTINUATION && touchedLower &&
-            bar.close > lower + 0.05 * atrEntry && lowerWick >= config.minWickRatio
-        ) {
-            action = SignalAction.BUY
-            modeUsed = KaneEntryMode.PARALLEL_REJECTION
-            touchLevel = lower
-            structuralLevel = min(bar.low, lower)
-        } else if (config.entryMode != KaneEntryMode.PARALLEL_REJECTION && touchedMedian) {
-            if (bar.close > median + 0.05 * atrEntry && lowerWick >= config.minWickRatio) {
-                action = SignalAction.BUY
-                modeUsed = KaneEntryMode.MEDIAN_CONTINUATION
-                touchLevel = median
-                structuralLevel = min(bar.low, median)
-            } else if (bar.close < median - 0.05 * atrEntry && upperWick >= config.minWickRatio) {
-                action = SignalAction.SELL
-                modeUsed = KaneEntryMode.MEDIAN_CONTINUATION
-                touchLevel = median
-                structuralLevel = max(bar.high, median)
+            fun add(titleFa: String, passed: Boolean, detailFa: String) {
+                sideConditions.add(StrategyConditionCheck(sideConditions.size + 1, titleFa, passed, detailFa))
             }
-        }
-
-        // هم‌افزایی فیبوناچی: باند اصلاح ۳۸٫۲–۶۱٫۸٪ موج `P2-P3` به‌عنوان یک ناحیهٔ پیوسته در نظر
-        // گرفته می‌شود (نه یک خط نازک) و هر سطح مشخص فیبوناچی که داخل تلورانس بیفتد به آن اضافه
-        // می‌شود. تلورانس روی مقیاس ساختار (ATR ۴ ساعته) و ۵٪ دامنهٔ موج سنجیده می‌شود، چون خود موج
-        // در مقیاس ساختار است نه در مقیاس ورود.
-        val legRange = abs(fork.p2.price - fork.p3.price)
-        val fibTolerance = max(config.fibClusterToleranceAtr * atrMacro, 0.05 * legRange)
-        val fibMatches: List<String> = if (touchLevel <= 0.0) {
-            emptyList()
-        } else {
-            fibConfluence(fork, touchLevel, fibTolerance)
-        }
-        val synergyStrong = fibMatches.size >= 2
-
-        val touchLabelFa = when {
-            modeUsed == KaneEntryMode.PARALLEL_REJECTION && action == SignalAction.SELL -> "موازی بالا"
-            modeUsed == KaneEntryMode.PARALLEL_REJECTION && action == SignalAction.BUY -> "موازی پایین"
-            modeUsed == KaneEntryMode.MEDIAN_CONTINUATION -> "خط میانه"
-            else -> "بدون لمس"
-        }
-
-        addCondition(
-            titleFa = "ناحیهٔ لمس (PTA)",
-            passed = action != SignalAction.NO_TRADE,
-            detailFa = "لمس $touchLabelFa در ${priceText(touchLevel)} (تلورانس ${"%.2f".format(Locale.US, config.touchToleranceAtr)} ATR)",
-        )
-        addCondition(
-            titleFa = "هم‌افزایی فیبوناچی",
-            passed = fibMatches.size >= config.minFibConfluence,
-            detailFa = if (fibMatches.isEmpty()) {
-                "هیچ هم‌راستایی فیبوناچی داخل ${"%.2f".format(Locale.US, config.fibClusterToleranceAtr)} ATR ناحیهٔ لمس نیست"
-            } else {
-                "${fibMatches.size} هم‌راستایی${if (synergyStrong) " (قوی)" else ""}: ${fibMatches.joinToString("، ")}"
-            },
-        )
-        addCondition(
-            titleFa = "کندل تایید ۱ ساعته",
-            passed = action != SignalAction.NO_TRADE,
-            detailFa = "ویک مخالف ${"%.2f".format(Locale.US, if (action == SignalAction.SELL) upperWick else lowerWick)} · " +
-                "حداقل ${"%.2f".format(Locale.US, config.minWickRatio)}",
-        )
-
-        // ── حد ضرر، حد سود و قرارداد R ──
-        var stop: Double? = null
-        var target: Double? = null
-        var riskReward: Double? = null
-        var roomToMedianAtr = 0.0
-        var targetClampedToCap = false
-
-        if (action == SignalAction.BUY) {
-            stop = structuralLevel - config.slBufferAtr * atrEntry
-            roomToMedianAtr = if (median > price) (median - price) / atrEntry else 0.0
-        } else if (action == SignalAction.SELL) {
-            stop = structuralLevel + config.slBufferAtr * atrEntry
-            roomToMedianAtr = if (median < price) (price - median) / atrEntry else 0.0
-        }
-
-        addCondition(
-            titleFa = "اتاق حرکت تا خط میانه",
-            passed = roomToMedianAtr >= config.minRoomToMedianAtr,
-            detailFa = "${"%.2f".format(Locale.US, roomToMedianAtr)} ATR · حداقل " +
-                "${"%.2f".format(Locale.US, config.minRoomToMedianAtr)}",
-        )
-
-        val risk = if (stop != null) abs(price - stop) else 0.0
-        val stopAtr = if (atrEntry > 0.0) risk / atrEntry else 0.0
-        addCondition(
-            titleFa = "فاصلهٔ حد ضرر ساختاری",
-            passed = stopAtr in config.minStopAtr..config.maxStopAtr,
-            detailFa = "${"%.2f".format(Locale.US, stopAtr)} ATR · بازهٔ مجاز " +
-                "${"%.2f".format(Locale.US, config.minStopAtr)} تا ${"%.2f".format(Locale.US, config.maxStopAtr)}",
-        )
-
-        if (action != SignalAction.NO_TRADE && risk > 0.0) {
-            val candidates = when (action) {
-                SignalAction.BUY -> listOf(median, upper, upper + (upper - median))
-                SignalAction.SELL -> listOf(median, lower, lower - (median - lower))
-                else -> emptyList()
-            }.filter { if (action == SignalAction.BUY) it > price else it < price }
-
-            val scored = candidates
-                .map { it to abs(it - price) / risk }
-                .filter { it.second >= config.minRiskReward }
-                .sortedBy { it.second }
-
-            val chosen = scored.firstOrNull { it.second <= config.maxRiskReward }
-            if (chosen != null) {
-                target = chosen.first
-                riskReward = chosen.second
-            } else if (scored.isNotEmpty()) {
-                // هدف هندسی دورتر از سقف ۳R است؛ به‌جای گزارش R غیرواقعی، هدف روی همان سقف بریده
-                // می‌شود تا حد سود و نسبت R در ژورنال و قرارداد پول دقیقاً یکی باشند.
-                val cappedRisk = config.maxRiskReward * risk
-                target = if (action == SignalAction.BUY) price + cappedRisk else price - cappedRisk
-                riskReward = config.maxRiskReward
-                targetClampedToCap = true
+            considered += 1
+            if (setup.rating < config.minRating) {
+                ratingRejected += 1
+                continue
             }
-        }
+            val atrEntryNow = entryAtr[lastEntry]
+            if (atrEntryNow <= 0.0) continue
+            val tolerance = config.hitToleranceAtr * atrEntryNow
 
-        val resolvedRiskReward = riskReward
-        addCondition(
-            titleFa = "نسبت سود به ضرر (R)",
-            passed = resolvedRiskReward != null &&
-                resolvedRiskReward >= config.minRiskReward &&
-                resolvedRiskReward <= config.maxRiskReward,
-            detailFa = resolvedRiskReward?.let { value ->
-                "${"%.2f".format(Locale.US, value)}R · بازهٔ مجاز " +
-                    "${"%.1f".format(Locale.US, config.minRiskReward)} تا ${"%.1f".format(Locale.US, config.maxRiskReward)}"
-            } ?: "هدف هندسی فورک کمتر از ${"%.1f".format(Locale.US, config.minRiskReward)}R می‌دهد",
-        )
-
-        // امتیازی (بدون گیت): تقارن ABCD روی چهار پیوت آخر.
-        val abcdNote = if (pivots.size >= 4) {
-            val a = pivots[pivots.size - 4]
-            val b = pivots[pivots.size - 3]
-            val c = pivots[pivots.size - 2]
-            val d = pivots[pivots.size - 1]
-            val ab = abs(b.price - a.price)
-            val bc = abs(c.price - b.price)
-            val cd = abs(d.price - c.price)
-            val bcRatio = if (ab > 0.0) bc / ab else 0.0
-            val cdRatio = if (bc > 0.0) cd / bc else 0.0
-            val symmetric = bcRatio in 0.382..0.786 && cdRatio in 0.382..0.886
-            "BC/AB=${"%.2f".format(Locale.US, bcRatio)} · CD/BC=${"%.2f".format(Locale.US, cdRatio)}" +
-                if (symmetric) " · هم‌ساخت" else " · ناهم‌ساخت"
-        } else {
-            "پیوت کافی برای الگوی چهارنقطه‌ای نیست"
-        }
-
-        val passedHard = conditions.count { it.passed }
-        val allHardPassed = conditions.all { it.passed }
-        val finalStop = stop
-        val finalTarget = target
-        val actionable = allHardPassed && action != SignalAction.NO_TRADE &&
-            finalStop != null && finalTarget != null && resolvedRiskReward != null
-
-        val readiness = when {
-            actionable && action == SignalAction.BUY -> StrategyReadinessState.SIGNAL_BUY
-            actionable && action == SignalAction.SELL -> StrategyReadinessState.SIGNAL_SELL
-            action != SignalAction.NO_TRADE -> StrategyReadinessState.WATCH_SETUP
-            else -> StrategyReadinessState.BLOCKED
-        }
-
-        val triggerType = when (modeUsed) {
-            KaneEntryMode.PARALLEL_REJECTION -> StrategyTriggerType.MEDIAN_LINE_REJECTION
-            KaneEntryMode.MEDIAN_CONTINUATION -> StrategyTriggerType.MEDIAN_LINE_CONTINUATION
-            else -> StrategyTriggerType.NONE
-        }
-
-        val baseConfidence = if (conditions.isEmpty()) 0.0 else {
-            passedHard.toDouble() / conditions.size.toDouble() * 100.0
-        }
-        val confidence = (baseConfidence + if (synergyStrong) 8.0 else 0.0).coerceIn(0.0, 100.0)
-
-        val summary = buildString {
-            append("فورک ").append(if (fork.isBullishStructure) "صعودی" else "نزولی").append(" · ")
-            append(fork.anchorsFa).append(" · ")
-            append("خط میانه ").append(priceText(median))
-            append(" · موازی بالا ").append(priceText(upper))
-            append(" · موازی پایین ").append(priceText(lower))
-            if (!actionable) {
-                append(" — ورودی ندارد؛ ")
-                val failed = conditions.filterNot { it.passed }.map { it.titleFa }
-                append(if (failed.isEmpty()) "هیچ ماشهٔ لمس تایید نشده" else failed.joinToString("؛ "))
-            } else {
-                append(" — ").append(modeUsed?.labelFa ?: "")
-                if (synergyStrong) append(" · هم‌افزایی فیبوناچی قوی (${fibMatches.size} مورد)")
-                append("؛ ورود ").append(priceText(price))
-                if (finalStop != null) append(" · حد ضرر ").append(priceText(finalStop))
-                if (finalTarget != null) append(" · هدف ").append(priceText(finalTarget))
-                if (resolvedRiskReward != null) {
-                    append(" (").append("%.2f".format(Locale.US, resolvedRiskReward)).append("R")
-                    if (targetClampedToCap) append(" — سقف ۳R")
-                    append(")")
+            // لمس ناحیهٔ PTA
+            var touchIndex = -1
+            val searchFrom = max(0, lastEntry - (config.maxTriggerBars + 5))
+            for (i in searchFrom..lastEntry) {
+                if (viewLow(entryCandles, side, i) <= setup.zoneHigh + tolerance) touchIndex = i
+            }
+            val touched = touchIndex >= 0
+            var lowSinceTouch = Double.POSITIVE_INFINITY
+            if (touched) {
+                for (i in touchIndex..lastEntry) {
+                    lowSinceTouch = min(lowSinceTouch, viewLow(entryCandles, side, i))
                 }
             }
+            val invalidated = viewLow(entryCandles, side, lastEntry) < setup.zoneLow - config.invalidAtr * atrEntryNow
+            val barsSinceTouch = if (touched) lastEntry - touchIndex else Int.MAX_VALUE
+            val triggerLive = touched && !invalidated && barsSinceTouch <= config.maxTriggerBars
+
+            var crossed = false
+            for (k in max(1, lastEntry - config.crossLookback + 1)..lastEntry) {
+                if (entryFast[k] > entrySlow[k] && entryFast[k - 1] <= entrySlow[k - 1]) {
+                    crossed = true
+                    break
+                }
+            }
+            val viewEntry = livePrice?.let { side * it } ?: viewClose(entryCandles, side, lastEntry)
+            val triggerFired = triggerLive &&
+                crossed &&
+                entryFast[lastEntry] > entrySlow[lastEntry] &&
+                viewEntry > entryFast[lastEntry]
+
+            val baseStop = if (touched && lowSinceTouch.isFinite()) min(lowSinceTouch, setup.zoneLow) else setup.zoneLow
+            val viewStop = baseStop - config.stopAtr * atrEntryNow
+            val viewRisk = viewEntry - viewStop
+            val targetCandidate = (if (lowSinceTouch.isFinite()) lowSinceTouch else setup.zoneLow)
+            val viewTargetSpec = targetCandidate + config.targetExtension * (setup.c.price - targetCandidate)
+
+            var riskOk = viewRisk > 0.0 && viewRisk <= config.maxRiskAtr * atrEntryNow
+            var viewTarget = viewTargetSpec
+            var rr = if (viewRisk > 0.0) (viewTargetSpec - viewEntry) / viewRisk else 0.0
+            var contractNote = ""
+            if (riskOk && rr < config.minRiskReward) {
+                viewTarget = viewEntry + config.minRiskReward * viewRisk
+                rr = config.minRiskReward
+                contractNote = "هدف کتاب (۱٫۲۷۲ اکستنشن) فقط ${format(rr)}R می‌داد؛ طبق قرارداد به کف ۱٫۵R بسته شد"
+            }
+            if (riskOk && rr > config.maxRiskReward) {
+                viewTarget = viewEntry + config.maxRiskReward * viewRisk
+                rr = config.maxRiskReward
+                contractNote = "هدف کتاب از سقف ۳R دورتر بود؛ طبق قرارداد روی ۳R بریده شد"
+            }
+            if (rr < config.minRiskReward) riskOk = false
+
+            val actionable = triggerFired && riskOk
+            val rating = setup.rating
+            if (actionable && rating <= bestRating) continue
+
+            val realEntry = side * viewEntry
+            val realStop = side * viewStop
+            val realTarget = side * viewTarget
+
+            add(
+                "الگوی ABCD با نسبت مجاز",
+                true,
+                "BC/AB = ${format((setup.c.price - setup.b.price) / (setup.a.price - setup.b.price))} " +
+                    "(بازهٔ ${format(config.bcMin)} تا ${format(config.bcMax)}) · X→H = " +
+                    "${format(setup.impulseHigh - setup.x.price)}",
+            )
+            add(
+                "گروه‌بندی فیبوناچی ناحیهٔ PTA",
+                true,
+                "${setup.groupLabelsFa.size} عدد: ${setup.groupLabelsFa.joinToString("، ")}",
+            )
+            add(
+                "خطوط هم‌گرا با ناحیه",
+                setup.familyBest.values.any { it > 0.0 },
+                setup.familyBest.entries.joinToString("، ") { "${it.key}=${format(it.value)}" },
+            )
+            add("امتیاز Synergy ≥ ${format(config.minRating)}", true, "امتیاز ${format(setup.rating)} از ۱۰")
+            add(
+                "هم‌راستایی context",
+                context == side,
+                when (context) {
+                    1 -> "context صعودی"
+                    -1 -> "context نزولی"
+                    else -> "context خنثی"
+                },
+            )
+            add(
+                "لمس ناحیهٔ PTA",
+                triggerLive,
+                "ناحیه ${format(side * setup.zoneLow)} تا ${format(side * setup.zoneHigh)} · " +
+                    if (touched) "لمس در کندل $barsSinceTouch قبل" else "بدون لمس",
+            )
+            add(
+                "تریگر اجباری EMA ${config.emaFast}/${config.emaSlow}",
+                triggerFired,
+                if (crossed) "کراس در ${config.crossLookback} کندل اخیر رخ داد" else "بدون کراس",
+            )
+            add(
+                "حد ضرر در محدودهٔ مجاز",
+                riskOk,
+                "ریسک ${format(abs(viewRisk) / atrEntryNow)} ATR · سقف ${format(config.maxRiskAtr)} ATR",
+            )
+            add(
+                "R در قرارداد ${format(config.minRiskReward)} تا ${format(config.maxRiskReward)}",
+                riskOk,
+                "${format(rr)}R" + if (contractNote.isBlank()) "" else " · $contractNote",
+            )
+
+            val summary = buildString {
+                append(if (side == 1) "خرید" else "فروش").append(" · امتیاز Synergy ").append(format(rating)).append(" از ۱۰")
+                append(" · ABCD ").append(format((setup.c.price - setup.b.price) / (setup.a.price - setup.b.price)))
+                append(" · ناحیهٔ PTA ").append(format(side * setup.zoneLow)).append(" تا ").append(format(side * setup.zoneHigh))
+                if (actionable) {
+                    append(" · ورود ").append(priceText(realEntry))
+                    append(" · حد ضرر ").append(priceText(realStop))
+                    append(" · هدف ").append(priceText(realTarget))
+                    append(" (").append(format(rr)).append("R)")
+                } else {
+                    append(" · بدون ورود: ")
+                    append(
+                        when {
+                            !triggerLive -> if (touched) "مهلت تریگر (${config.maxTriggerBars} کندل) گذشته یا ناحیه باطل شد" else "قیمت هنوز به ناحیه نرسیده"
+                            !crossed -> "تریگر EMA فعال نشده"
+                            !riskOk -> "قرارداد R برقرار نیست"
+                            else -> "شرط ناشناخته"
+                        }
+                    )
+                }
+                if (contractNote.isNotBlank()) append(" · ").append(contractNote)
+            }
+
+            val entryPath = buildString {
+                append("Kane · خط میانه–فیبوناچی · زیگزاگ ").append(format(config.zzSmall))
+                append("/").append(format(config.zzBig)).append(" ATR")
+                append(" · ABCD: A#").append(setup.a.index).append(" B#").append(setup.b.index).append(" C#").append(setup.c.index)
+                append(" · X#").append(setup.x.index).append(" · H=").append(priceText(side * setup.impulseHigh))
+                append(" · امتیاز: ").append(setup.partsFa.entries.joinToString("، ") { "${it.key}=${format(it.value)}" })
+                append(" · خانواده‌های برخوردکرده: ").append(setup.familyBest.keys.joinToString("، "))
+                append(" · هم‌زمانی زمانی: ").append(format(setup.timeScore))
+                if (contractNote.isNotBlank()) append(" · ").append(contractNote)
+            }
+
+            val evaluation = KaneEvaluation(
+                action = if (actionable) (if (side == 1) SignalAction.BUY else SignalAction.SELL) else SignalAction.NO_TRADE,
+                readiness = when {
+                    actionable && side == 1 -> StrategyReadinessState.SIGNAL_BUY
+                    actionable && side == -1 -> StrategyReadinessState.SIGNAL_SELL
+                    else -> StrategyReadinessState.WATCH_SETUP
+                },
+                triggerType = if (actionable) StrategyTriggerType.MEDIAN_LINE_REJECTION else StrategyTriggerType.NONE,
+                entry = if (actionable) realEntry else null,
+                stopLoss = if (actionable) realStop else null,
+                takeProfit = if (actionable) realTarget else null,
+                riskReward = if (actionable) rr else null,
+                confidence = (rating / 10.0 * 100.0).coerceIn(0.0, 100.0),
+                conditions = sideConditions.toList(),
+                summaryFa = summary,
+                entryPathFa = entryPath,
+                rating = rating,
+                zoneLow = side * setup.zoneLow,
+                zoneHigh = side * setup.zoneHigh,
+                ratingPartsFa = setup.partsFa,
+                triggerBarTime = entryCandles.last().time,
+                livePrice = realEntry,
+                contractNoteFa = contractNote,
+            )
+            if (actionable) {
+                bestEvaluation = evaluation
+                bestRating = rating
+            } else if (bestEvaluation == null) {
+                bestEvaluation = evaluation
+            }
         }
 
-        val entryPath = buildString {
-            append("Kane · خط میانه–فیبوناچی · حالت: ").append(modeUsed?.labelFa ?: "بدون ماشه")
-            append(" · سه‌گانه: ").append(fork.anchorsFa)
-            append(" · شیب ").append("%.3f".format(Locale.US, slopeAtr)).append(" ATR/کندل")
-            append(" · ER ").append("%.2f".format(Locale.US, efficiency))
-            append(" · فیبو: ").append(if (fibMatches.isEmpty()) "بدون هم‌راستایی" else fibMatches.joinToString("، "))
-            append(" · ABCD: ").append(abcdNote)
-            append(" · ATR ساختار ").append(priceText(atrMacro)).append(" / ورود ").append(priceText(atrEntry))
-        }
+        if (bestEvaluation != null) return bestEvaluation
 
+        val noSetupNote = when {
+            considered == 0 -> "هیچ الگوی ABCD معتبر با ناحیهٔ فیبوناچی و خطوط هم‌گرا پیدا نشد."
+            ratingRejected > 0 -> "ستاپ ساخته شد ولی امتیاز Synergy آن زیر آستانهٔ ${format(config.minRating)} از ۱۰ است."
+            else -> "ستاپ معتبری برای این لحظه وجود ندارد."
+        }
         return KaneEvaluation(
-            action = if (actionable) action else SignalAction.NO_TRADE,
-            readiness = readiness,
-            triggerType = if (actionable) triggerType else StrategyTriggerType.NONE,
-            entry = if (actionable) price else null,
-            stopLoss = if (actionable) finalStop else null,
-            takeProfit = if (actionable) finalTarget else null,
-            riskReward = if (actionable) resolvedRiskReward else null,
-            confidence = confidence,
-            conditions = conditions,
-            summaryFa = summary,
-            entryPathFa = entryPath,
-            fork = fork,
-            atrMacro = atrMacro,
-            atrEntry = atrEntry,
-            medianLine = median,
-            upperParallel = upper,
-            lowerParallel = lower,
-            fibMatchesFa = fibMatches,
-            modeUsed = modeUsed,
-            triggerBarTime = bar.time,
-            livePrice = price,
+            readiness = StrategyReadinessState.BLOCKED,
+            summaryFa = noSetupNote,
+            livePrice = livePrice ?: entryCandles.last().close,
+            triggerBarTime = entryCandles.last().time,
         )
     }
 
-    /** قیمت با حداکثر ۶ رقم اعشار و بدون صفرهای اضافی. */
+    private fun format(value: Double): String = if (!value.isFinite()) "—" else "%.2f".format(Locale.US, value)
+
+    private fun ratioText(value: Double): String = "%.3f".format(Locale.US, value)
+
     fun priceText(value: Double): String {
         if (!value.isFinite()) return "—"
         val text = "%.6f".format(Locale.US, value)
