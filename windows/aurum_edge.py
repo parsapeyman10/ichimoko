@@ -1,466 +1,396 @@
 #!/usr/bin/env python3
-"""Aurum Edge desktop application — pure Python/Tkinter edition.
+"""Aurum Edge desktop application — PyQt6 edition.
 
-The same source runs on Windows, macOS and Linux. Build an artifact on each host
-with build_desktop.py (or the host wrapper); PyInstaller does not cross-compile.
-This is strictly a historical-analysis and paper-journal app.
+The interface is intentionally a basic PyQt rewrite: all trading calculations stay
+in aurum_core, while this module owns only presentation, local-file selection and
+background UI work. It has no broker credentials or live order routing.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import queue
 import sqlite3
-import subprocess
 import sys
 import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-import webbrowser
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from tkinter import BOTH, END, LEFT, RIGHT, X, Y, BooleanVar, Canvas, StringVar, Tk, filedialog, messagebox
-from tkinter import ttk
+
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtWidgets import (
+    QApplication, QCheckBox, QFileDialog, QGridLayout, QGroupBox, QHBoxLayout,
+    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
+    QTabWidget, QVBoxLayout, QWidget,
+)
 
 from aurum_core import (
-    BacktestConfig,
-    BacktestResult,
-    Candle,
-    CsvAudit,
-    CsvError,
-    GuardedTradePlan,
-    JournalStore,
-    NeoWaveVerdict,
-    RiskCalculation,
-    analyze_neo_wave,
-    calculate_position,
-    export_candles,
-    export_journal,
-    monthly_calendar,
-    neo_wave_dynamic_amplitude,
-    neo_wave_pivots,
-    read_csv,
-    run_ichimoku_baseline,
-    sanitize_trade_plan,
+    BacktestConfig, BacktestResult, Candle, CsvAudit, JournalStore,
+    NeoWaveVerdict, analyze_neo_wave, calculate_position, export_candles,
+    export_journal, monthly_calendar, neo_wave_dynamic_amplitude,
+    neo_wave_pivots, read_csv, run_ichimoku_baseline, sanitize_trade_plan,
     train_neural_baseline,
 )
 
-APP_TITLE = "Aurum Edge — Python Desktop"
-APP_VERSION = "0.3.0-cross-platform"
+APP_TITLE = "Aurum Edge — PyQt Desktop"
+APP_VERSION = "0.4.0-pyqt"
 BG, PANEL, TEXT, MUTED, GREEN, RED, ACCENT = "#0c1220", "#131d30", "#e5ecf7", "#91a0b8", "#29c995", "#ff6580", "#67a5ff"
-UI_FONT = "Segoe UI" if os.name == "nt" else "Helvetica Neue" if sys.platform == "darwin" else "DejaVu Sans"
 
 
 def application_data_root() -> Path:
-    """Return an OS-appropriate writable location for the local SQLite journal."""
     if os.name == "nt":
-        return Path(os.getenv("APPDATA") or Path.home()) / "AurumEdgePython"
+        return Path(os.getenv("APPDATA") or Path.home()) / "AurumEdgePyQt"
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "AurumEdgePython"
-    return Path(os.getenv("XDG_DATA_HOME") or (Path.home() / ".local" / "share")) / "AurumEdgePython"
+        return Path.home() / "Library" / "Application Support" / "AurumEdgePyQt"
+    return Path(os.getenv("XDG_DATA_HOME") or (Path.home() / ".local" / "share")) / "AurumEdgePyQt"
 
 
-class AurumEdgeApp:
-    def __init__(self, root: Tk) -> None:
-        self.root = root
-        self.root.title(APP_TITLE)
-        self.root.geometry("1400x880")
-        self.root.minsize(1120, 720)
-        self.events: queue.Queue[tuple[str, object]] = queue.Queue()
+def utc_text(time_ms: int) -> str:
+    return datetime.fromtimestamp(time_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+class EventBus(QObject):
+    event = pyqtSignal(str, object)
+
+
+class CandleChart(QWidget):
+    """Small dependency-free OHLC renderer for the latest candle window."""
+    def __init__(self) -> None:
+        super().__init__()
+        self.candles: list[Candle] = []
+        self.setMinimumHeight(300)
+
+    def set_candles(self, candles: list[Candle]) -> None:
+        self.candles = candles[-1500:]
+        self.update()
+
+    def paintEvent(self, _event: object) -> None:  # noqa: N802 - Qt API spelling
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(BG))
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if not self.candles:
+            painter.setPen(QColor(MUTED))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "CSV را بارگذاری کنید")
+            return
+        width, height = max(300, self.width()), max(240, self.height())
+        left, right, top, bottom = 14.0, width - 72.0, 16.0, height - 22.0
+        high, low = max(bar.high for bar in self.candles), min(bar.low for bar in self.candles)
+        spread = max(high - low, 1e-9)
+        y = lambda price: bottom - (price - low) / spread * (bottom - top)
+        painter.setFont(QFont("Arial", 8))
+        for grid in range(5):
+            yy = top + (bottom - top) * grid / 4
+            painter.setPen(QPen(QColor("#1d2a40"), 1))
+            painter.drawLine(int(left), int(yy), int(right), int(yy))
+            painter.setPen(QColor(MUTED))
+            painter.drawText(int(right + 4), int(yy + 4), f"{high - spread * grid / 4:.5g}")
+        step = (right - left) / len(self.candles)
+        body = max(1.0, min(10.0, step * 0.68))
+        for index, bar in enumerate(self.candles):
+            x = left + (index + 0.5) * step
+            color = QColor(GREEN if bar.close >= bar.open else RED)
+            painter.setPen(QPen(color, max(1, int(step * 0.08))))
+            painter.drawLine(int(x), int(y(bar.high)), int(x), int(y(bar.low)))
+            y_top, y_bottom = y(max(bar.open, bar.close)), y(min(bar.open, bar.close))
+            painter.fillRect(int(x - body / 2), int(y_top), max(1, int(body)), max(1, int(y_bottom - y_top)), color)
+
+
+class AurumEdgeWindow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
         self.candles: list[Candle] = []
         self.audit: CsvAudit | None = None
         self.backtest: BacktestResult | None = None
         self.neowave: NeoWaveVerdict | None = None
-        self.status = StringVar(value="آماده — این ابزار سفارش واقعی ارسال نمی‌کند.")
-        self.data_label = StringVar(value="CSV بارگذاری نشده")
+        self.bus = EventBus()
+        self.bus.event.connect(self._handle_event)
         self.journal = JournalStore(application_data_root() / "journal.sqlite")
-        self._setup_style()
+        self.setWindowTitle(APP_TITLE)
+        self.resize(1400, 880)
+        self.setMinimumSize(1080, 700)
+        self._style()
         self._build()
-        self.root.protocol("WM_DELETE_WINDOW", self._close)
-        self.root.after(80, self._drain_events)
+        self.statusBar().showMessage("آماده — ابزار تحلیل تاریخی و Paper Trading؛ بدون سفارش واقعی.")
 
-    def _setup_style(self) -> None:
-        self.root.configure(background=BG)
-        style = ttk.Style(self.root)
-        try: style.theme_use("clam")
-        except Exception: pass
-        style.configure("TFrame", background=BG)
-        style.configure("Card.TFrame", background=PANEL)
-        style.configure("TLabel", background=BG, foreground=TEXT, font=(UI_FONT, 10))
-        style.configure("Card.TLabel", background=PANEL, foreground=TEXT)
-        style.configure("Header.TLabel", background=BG, foreground=ACCENT, font=(UI_FONT, 18, "bold"))
-        style.configure("Muted.TLabel", background=BG, foreground=MUTED)
-        style.configure("TButton", padding=(10, 6))
-        style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(14, 8), background=PANEL, foreground=TEXT)
-        style.map("TNotebook.Tab", background=[("selected", ACCENT)], foreground=[("selected", BG)])
-        style.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=TEXT, rowheight=26)
-        style.configure("Treeview.Heading", background="#1b2c49", foreground=TEXT, font=(UI_FONT, 9, "bold"))
-        style.map("Treeview", background=[("selected", "#244b78")])
-        style.configure("TLabelframe", background=BG, foreground=ACCENT)
-        style.configure("TLabelframe.Label", background=BG, foreground=ACCENT, font=(UI_FONT, 10, "bold"))
+    def _style(self) -> None:
+        self.setStyleSheet(f"""
+            QMainWindow, QWidget {{ background: {BG}; color: {TEXT}; font-family: Arial; font-size: 13px; }}
+            QTabWidget::pane {{ border: 1px solid #263652; }}
+            QTabBar::tab {{ background: {PANEL}; color: {TEXT}; padding: 9px 14px; margin: 1px; }}
+            QTabBar::tab:selected {{ background: {ACCENT}; color: {BG}; font-weight: bold; }}
+            QGroupBox {{ border: 1px solid #2a3c5c; border-radius: 5px; margin-top: 12px; padding: 10px; color: {ACCENT}; font-weight: bold; }}
+            QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
+            QLineEdit, QComboBox, QTableWidget {{ background: {PANEL}; color: {TEXT}; border: 1px solid #31435f; border-radius: 3px; padding: 5px; }}
+            QPushButton {{ background: #214873; color: white; border: 0; border-radius: 4px; padding: 8px 12px; }}
+            QPushButton:hover {{ background: #2d6099; }}
+            QPushButton:disabled {{ background: #394455; color: #9ca7b6; }}
+            QHeaderView::section {{ background: #1b2c49; color: {TEXT}; padding: 6px; border: 0; }}
+            QStatusBar {{ background: {PANEL}; color: {MUTED}; }}
+        """)
 
     def _build(self) -> None:
-        header = ttk.Frame(self.root, padding=(16, 12), style="Card.TFrame")
-        header.pack(fill=X)
-        ttk.Label(header, text="AURUM EDGE", style="Header.TLabel").pack(side=LEFT)
-        ttk.Label(header, text="Python / Tkinter · دادهٔ محلی · بدون API معامله", style="Card.TLabel").pack(side=LEFT, padx=16)
-        ttk.Label(header, textvariable=self.status, style="Card.TLabel").pack(side=RIGHT)
-        self.tabs = ttk.Notebook(self.root)
-        self.tabs.pack(fill=BOTH, expand=True, padx=12, pady=(0, 12))
-        self._home_tab()
-        self._chart_tab()
-        self._backtest_tab()
-        self._risk_tab()
-        self._journal_tab()
-        self._calendar_tab()
-        self._neowave_tab()
-        self._live_tab()
-        self._settings_tab()
+        root = QWidget(); outer = QVBoxLayout(root); outer.setContentsMargins(14, 12, 14, 12)
+        header = QHBoxLayout()
+        title = QLabel("AURUM EDGE"); title.setStyleSheet(f"color: {ACCENT}; font-size: 22px; font-weight: bold;")
+        subtitle = QLabel("PyQt6 · دادهٔ محلی · بدون API معامله")
+        subtitle.setStyleSheet(f"color: {MUTED};")
+        header.addWidget(title); header.addWidget(subtitle); header.addStretch()
+        outer.addLayout(header)
+        self.tabs = QTabWidget(); outer.addWidget(self.tabs)
+        self.setCentralWidget(root)
+        self._home_tab(); self._chart_tab(); self._backtest_tab(); self._risk_tab(); self._journal_tab(); self._calendar_tab(); self._neowave_tab(); self._live_tab(); self._settings_tab()
 
-    def _tab(self, title: str) -> ttk.Frame:
-        page = ttk.Frame(self.tabs, padding=16)
-        self.tabs.add(page, text=title)
-        return page
+    def _page(self, title: str) -> tuple[QWidget, QVBoxLayout]:
+        page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(14, 14, 14, 14)
+        self.tabs.addTab(page, title)
+        return page, layout
+
+    @staticmethod
+    def _heading(text: str) -> QLabel:
+        label = QLabel(text); label.setStyleSheet(f"color: {ACCENT}; font-size: 20px; font-weight: bold;"); label.setWordWrap(True)
+        return label
+
+    @staticmethod
+    def _muted(text: str) -> QLabel:
+        label = QLabel(text); label.setStyleSheet(f"color: {MUTED};"); label.setWordWrap(True)
+        return label
+
+    @staticmethod
+    def _table(headers: list[str]) -> QTableWidget:
+        table = QTableWidget(0, len(headers)); table.setHorizontalHeaderLabels(headers)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setAlternatingRowColors(True); table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setStretchLastSection(True)
+        return table
+
+    @staticmethod
+    def _put(table: QTableWidget, rows: list[list[object]]) -> None:
+        table.setRowCount(0)
+        for values in rows:
+            row = table.rowCount(); table.insertRow(row)
+            for column, value in enumerate(values):
+                table.setItem(row, column, QTableWidgetItem(str(value)))
+
+    @staticmethod
+    def _fields(items: list[tuple[str, str]], columns: int = 4) -> tuple[QWidget, dict[str, QLineEdit]]:
+        box = QGroupBox("تنظیمات"); grid = QGridLayout(box); fields: dict[str, QLineEdit] = {}
+        for index, (key, value) in enumerate(items):
+            row, column = divmod(index, columns); column *= 2
+            grid.addWidget(QLabel(key), row, column)
+            field = QLineEdit(value); fields[key] = field; grid.addWidget(field, row, column + 1)
+        return box, fields
 
     def _home_tab(self) -> None:
-        page = self._tab("خانه")
-        ttk.Label(page, text="مرکز فرماندهی Aurum Edge", style="Header.TLabel").pack(anchor="w")
-        ttk.Label(page, text="نسخهٔ Python جایگزین C++/Qt است. تحلیل‌ها روی دادهٔ CSV محلی اجرا می‌شوند و هیچ سفارش، کلید API یا حساب کارگزاری در برنامه وجود ندارد.", style="Muted.TLabel", wraplength=940).pack(anchor="w", pady=(8, 18))
-        card = ttk.LabelFrame(page, text="وضعیت داده و بک‌تست", padding=16)
-        card.pack(fill=X)
-        self.home_data = StringVar(value="CSV بارگذاری نشده")
-        self.home_backtest = StringVar(value="نتیجهٔ بک‌تست: —")
-        self.home_neowave = StringVar(value="NeoWave: —")
-        for value in (self.home_data, self.home_backtest, self.home_neowave):
-            ttk.Label(card, textvariable=value, style="Card.TLabel", wraplength=1000).pack(anchor="w", pady=6)
-        ttk.Button(page, text="انتخاب CSV", command=self._choose_csv).pack(anchor="w", pady=18)
+        _, layout = self._page("خانه")
+        layout.addWidget(self._heading("مرکز فرماندهی Aurum Edge"))
+        layout.addWidget(self._muted("نسخهٔ پایهٔ PyQt6. تمام تحلیل‌ها روی CSV محلی انجام می‌شوند؛ هیچ کلید API، حساب یا سفارش واقعی وجود ندارد."))
+        card = QGroupBox("وضعیت داده و بک‌تست"); card_layout = QVBoxLayout(card)
+        self.home_data, self.home_backtest, self.home_neowave = QLabel("CSV بارگذاری نشده"), QLabel("نتیجهٔ بک‌تست: —"), QLabel("NeoWave: —")
+        for label in (self.home_data, self.home_backtest, self.home_neowave): label.setWordWrap(True); card_layout.addWidget(label)
+        layout.addWidget(card); button = QPushButton("انتخاب CSV"); button.clicked.connect(self._choose_csv); layout.addWidget(button); layout.addStretch()
 
     def _chart_tab(self) -> None:
-        page = self._tab("چارت و CSV")
-        toolbar = ttk.Frame(page)
-        toolbar.pack(fill=X)
-        ttk.Button(toolbar, text="انتخاب CSV", command=self._choose_csv).pack(side=LEFT)
-        ttk.Button(toolbar, text="Archive CSV/JSON", command=self._export_candles).pack(side=LEFT, padx=8)
-        ttk.Label(toolbar, textvariable=self.data_label, style="Muted.TLabel").pack(side=LEFT, padx=16)
-        self.chart = Canvas(page, bg=BG, highlightthickness=0)
-        self.chart.pack(fill=BOTH, expand=True, pady=(14, 2))
-        self.chart.bind("<Configure>", lambda _event: self._draw_chart())
-        ttk.Label(page, text="حداکثر ۱٬۵۰۰ کندل آخر رسم می‌شود؛ محاسبات بک‌تست روی تمام دادهٔ بارگذاری‌شده انجام می‌گیرد.", style="Muted.TLabel").pack(anchor="w", pady=6)
+        _, layout = self._page("چارت و CSV")
+        bar = QHBoxLayout(); choose = QPushButton("انتخاب CSV"); choose.clicked.connect(self._choose_csv)
+        archive = QPushButton("Archive CSV/JSON"); archive.clicked.connect(self._export_candles)
+        self.data_label = self._muted("CSV بارگذاری نشده")
+        bar.addWidget(choose); bar.addWidget(archive); bar.addWidget(self.data_label); bar.addStretch(); layout.addLayout(bar)
+        self.chart = CandleChart(); layout.addWidget(self.chart, 1)
+        layout.addWidget(self._muted("حداکثر ۱٬۵۰۰ کندل آخر رسم می‌شود؛ بک‌تست روی تمام دادهٔ بارگذاری‌شده اجرا می‌شود."))
 
     def _backtest_tab(self) -> None:
-        page = self._tab("بک‌تست")
-        ttk.Label(page, text="Ichimoku 8/24/72 TK-cross baseline", style="Header.TLabel").pack(anchor="w")
-        ttk.Label(page, text="نسخهٔ Python با ورود کندل بعدی، هزینه، لغزش، SL-first و Trend Runner. این مدل baseline مستقل است و ادعای Peyman parity یا سودآوری ندارد.", style="Muted.TLabel", wraplength=1100).pack(anchor="w", pady=(4, 12))
-        form = ttk.LabelFrame(page, text="تنظیمات", padding=10); form.pack(fill=X)
-        self.bt_equity, self.bt_risk, self.bt_fee, self.bt_slippage, self.bt_target = (StringVar(value=value) for value in ("1000", "0.25", "0.001", "0.0001", "2.0"))
-        self.bt_long, self.bt_short, self.bt_runner = BooleanVar(value=True), BooleanVar(value=True), BooleanVar(value=True)
-        for column, (label, variable) in enumerate((("سرمایه", self.bt_equity), ("ریسک %", self.bt_risk), ("Fee هر سمت", self.bt_fee), ("Slippage هر سمت", self.bt_slippage), ("Target R", self.bt_target))):
-            ttk.Label(form, text=label).grid(row=0, column=column * 2, sticky="w", padx=(0, 5), pady=4)
-            ttk.Entry(form, textvariable=variable, width=12).grid(row=0, column=column * 2 + 1, sticky="ew", padx=(0, 14), pady=4)
-        ttk.Checkbutton(form, text="Long", variable=self.bt_long).grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Checkbutton(form, text="Short", variable=self.bt_short).grid(row=1, column=1, sticky="w", pady=(8, 0))
-        ttk.Checkbutton(form, text="Trend Runner", variable=self.bt_runner).grid(row=1, column=2, sticky="w", pady=(8, 0))
-        self.backtest_button = ttk.Button(form, text="اجرای بک‌تست", command=self._start_backtest)
-        self.backtest_button.grid(row=1, column=4, columnspan=2, sticky="w", padx=12, pady=(8, 0))
-        self.bt_summary = StringVar(value="CSV را بارگذاری کنید.")
-        ttk.Label(page, textvariable=self.bt_summary, style="Header.TLabel", wraplength=1200).pack(anchor="w", pady=14)
-        columns = ("#", "جهت", "ورود UTC", "خروج UTC", "ورود", "SL", "TP", "خروج", "دلیل", "PnL", "R", "Equity")
-        self.trade_tree = self._tree(page, columns, (50, 65, 145, 145, 85, 85, 85, 85, 115, 90, 70, 100), height=18)
+        _, layout = self._page("بک‌تست")
+        layout.addWidget(self._heading("Ichimoku 8/24/72 TK-cross baseline")); layout.addWidget(self._muted("ورود کندل بعدی، هزینه، لغزش، SL-first و Trend Runner. این مدل ادعای Peyman parity یا سودآوری ندارد."))
+        form, self.bt = self._fields([("سرمایه", "1000"), ("ریسک %", "0.25"), ("Fee هر سمت", "0.001"), ("Slippage", "0.0001"), ("Target R", "2.0")], 5)
+        self.bt_long, self.bt_short, self.bt_runner = QCheckBox("Long"), QCheckBox("Short"), QCheckBox("Trend Runner")
+        self.bt_long.setChecked(True); self.bt_short.setChecked(True); self.bt_runner.setChecked(True)
+        actions = QHBoxLayout(); actions.addWidget(self.bt_long); actions.addWidget(self.bt_short); actions.addWidget(self.bt_runner)
+        self.backtest_button = QPushButton("اجرای بک‌تست"); self.backtest_button.clicked.connect(self._start_backtest); actions.addWidget(self.backtest_button); actions.addStretch(); form.layout().addLayout(actions, 2, 0, 1, 10)
+        layout.addWidget(form); self.bt_summary = QLabel("CSV را بارگذاری کنید."); self.bt_summary.setWordWrap(True); layout.addWidget(self.bt_summary)
+        self.trade_table = self._table(["#", "جهت", "ورود UTC", "خروج UTC", "ورود", "SL", "TP", "خروج", "دلیل", "PnL", "R", "Equity"]); layout.addWidget(self.trade_table, 1)
 
     def _risk_tab(self) -> None:
-        page = self._tab("ریسک")
-        ttk.Label(page, text="ماشین‌حساب ریسک و محافظ پلن", style="Header.TLabel").pack(anchor="w")
-        ttk.Label(page, text="این محاسبه حجم و محافظه‌کاری حد ضرر را برای Paper Trading نشان می‌دهد؛ هیچ سفارش واقعی ایجاد نمی‌کند.", style="Muted.TLabel").pack(anchor="w", pady=(4, 12))
-        form = ttk.LabelFrame(page, text="پارامترهای پلن", padding=12); form.pack(fill=X)
-        self.r_symbol, self.r_balance, self.r_percent, self.r_entry, self.r_stop, self.r_target, self.r_atr = (StringVar(value=value) for value in ("XAU/USD", "10000", "0.5", "2000", "1990", "2020", "0"))
-        values = (("نماد", self.r_symbol), ("موجودی $", self.r_balance), ("ریسک %", self.r_percent), ("ورود", self.r_entry), ("SL", self.r_stop), ("TP", self.r_target), ("ATR مرجع", self.r_atr))
-        for index, (label, variable) in enumerate(values):
-            row, column = divmod(index, 4); column *= 2
-            ttk.Label(form, text=label).grid(row=row, column=column, sticky="w", padx=(0, 5), pady=5)
-            ttk.Entry(form, textvariable=variable, width=17).grid(row=row, column=column + 1, sticky="ew", padx=(0, 16), pady=5)
-        ttk.Button(form, text="محاسبهٔ ریسک", command=self._calculate_risk).grid(row=2, column=0, pady=(10, 0), sticky="w")
-        ttk.Button(form, text="اصلاح محافظه‌کارانهٔ پلن", command=self._guard_plan).grid(row=2, column=1, columnspan=2, pady=(10, 0), sticky="w")
-        self.risk_result = StringVar(value="مقادیر را وارد و محاسبه کنید.")
-        self.guard_result = StringVar(value="")
-        ttk.Label(page, textvariable=self.risk_result, wraplength=1160).pack(anchor="w", pady=(18, 6))
-        ttk.Label(page, textvariable=self.guard_result, style="Muted.TLabel", wraplength=1160).pack(anchor="w")
+        _, layout = self._page("ریسک")
+        layout.addWidget(self._heading("ماشین‌حساب ریسک و محافظ پلن")); layout.addWidget(self._muted("محاسبهٔ حجم و محافظه‌کاری SL برای Paper Trading؛ بدون ایجاد سفارش."))
+        form, self.risk = self._fields([("نماد", "XAU/USD"), ("موجودی $", "10000"), ("ریسک %", "0.5"), ("ورود", "2000"), ("SL", "1990"), ("TP", "2020"), ("ATR مرجع", "0")])
+        actions = QHBoxLayout(); calculate = QPushButton("محاسبهٔ ریسک"); calculate.clicked.connect(self._calculate_risk); guard = QPushButton("اصلاح محافظه‌کارانهٔ پلن"); guard.clicked.connect(self._guard_plan); actions.addWidget(calculate); actions.addWidget(guard); actions.addStretch(); form.layout().addLayout(actions, 2, 0, 1, 8)
+        layout.addWidget(form); self.risk_result, self.guard_result = QLabel("مقادیر را وارد و محاسبه کنید."), self._muted("")
+        self.risk_result.setWordWrap(True); self.guard_result.setWordWrap(True); layout.addWidget(self.risk_result); layout.addWidget(self.guard_result); layout.addStretch()
 
     def _journal_tab(self) -> None:
-        page = self._tab("ژورنال")
-        ttk.Label(page, text="ژورنال محلی SQLite", style="Header.TLabel").pack(anchor="w")
-        form = ttk.LabelFrame(page, text="ثبت معاملهٔ بسته", padding=10); form.pack(fill=X, pady=12)
-        self.j_symbol, self.j_side, self.j_entry, self.j_stop, self.j_target, self.j_exit, self.j_pnl = (StringVar(value=value) for value in ("BTC/USD", "BUY", "", "", "", "", ""))
-        values = (("نماد", self.j_symbol), ("جهت BUY/SELL", self.j_side), ("ورود", self.j_entry), ("SL", self.j_stop), ("TP", self.j_target), ("خروج", self.j_exit), ("PnL", self.j_pnl))
-        for index, (label, variable) in enumerate(values):
-            ttk.Label(form, text=label).grid(row=0, column=index * 2, sticky="w", padx=(0, 4))
-            ttk.Entry(form, textvariable=variable, width=12).grid(row=0, column=index * 2 + 1, sticky="w", padx=(0, 10))
-        ttk.Button(form, text="ثبت", command=self._add_journal).grid(row=1, column=0, pady=10, sticky="w")
-        ttk.Button(form, text="خروجی CSV/JSON/PDF", command=self._export_journal).grid(row=1, column=1, columnspan=2, pady=10, sticky="w")
-        columns = ("نماد", "جهت", "ورود", "SL", "TP", "خروج", "PnL", "زمان UTC")
-        self.journal_tree = self._tree(page, columns, (110, 70, 100, 100, 100, 100, 100, 175), height=18)
-        self._refresh_journal()
+        _, layout = self._page("ژورنال")
+        layout.addWidget(self._heading("ژورنال محلی SQLite"))
+        form, self.journal_fields = self._fields([("نماد", "BTC/USD"), ("جهت", "BUY"), ("ورود", ""), ("SL", ""), ("TP", ""), ("خروج", ""), ("PnL", "")])
+        buttons = QHBoxLayout(); add = QPushButton("ثبت"); add.clicked.connect(self._add_journal); export = QPushButton("خروجی CSV/JSON/PDF"); export.clicked.connect(self._export_journal); buttons.addWidget(add); buttons.addWidget(export); buttons.addStretch(); form.layout().addLayout(buttons, 2, 0, 1, 8)
+        layout.addWidget(form); self.journal_table = self._table(["نماد", "جهت", "ورود", "SL", "TP", "خروج", "PnL", "زمان UTC"]); layout.addWidget(self.journal_table, 1); self._refresh_journal()
 
     def _calendar_tab(self) -> None:
-        page = self._tab("تقویم")
-        ttk.Label(page, text="تقویم عملکرد ماهانه", style="Header.TLabel").pack(anchor="w")
-        controls = ttk.Frame(page); controls.pack(fill=X, pady=12)
-        now = datetime.now()
-        self.calendar_year, self.calendar_month = StringVar(value=str(now.year)), StringVar(value=str(now.month))
-        for label, variable in (("سال", self.calendar_year), ("ماه", self.calendar_month)):
-            ttk.Label(controls, text=label).pack(side=LEFT); ttk.Entry(controls, textvariable=variable, width=8).pack(side=LEFT, padx=(4, 14))
-        ttk.Button(controls, text="نمایش", command=self._refresh_calendar).pack(side=LEFT)
-        self.calendar_result = StringVar(value="")
-        ttk.Label(page, textvariable=self.calendar_result, wraplength=1100).pack(anchor="w", pady=8)
-        self.calendar_tree = self._tree(page, ("روز", "PnL", "تعداد معامله"), (110, 160, 160), height=22)
-        self._refresh_calendar()
+        _, layout = self._page("تقویم")
+        layout.addWidget(self._heading("تقویم عملکرد ماهانه")); bar = QHBoxLayout(); now = datetime.now()
+        self.calendar_year, self.calendar_month = QLineEdit(str(now.year)), QLineEdit(str(now.month)); refresh = QPushButton("نمایش"); refresh.clicked.connect(self._refresh_calendar)
+        for text, field in (("سال", self.calendar_year), ("ماه", self.calendar_month)): bar.addWidget(QLabel(text)); field.setMaximumWidth(100); bar.addWidget(field)
+        bar.addWidget(refresh); bar.addStretch(); layout.addLayout(bar); self.calendar_result = QLabel(); self.calendar_result.setWordWrap(True); layout.addWidget(self.calendar_result)
+        self.calendar_table = self._table(["روز", "PnL", "تعداد معامله"]); layout.addWidget(self.calendar_table, 1); self._refresh_calendar()
 
     def _neowave_tab(self) -> None:
-        page = self._tab("NeoWave")
-        ttk.Label(page, text="تحلیل ساختاری NeoWave", style="Header.TLabel").pack(anchor="w")
-        ttk.Label(page, text="پیوت‌ها فقط از کندل‌های بستهٔ CSV ساخته می‌شوند. نبود ساختار معتبر خنثی است و سیگنال ساختگی تولید نمی‌شود.", style="Muted.TLabel", wraplength=1050).pack(anchor="w", pady=(4, 12))
-        ttk.Button(page, text="تحلیل دادهٔ بارگذاری‌شده", command=self._analyze_neowave).pack(anchor="w")
-        self.neowave_result = StringVar(value="CSV را بارگذاری کنید.")
-        ttk.Label(page, textvariable=self.neowave_result, wraplength=1150).pack(anchor="w", pady=14)
-        self.pivot_tree = self._tree(page, ("Index", "نوع", "قیمت", "زمان UTC"), (100, 100, 180, 220), height=20)
+        _, layout = self._page("NeoWave")
+        layout.addWidget(self._heading("تحلیل ساختاری NeoWave")); layout.addWidget(self._muted("پیوت‌ها فقط از کندل‌های بسته ساخته می‌شوند؛ نبود ساختار معتبر خنثی است."))
+        button = QPushButton("تحلیل دادهٔ بارگذاری‌شده"); button.clicked.connect(self._analyze_neowave); layout.addWidget(button)
+        self.neowave_result = QLabel("CSV را بارگذاری کنید."); self.neowave_result.setWordWrap(True); layout.addWidget(self.neowave_result)
+        self.pivot_table = self._table(["Index", "نوع", "قیمت", "زمان UTC"]); layout.addWidget(self.pivot_table, 1)
 
     def _live_tab(self) -> None:
-        page = self._tab("قیمت زنده")
-        ttk.Label(page, text="Quote عمومی — فقط مشاهده", style="Header.TLabel").pack(anchor="w")
-        ttk.Label(page, text="هر دریافت از دادهٔ عمومی است؛ به‌دلیل اسپرد، تأخیر و تفاوت provider قیمت اجرایی محسوب نمی‌شود. هیچ اتصال حساب یا سفارشی وجود ندارد.", style="Muted.TLabel", wraplength=1100).pack(anchor="w", pady=(4, 12))
-        controls = ttk.Frame(page); controls.pack(fill=X)
-        self.live_symbol = StringVar(value="BTC/USDT")
-        ttk.Entry(controls, textvariable=self.live_symbol, width=20).pack(side=LEFT)
-        ttk.Button(controls, text="دریافت Quote", command=self._fetch_quote).pack(side=LEFT, padx=8)
-        self.live_result = StringVar(value="Quote دریافت نشده است.")
-        ttk.Label(page, textvariable=self.live_result, style="Header.TLabel", wraplength=1100).pack(anchor="w", pady=24)
+        _, layout = self._page("قیمت زنده")
+        layout.addWidget(self._heading("Quote عمومی — فقط مشاهده")); layout.addWidget(self._muted("Quote عمومی قیمت قابل اجرا نیست و اتصال حساب یا ارسال سفارش ندارد."))
+        bar = QHBoxLayout(); self.live_symbol = QLineEdit("BTC/USDT"); self.live_symbol.setMaximumWidth(220); get = QPushButton("دریافت Quote"); get.clicked.connect(self._fetch_quote); bar.addWidget(self.live_symbol); bar.addWidget(get); bar.addStretch(); layout.addLayout(bar)
+        self.live_result = QLabel("Quote دریافت نشده است."); self.live_result.setWordWrap(True); self.live_result.setStyleSheet(f"color: {ACCENT}; font-size: 20px;"); layout.addWidget(self.live_result); layout.addStretch()
 
     def _settings_tab(self) -> None:
-        page = self._tab("تنظیمات")
-        ttk.Label(page, text="قرارداد نسخهٔ Python", style="Header.TLabel").pack(anchor="w")
-        notes = (
-            "• فقط Python استاندارد + Tkinter در runtime؛ Qt، CMake، Ninja و Visual Studio لازم نیست.\n"
-            "• CSV و journal روی دستگاه باقی می‌مانند؛ برنامه API key نگه نمی‌دارد.\n"
-            "• در برخورد هم‌زمان SL و TP، مدل بک‌تست SL را مقدم می‌دارد.\n"
-            "• ساخت artifact native با build_windows.bat در Windows یا build_desktop.sh در macOS/Linux انجام می‌شود؛ فایل ناشناس دانلود یا نصب خودکار نمی‌شود."
-        )
-        ttk.Label(page, text=notes, justify="left", wraplength=1100).pack(anchor="w", pady=14)
-        self.update_result = StringVar(value=f"نسخهٔ محلی: {APP_VERSION}")
-        ttk.Label(page, textvariable=self.update_result, style="Muted.TLabel", wraplength=1100).pack(anchor="w", pady=8)
-        ttk.Button(page, text="بررسی GitHub Release", command=self._check_update).pack(anchor="w")
-
-    def _tree(self, parent: ttk.Frame, columns: tuple[str, ...], widths: tuple[int, ...], height: int) -> ttk.Treeview:
-        holder = ttk.Frame(parent); holder.pack(fill=BOTH, expand=True)
-        tree = ttk.Treeview(holder, columns=columns, show="headings", height=height)
-        for column, width in zip(columns, widths):
-            tree.heading(column, text=column); tree.column(column, width=width, anchor="center", minwidth=65)
-        ybar = ttk.Scrollbar(holder, orient="vertical", command=tree.yview); xbar = ttk.Scrollbar(holder, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
-        tree.pack(side=LEFT, fill=BOTH, expand=True); ybar.pack(side=RIGHT, fill=Y); xbar.pack(side="bottom", fill=X)
-        return tree
+        _, layout = self._page("تنظیمات")
+        layout.addWidget(self._heading("قرارداد نسخهٔ PyQt6"))
+        layout.addWidget(QLabel("• رابط PyQt6 برای Windows، macOS و Linux\n• CSV و journal محلی هستند و API key نگه‌داری نمی‌شود.\n• برخورد هم‌زمان SL/TP با SL-first مدل می‌شود.\n• ساخت artifact با PyInstaller و بدون نصب خودکار فایل ناشناس انجام می‌شود."))
+        self.update_result = self._muted(f"نسخهٔ محلی: {APP_VERSION}"); self.update_result.setWordWrap(True); layout.addWidget(self.update_result)
+        check = QPushButton("بررسی GitHub Release"); check.clicked.connect(self._check_update); layout.addWidget(check); layout.addStretch()
 
     def _choose_csv(self) -> None:
-        path = filedialog.askopenfilename(title="انتخاب CSV", filetypes=[("CSV", "*.csv"), ("All files", "*.*")])
-        if not path: return
-        self.status.set("در حال خواندن CSV در Worker Thread…")
-        threading.Thread(target=self._load_csv_worker, args=(Path(path),), daemon=True).start()
+        filename, _ = QFileDialog.getOpenFileName(self, "انتخاب CSV", "", "CSV files (*.csv);;All files (*.*)")
+        if filename:
+            self.statusBar().showMessage("در حال خواندن CSV در Worker Thread…")
+            threading.Thread(target=self._load_csv_worker, args=(Path(filename),), daemon=True).start()
 
     def _load_csv_worker(self, path: Path) -> None:
         try:
-            candles, audit = read_csv(path)
-            amplitude = neo_wave_dynamic_amplitude(candles)
-            pivots = neo_wave_pivots(candles, amplitude)
-            verdict = analyze_neo_wave(candles, amplitude)
-            self.events.put(("loaded", (path, candles, audit, pivots, verdict)))
-        except Exception as exc:
-            self.events.put(("error", f"خطای CSV: {exc}"))
+            candles, audit = read_csv(path); amplitude = neo_wave_dynamic_amplitude(candles); pivots = neo_wave_pivots(candles, amplitude)
+            self.bus.event.emit("loaded", (path, candles, audit, pivots, analyze_neo_wave(candles, amplitude)))
+        except Exception as error: self.bus.event.emit("error", f"خطای CSV: {error}")
 
     def _loaded(self, payload: tuple[Path, list[Candle], CsvAudit, list[object], NeoWaveVerdict | None]) -> None:
-        path, self.candles, self.audit, pivots, self.neowave = payload
-        audit = self.audit
-        self.data_label.set(f"{path.name} · {audit.accepted_rows:,} کندل · {audit.inferred_interval} · حذف‌شده: {audit.skipped_rows + audit.duplicate_rows + audit.flat_rows_dropped}")
-        self.home_data.set(self.data_label.get())
-        self.status.set("CSV بارگذاری شد.")
-        self.backtest = None; self.home_backtest.set("نتیجهٔ بک‌تست: —"); self.bt_summary.set("آمادهٔ اجرای بک‌تست.")
-        self._draw_chart(); self._populate_pivots(pivots); self._show_neowave()
-
-    def _draw_chart(self) -> None:
-        self.chart.delete("all")
-        if not self.candles:
-            self.chart.create_text(max(1, self.chart.winfo_width() / 2), max(1, self.chart.winfo_height() / 2), text="CSV را بارگذاری کنید", fill=MUTED, font=(UI_FONT, 13))
-            return
-        bars = self.candles[-1500:]; width, height = max(300, self.chart.winfo_width()), max(240, self.chart.winfo_height())
-        left, right, top, bottom = 14, width - 72, 16, height - 22
-        highest, lowest = max(bar.high for bar in bars), min(bar.low for bar in bars); spread = max(highest - lowest, EPSILON)
-        y = lambda price: bottom - (price - lowest) / spread * (bottom - top)
-        for grid in range(5):
-            yy = top + (bottom - top) * grid / 4; self.chart.create_line(left, yy, right, yy, fill="#1d2a40")
-            self.chart.create_text(right + 4, yy, text=f"{highest - spread * grid / 4:.5g}", fill=MUTED, anchor="w", font=(UI_FONT, 8))
-        step = (right - left) / len(bars); body = max(1, min(10, step * .68))
-        for index, bar in enumerate(bars):
-            x = left + (index + .5) * step; color = GREEN if bar.close >= bar.open else RED
-            self.chart.create_line(x, y(bar.high), x, y(bar.low), fill=color, width=max(1, int(step * .08)))
-            self.chart.create_rectangle(x - body / 2, y(max(bar.open, bar.close)), x + body / 2, y(min(bar.open, bar.close)), fill=color, outline=color)
+        path, self.candles, self.audit, pivots, self.neowave = payload; audit = self.audit
+        text = f"{path.name} · {audit.accepted_rows:,} کندل · {audit.inferred_interval} · حذف‌شده: {audit.skipped_rows + audit.duplicate_rows + audit.flat_rows_dropped}"
+        self.data_label.setText(text); self.home_data.setText(text); self.chart.set_candles(self.candles); self.backtest = None; self.bt_summary.setText("آمادهٔ اجرای بک‌تست."); self.home_backtest.setText("نتیجهٔ بک‌تست: —"); self._put(self.trade_table, []); self._put(self.pivot_table, [[item.index, "HIGH" if item.is_high else "LOW", f"{item.price:.6g}", utc_text(item.time_ms)] for item in pivots[-30:]]); self._show_neowave(); self.statusBar().showMessage("CSV بارگذاری شد.")
 
     def _config(self) -> BacktestConfig:
-        return BacktestConfig(float(self.bt_equity.get()), float(self.bt_risk.get()) / 100, float(self.bt_fee.get()), float(self.bt_slippage.get()), float(self.bt_target.get()), self.bt_long.get(), self.bt_short.get(), self.bt_runner.get())
+        return BacktestConfig(float(self.bt["سرمایه"].text()), float(self.bt["ریسک %"].text()) / 100, float(self.bt["Fee هر سمت"].text()), float(self.bt["Slippage"].text()), float(self.bt["Target R"].text()), self.bt_long.isChecked(), self.bt_short.isChecked(), self.bt_runner.isChecked())
 
     def _start_backtest(self) -> None:
-        if not self.candles:
-            messagebox.showwarning(APP_TITLE, "ابتدا CSV را بارگذاری کنید."); return
+        if not self.candles: QMessageBox.warning(self, APP_TITLE, "ابتدا CSV را بارگذاری کنید."); return
         try: config = self._config(); config.validate()
-        except ValueError as exc: messagebox.showerror(APP_TITLE, f"تنظیمات نامعتبر: {exc}"); return
-        self.backtest_button.configure(state="disabled"); self.status.set("بک‌تست در Worker Thread در حال اجرا است…")
-        threading.Thread(target=self._backtest_worker, args=(config,), daemon=True).start()
+        except ValueError as error: QMessageBox.critical(self, APP_TITLE, f"تنظیمات نامعتبر: {error}"); return
+        self.backtest_button.setEnabled(False); self.statusBar().showMessage("بک‌تست در Worker Thread در حال اجرا است…"); threading.Thread(target=self._backtest_worker, args=(config,), daemon=True).start()
 
     def _backtest_worker(self, config: BacktestConfig) -> None:
         try:
-            result = run_ichimoku_baseline(self.candles, config, lambda done, total: self.events.put(("status", f"بک‌تست: {done:,}/{total:,}")))
-            neural = train_neural_baseline(self.candles, result.trades, self.audit.suggested_symbol if self.audit else "")
-            self.events.put(("backtest", (result, neural)))
-        except Exception as exc: self.events.put(("error", f"خطای بک‌تست: {exc}"))
+            result = run_ichimoku_baseline(self.candles, config, lambda done, total: self.bus.event.emit("status", f"بک‌تست: {done:,}/{total:,}"))
+            self.bus.event.emit("backtest", (result, train_neural_baseline(self.candles, result.trades, self.audit.suggested_symbol if self.audit else "")))
+        except Exception as error: self.bus.event.emit("error", f"خطای بک‌تست: {error}")
 
     def _show_backtest(self, payload: tuple[BacktestResult, object]) -> None:
-        self.backtest, neural = payload
-        self.backtest_button.configure(state="normal")
-        stats = self.backtest.stats
+        self.backtest, neural = payload; self.backtest_button.setEnabled(True); stats = self.backtest.stats
         text = f"معامله: {stats.trades} | برد: {stats.win_rate:.2f}% | PF: {stats.profit_factor:.3f} | انتظار: {stats.expectancy_r:.3f}R | خالص: ${stats.net_pnl:.2f} | DD: {stats.max_drawdown_pct:.2f}%"
-        self.bt_summary.set(text); self.home_backtest.set(text); self.status.set(f"بک‌تست کامل شد؛ حساب نهایی: ${stats.final_equity:.2f}")
-        self._clear_tree(self.trade_tree)
-        for index, trade in enumerate(self.backtest.trades, 1):
-            self.trade_tree.insert("", END, values=(index, trade.side, self._time(trade.entry_time_ms), self._time(trade.exit_time_ms), f"{trade.entry:.6g}", f"{trade.stop:.6g}", f"{trade.target:.6g}", f"{trade.exit:.6g}", trade.reason, f"{trade.net_pnl:.2f}", f"{trade.r_multiple:.2f}", f"{trade.equity_after:.2f}"))
-        if neural.samples:
-            self.bt_summary.set(text + f" | Neural Lab: {neural.samples} نمونه، win estimate {neural.predicted_win_rate_pct:.1f}%، دقت in-sample {neural.in_sample_accuracy_pct:.1f}% (نه OOS).")
+        if neural.samples: text += f" | Neural Lab: {neural.samples} نمونه، win estimate {neural.predicted_win_rate_pct:.1f}%، دقت in-sample {neural.in_sample_accuracy_pct:.1f}%"
+        self.bt_summary.setText(text); self.home_backtest.setText(text); self.statusBar().showMessage(f"بک‌تست کامل شد؛ حساب نهایی: ${stats.final_equity:.2f}")
+        self._put(self.trade_table, [[index, item.side, utc_text(item.entry_time_ms), utc_text(item.exit_time_ms), f"{item.entry:.6g}", f"{item.stop:.6g}", f"{item.target:.6g}", f"{item.exit:.6g}", item.reason, f"{item.net_pnl:.2f}", f"{item.r_multiple:.2f}", f"{item.equity_after:.2f}"] for index, item in enumerate(self.backtest.trades, 1)])
 
     def _calculate_risk(self) -> None:
         try:
-            result = calculate_position(self.r_symbol.get(), float(self.r_balance.get()), float(self.r_percent.get()), float(self.r_entry.get()), float(self.r_stop.get()), float(self.r_target.get()))
-            if not result: raise ValueError("جهت ورود/SL/TP نامعتبر است.")
-            self.risk_result.set(f"{result.side} | بودجه ریسک ${result.risk_budget_usd:.2f} | حجم {result.position_units:.4f} / لات {result.standard_lots:.4f} | R:R 1:{result.risk_reward:.2f} | اهرم {result.leverage}x | مارجین ${result.margin_required_usd:.2f} | کمیسیون ${result.commission_usd:.2f} | اسپرد ${result.spread_cost_usd:.2f} | لیکوییدیشن {result.liquidation_price:.6g} ({result.liquidation_buffer_r:.2f}R) | {result.plan_note}")
-        except ValueError as exc: messagebox.showerror(APP_TITLE, str(exc))
+            item = calculate_position(self.risk["نماد"].text(), float(self.risk["موجودی $"].text()), float(self.risk["ریسک %"].text()), float(self.risk["ورود"].text()), float(self.risk["SL"].text()), float(self.risk["TP"].text()))
+            if not item: raise ValueError("جهت ورود/SL/TP نامعتبر است.")
+            self.risk_result.setText(f"{item.side} | بودجه ریسک ${item.risk_budget_usd:.2f} | حجم {item.position_units:.4f} / لات {item.standard_lots:.4f} | R:R 1:{item.risk_reward:.2f} | اهرم {item.leverage}x | مارجین ${item.margin_required_usd:.2f} | لیکوییدیشن {item.liquidation_price:.6g} | {item.plan_note}")
+        except ValueError as error: QMessageBox.critical(self, APP_TITLE, str(error))
 
     def _guard_plan(self) -> None:
         try:
-            entry, stop, target = float(self.r_entry.get()), float(self.r_stop.get()), float(self.r_target.get())
-            side = "SELL" if stop > entry else "BUY"
-            result = sanitize_trade_plan(self.r_symbol.get(), side, entry, stop, target, 2.0, float(self.r_atr.get()), 15)
-            self.guard_result.set(f"TradePlanGuard: {'تأیید' if result.usable else 'رد'}{' / اصلاح‌شده' if result.adjusted else ''} | ورود {result.entry:.6g} · SL {result.stop_loss:.6g} · TP {result.take_profit:.6g} · R:R 1:{result.risk_reward:.2f} · اهرم {result.recommended_leverage}x · {result.note}")
-        except ValueError as exc: messagebox.showerror(APP_TITLE, str(exc))
+            entry, stop, target = float(self.risk["ورود"].text()), float(self.risk["SL"].text()), float(self.risk["TP"].text()); side = "SELL" if stop > entry else "BUY"
+            item = sanitize_trade_plan(self.risk["نماد"].text(), side, entry, stop, target, 2.0, float(self.risk["ATR مرجع"].text()), 15)
+            self.guard_result.setText(f"TradePlanGuard: {'تأیید' if item.usable else 'رد'}{' / اصلاح‌شده' if item.adjusted else ''} | ورود {item.entry:.6g} · SL {item.stop_loss:.6g} · TP {item.take_profit:.6g} · R:R 1:{item.risk_reward:.2f} · اهرم {item.recommended_leverage}x · {item.note}")
+        except ValueError as error: QMessageBox.critical(self, APP_TITLE, str(error))
 
     def _add_journal(self) -> None:
         try:
-            self.journal.add_trade(self.j_symbol.get(), self.j_side.get(), float(self.j_entry.get()), float(self.j_stop.get()), float(self.j_target.get()), float(self.j_exit.get()), float(self.j_pnl.get()))
-            self._refresh_journal(); self._refresh_calendar(); self.status.set("معامله در ژورنال SQLite ثبت شد.")
-            for value in (self.j_entry, self.j_stop, self.j_target, self.j_exit, self.j_pnl): value.set("")
-        except (ValueError, sqlite3.Error) as exc: messagebox.showerror(APP_TITLE, f"ثبت ژورنال ناموفق: {exc}")
+            values = self.journal_fields; self.journal.add_trade(values["نماد"].text(), values["جهت"].text(), float(values["ورود"].text()), float(values["SL"].text()), float(values["TP"].text()), float(values["خروج"].text()), float(values["PnL"].text()))
+            for key in ("ورود", "SL", "TP", "خروج", "PnL"): values[key].clear()
+            self._refresh_journal(); self._refresh_calendar(); self.statusBar().showMessage("معامله در ژورنال SQLite ثبت شد.")
+        except (ValueError, sqlite3.Error) as error: QMessageBox.critical(self, APP_TITLE, f"ثبت ژورنال ناموفق: {error}")
 
     def _refresh_journal(self) -> None:
-        self._clear_tree(self.journal_tree)
-        for row in self.journal.recent():
-            self.journal_tree.insert("", END, values=(row["symbol"], row["side"], f"{float(row['entry']):.6g}", f"{float(row['stop']):.6g}", f"{float(row['target']):.6g}", f"{float(row['exit']):.6g}", f"{float(row['net_pnl']):.2f}", self._time(int(row["closed_at_ms"]))))
+        self._put(self.journal_table, [[row["symbol"], row["side"], f"{float(row['entry']):.6g}", f"{float(row['stop']):.6g}", f"{float(row['target']):.6g}", f"{float(row['exit']):.6g}", f"{float(row['net_pnl']):.2f}", utc_text(int(row["closed_at_ms"]))] for row in self.journal.recent()])
 
     def _export_journal(self) -> None:
-        path = filedialog.asksaveasfilename(title="ذخیرهٔ ژورنال", defaultextension=".csv", filetypes=[("CSV", "*.csv"), ("JSON", "*.json"), ("PDF", "*.pdf")])
-        if not path: return
-        try: export_journal(self.journal.recent(1000), Path(path)); self.status.set(f"خروجی ژورنال ذخیره شد: {Path(path).name}")
-        except OSError as exc: messagebox.showerror(APP_TITLE, str(exc))
+        filename, _ = QFileDialog.getSaveFileName(self, "ذخیرهٔ ژورنال", "journal.csv", "CSV (*.csv);;JSON (*.json);;PDF (*.pdf)")
+        if filename:
+            try: export_journal(self.journal.recent(1000), Path(filename)); self.statusBar().showMessage(f"خروجی ژورنال ذخیره شد: {Path(filename).name}")
+            except OSError as error: QMessageBox.critical(self, APP_TITLE, str(error))
 
     def _export_candles(self) -> None:
-        if not self.candles: messagebox.showwarning(APP_TITLE, "ابتدا CSV را بارگذاری کنید."); return
-        path = filedialog.asksaveasfilename(title="Archive کندل", defaultextension=".csv", filetypes=[("CSV", "*.csv"), ("JSON", "*.json")])
-        if not path: return
-        try: export_candles(self.candles, Path(path)); self.status.set(f"Archive ذخیره شد: {Path(path).name}")
-        except OSError as exc: messagebox.showerror(APP_TITLE, str(exc))
+        if not self.candles: QMessageBox.warning(self, APP_TITLE, "ابتدا CSV را بارگذاری کنید."); return
+        filename, _ = QFileDialog.getSaveFileName(self, "Archive کندل", "candles.csv", "CSV (*.csv);;JSON (*.json)")
+        if filename:
+            try: export_candles(self.candles, Path(filename)); self.statusBar().showMessage(f"Archive ذخیره شد: {Path(filename).name}")
+            except OSError as error: QMessageBox.critical(self, APP_TITLE, str(error))
 
     def _refresh_calendar(self) -> None:
         try:
-            report = monthly_calendar(self.journal, int(self.calendar_year.get()), int(self.calendar_month.get()))
-            self.calendar_result.set(f"PnL: ${float(report['net']):.2f} | برد/باخت: {report['wins']} / {report['losses']} | Win rate: {float(report['win_rate']):.1f}% | روز سبز/قرمز: {report['winning_days']} / {report['losing_days']}")
-            self._clear_tree(self.calendar_tree)
-            for item in report["entries"]: self.calendar_tree.insert("", END, values=(item["day"], f"{float(item['net']):.2f}", item["count"]))
-        except ValueError: self.calendar_result.set("سال یا ماه نامعتبر است.")
-
-    def _populate_pivots(self, pivots: list[object]) -> None:
-        self._clear_tree(self.pivot_tree)
-        for pivot in pivots[-30:]: self.pivot_tree.insert("", END, values=(pivot.index, "HIGH" if pivot.is_high else "LOW", f"{pivot.price:.6g}", self._time(pivot.time_ms)))
+            report = monthly_calendar(self.journal, int(self.calendar_year.text()), int(self.calendar_month.text()))
+            self.calendar_result.setText(f"PnL: ${float(report['net']):.2f} | برد/باخت: {report['wins']} / {report['losses']} | Win rate: {float(report['win_rate']):.1f}% | روز سبز/قرمز: {report['winning_days']} / {report['losing_days']}")
+            self._put(self.calendar_table, [[item["day"], f"{float(item['net']):.2f}", item["count"]] for item in report["entries"]])
+        except ValueError: self.calendar_result.setText("سال یا ماه نامعتبر است.")
 
     def _analyze_neowave(self) -> None:
-        if not self.candles: messagebox.showwarning(APP_TITLE, "ابتدا CSV را بارگذاری کنید."); return
-        amplitude = neo_wave_dynamic_amplitude(self.candles); pivots = neo_wave_pivots(self.candles, amplitude); self.neowave = analyze_neo_wave(self.candles, amplitude); self._populate_pivots(pivots); self._show_neowave()
+        if not self.candles: QMessageBox.warning(self, APP_TITLE, "ابتدا CSV را بارگذاری کنید."); return
+        amplitude = neo_wave_dynamic_amplitude(self.candles); pivots = neo_wave_pivots(self.candles, amplitude); self.neowave = analyze_neo_wave(self.candles, amplitude); self._put(self.pivot_table, [[item.index, "HIGH" if item.is_high else "LOW", f"{item.price:.6g}", utc_text(item.time_ms)] for item in pivots[-30:]]); self._show_neowave()
 
     def _show_neowave(self) -> None:
-        if not self.neowave:
-            text = "ساختار معتبر NeoWave با دادهٔ فعلی شناسایی نشد؛ داور خنثی است."
+        if not self.neowave: text = "ساختار معتبر NeoWave با دادهٔ فعلی شناسایی نشد؛ داور خنثی است."
         else:
-            value = self.neowave
-            text = f"{value.badge} | {value.rules_passed}/{value.rules_total} قاعده | اطمینان {value.confidence_pct:.1f}% | {'تأییدشده' if value.confirmed else 'بدون تأیید'} | هدف {value.next_target:.6g} | ابطال {value.invalidation_price:.6g}"
-        self.neowave_result.set(text); self.home_neowave.set("NeoWave: " + text)
+            item = self.neowave; text = f"{item.badge} | {item.rules_passed}/{item.rules_total} قاعده | اطمینان {item.confidence_pct:.1f}% | {'تأییدشده' if item.confirmed else 'بدون تأیید'} | هدف {item.next_target:.6g} | ابطال {item.invalidation_price:.6g}"
+        self.neowave_result.setText(text); self.home_neowave.setText("NeoWave: " + text)
 
     def _fetch_quote(self) -> None:
-        symbol = self.live_symbol.get().strip().upper()
-        if not symbol: return
-        self.live_result.set("در حال دریافت Quote عمومی…")
-        threading.Thread(target=self._quote_worker, args=(symbol,), daemon=True).start()
+        symbol = self.live_symbol.text().strip().upper()
+        if symbol: self.live_result.setText("در حال دریافت Quote عمومی…"); threading.Thread(target=self._quote_worker, args=(symbol,), daemon=True).start()
 
     def _quote_worker(self, symbol: str) -> None:
         compact = symbol.replace("/", "")
         try:
             if symbol.endswith(("USDT", "USDC")) or compact.startswith(("BTC", "ETH", "SOL")):
-                pair = compact + "T" if symbol.endswith("/USD") else compact
-                url = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={urllib.parse.quote(pair)}"
-                with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "AurumEdgePython/0.2"}), timeout=8) as response:
-                    payload = json.loads(response.read().decode("utf-8")); price, provider = float(payload["price"]), "Binance public market data"
+                url = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={urllib.parse.quote(compact)}"
+                with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "AurumEdgePyQt/0.4"}), timeout=8) as response: price, provider = float(json.loads(response.read().decode("utf-8"))["price"]), "Binance public market data"
             else:
-                aliases = {"XAU/USD": "GC=F", "XAG/USD": "SI=F", "EUR/USD": "EURUSD=X", "USD/JPY": "JPY=X"}; ticker = aliases.get(symbol, compact)
-                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}?interval=1m&range=1d"
-                with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "AurumEdgePython/0.2"}), timeout=8) as response:
-                    payload = json.loads(response.read().decode("utf-8")); price, provider = float(payload["chart"]["result"][0]["meta"]["regularMarketPrice"]), "Yahoo public chart"
-            self.events.put(("quote", f"{symbol}: {price:,.8g} | {provider} | {datetime.now().strftime('%H:%M:%S')} — فقط مشاهده / Paper Trading"))
-        except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as exc: self.events.put(("quote", f"Quote دریافت نشد: {exc}"))
+                ticker = {"XAU/USD": "GC=F", "XAG/USD": "SI=F", "EUR/USD": "EURUSD=X", "USD/JPY": "JPY=X"}.get(symbol, compact); url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}?interval=1m&range=1d"
+                with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "AurumEdgePyQt/0.4"}), timeout=8) as response: price, provider = float(json.loads(response.read().decode("utf-8"))["chart"]["result"][0]["meta"]["regularMarketPrice"]), "Yahoo public chart"
+            self.bus.event.emit("quote", f"{symbol}: {price:,.8g} | {provider} | {datetime.now().strftime('%H:%M:%S')} — فقط مشاهده / Paper Trading")
+        except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as error: self.bus.event.emit("quote", f"Quote دریافت نشد: {error}")
 
     def _check_update(self) -> None:
-        self.update_result.set("در حال بررسی GitHub Releases…")
-        threading.Thread(target=self._update_worker, daemon=True).start()
+        self.update_result.setText("در حال بررسی GitHub Releases…"); threading.Thread(target=self._update_worker, daemon=True).start()
 
     def _update_worker(self) -> None:
         try:
-            request = urllib.request.Request("https://api.github.com/repos/parsapeyman10/ichimoko/releases/latest", headers={"User-Agent": "AurumEdgePython/0.2", "Accept": "application/vnd.github+json"})
+            request = urllib.request.Request("https://api.github.com/repos/parsapeyman10/ichimoko/releases/latest", headers={"User-Agent": "AurumEdgePyQt/0.4", "Accept": "application/vnd.github+json"})
             with urllib.request.urlopen(request, timeout=10) as response: payload = json.loads(response.read().decode("utf-8"))
-            self.events.put(("update", f"آخرین Release: {payload.get('tag_name', '—')} · {payload.get('html_url', '')}"))
-        except urllib.error.HTTPError as exc:
-            self.events.put(("update", "هنوز Release عمومی برای ویندوز منتشر نشده است." if exc.code == 404 else f"بررسی update ناموفق: HTTP {exc.code}"))
-        except (urllib.error.URLError, TimeoutError, ValueError) as exc: self.events.put(("update", f"بررسی update ناموفق: {exc}"))
+            self.bus.event.emit("update", f"آخرین Release: {payload.get('tag_name', '—')} · {payload.get('html_url', '')}")
+        except urllib.error.HTTPError as error: self.bus.event.emit("update", "هنوز Release عمومی برای ویندوز منتشر نشده است." if error.code == 404 else f"بررسی update ناموفق: HTTP {error.code}")
+        except (urllib.error.URLError, TimeoutError, ValueError) as error: self.bus.event.emit("update", f"بررسی update ناموفق: {error}")
 
-    def _drain_events(self) -> None:
-        try:
-            while True:
-                name, payload = self.events.get_nowait()
-                if name == "loaded": self._loaded(payload)
-                elif name == "backtest": self._show_backtest(payload)
-                elif name == "status": self.status.set(str(payload))
-                elif name == "error": self.status.set(str(payload)); self.backtest_button.configure(state="normal"); messagebox.showerror(APP_TITLE, str(payload))
-                elif name == "quote": self.live_result.set(str(payload))
-                elif name == "update": self.update_result.set(str(payload))
-        except queue.Empty: pass
-        self.root.after(80, self._drain_events)
+    def _handle_event(self, name: str, payload: object) -> None:
+        if name == "loaded": self._loaded(payload)  # type: ignore[arg-type]
+        elif name == "backtest": self._show_backtest(payload)  # type: ignore[arg-type]
+        elif name == "status": self.statusBar().showMessage(str(payload))
+        elif name == "error": self.backtest_button.setEnabled(True); self.statusBar().showMessage(str(payload)); QMessageBox.critical(self, APP_TITLE, str(payload))
+        elif name == "quote": self.live_result.setText(str(payload))
+        elif name == "update": self.update_result.setText(str(payload))
 
-    @staticmethod
-    def _clear_tree(tree: ttk.Treeview) -> None:
-        tree.delete(*tree.get_children())
-
-    @staticmethod
-    def _time(time_ms: int) -> str:
-        return datetime.fromtimestamp(time_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
-
-    def _close(self) -> None:
-        self.journal.close(); self.root.destroy()
+    def closeEvent(self, event: object) -> None:  # noqa: N802 - Qt API spelling
+        self.journal.close(); event.accept()  # type: ignore[attr-defined]
 
 
 def main() -> int:
-    root = Tk(); AurumEdgeApp(root); root.mainloop(); return 0
+    app = QApplication(sys.argv); app.setApplicationName("Aurum Edge")
+    window = AurumEdgeWindow(); window.show()
+    return app.exec()
 
 
 if __name__ == "__main__":

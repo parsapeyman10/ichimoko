@@ -9,7 +9,7 @@
 
 ## اپلیکیشن desktop Aurum Edge — Python خالص و چندسکویی
 
-نسخهٔ desktop اصلی در [`windows/README.md`](windows/README.md) کاملاً با **Python + Tkinter** برای Windows، macOS و Linux پیاده‌سازی شده است؛ هیچ فایل C++، Qt، CMake، Ninja یا Visual Studio در این deliverable وجود ندارد. برنامه CSV/چارت، بک‌تست Ichimoku baseline، ژورنال SQLite، تقویم، ریسک، NeoWave، Neural Lab، quote عمومیِ صرفاً مشاهده‌ای و بررسی دستی Release را ارائه می‌دهد. برای Windows فایل [`windows/build_windows.bat`](windows/build_windows.bat) و برای macOS/Linux فایل [`windows/build_desktop.sh`](windows/build_desktop.sh) را اجرا کنید. هر سیستم‌عامل باید artifact native خود را بسازد؛ یک EXE واحد قابل اجرای همهٔ سیستم‌عامل‌ها نیست. این برنامه historical-analysis و paper-journal است و سفارش واقعی نمی‌فرستد.
+نسخهٔ desktop اصلی در [`windows/README.md`](windows/README.md) با **Python + PyQt6** برای Windows، macOS و Linux پیاده‌سازی شده است؛ رابط آن با widgetهای PyQt6 و `QPainter` بازنویسی شده و هیچ C++ source، CMake، Ninja یا Visual Studio در این deliverable وجود ندارد. برنامه CSV/چارت، بک‌تست Ichimoku baseline، ژورنال SQLite، تقویم، ریسک، NeoWave، Neural Lab، quote عمومیِ صرفاً مشاهده‌ای و بررسی دستی Release را ارائه می‌دهد. برای اجرای source ابتدا `python -m pip install -r windows/requirements.txt` را اجرا کنید؛ سپس در Windows فایل [`windows/build_windows.bat`](windows/build_windows.bat) و برای macOS/Linux فایل [`windows/build_desktop.sh`](windows/build_desktop.sh) را برای ساخت native اجرا کنید. هر سیستم‌عامل باید artifact native خود را بسازد؛ یک EXE واحد قابل اجرای همهٔ سیستم‌عامل‌ها نیست. این برنامه historical-analysis و paper-journal است و سفارش واقعی نمی‌فرستد.
 
 ## ابزار مستقل بک‌تست native 15m — Python خالص
 

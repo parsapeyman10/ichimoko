@@ -22,22 +22,27 @@ from aurum_core import (
 
 
 class AurumPythonCoreTests(unittest.TestCase):
-    def test_cross_platform_build_wrappers_pass_the_application_source(self) -> None:
+    def test_pyqt_build_wrappers_pass_the_application_source(self) -> None:
         root = Path(__file__).resolve().parent
         batch = (root / "build_windows.bat").read_text(encoding="utf-8")
         builder = (root / "build_desktop.py").read_text(encoding="utf-8")
         shell = (root / "build_desktop.sh").read_text(encoding="utf-8")
+        app = (root / "aurum_edge.py").read_text(encoding="utf-8")
+        requirements = (root / "requirements-build.txt").read_text(encoding="utf-8")
         self.assertIn("build_desktop.py", batch)
         self.assertIn("--recreate-venv", batch)
-        self.assertIn("import sys, tkinter", batch)
+        self.assertNotIn("tkinter", batch.lower())
         self.assertIn('"--paths", "."', builder)
         self.assertIn("APP_SOURCE.name", builder)
-        self.assertIn("platform.system", builder)
-        self.assertIn("prepare_tkinter_environment", builder)
-        self.assertIn("assert_tkinter(Path(sys.executable)", builder)
+        self.assertIn("PyQt6", builder)
+        self.assertIn('"--collect-all", "PyQt6"', builder)
+        self.assertIn("requirements-build.txt", builder)
         self.assertIn("shutil.rmtree(VENV_DIR)", builder)
         self.assertIn("build_desktop.py", shell)
         self.assertIn('"$@"', shell)
+        self.assertIn("from PyQt6", app)
+        self.assertNotIn("tkinter", app.lower())
+        self.assertIn("PyQt6", requirements)
         self.assertNotIn('--paths "%SCRIPT_DIR%"', batch)
 
     def bars(self, count: int = 120) -> list[Candle]:

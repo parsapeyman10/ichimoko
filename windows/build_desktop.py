@@ -20,6 +20,8 @@ APP_DIR = Path(__file__).resolve().parent
 APP_SOURCE = APP_DIR / "aurum_edge.py"
 CORE_SOURCE = APP_DIR / "aurum_core.py"
 TEST_SOURCE = APP_DIR / "test_aurum_core.py"
+RUNTIME_REQUIREMENTS_FILE = APP_DIR / "requirements.txt"
+REQUIREMENTS_FILE = APP_DIR / "requirements-build.txt"
 VENV_DIR = APP_DIR / ".build-venv"
 
 
@@ -53,7 +55,7 @@ def run(command: list[str], *, cwd: Path = APP_DIR) -> None:
 def validate_source() -> None:
     if sys.version_info < (3, 11):
         raise BuildError("Python 3.11 or newer is required.")
-    for required in (APP_SOURCE, CORE_SOURCE, TEST_SOURCE):
+    for required in (APP_SOURCE, CORE_SOURCE, TEST_SOURCE, RUNTIME_REQUIREMENTS_FILE, REQUIREMENTS_FILE):
         if not required.is_file():
             raise BuildError(f"Required source file is missing: {required.name}")
     banned_suffixes = {".cpp", ".cc", ".cxx", ".h", ".hpp"}
@@ -67,22 +69,20 @@ def run_core_checks(python: Path) -> None:
     run([str(python), TEST_SOURCE.name])
 
 
-def assert_tkinter(python: Path, label: str) -> None:
-    command = [str(python), "-c", "import tkinter; print('Tkinter is available for the desktop build.')"]
+def assert_pyqt6(python: Path) -> None:
+    """Validate the GUI runtime inside the generated venv, not the host Python."""
+    command = [str(python), "-c", "from PyQt6.QtWidgets import QApplication; print('PyQt6 is available for the desktop build.')"]
     printable = subprocess.list2cmdline(command) if os.name == "nt" else " ".join(command)
     print(f"\n> {printable}")
     completed = subprocess.run(command, cwd=APP_DIR, check=False)
     if not completed.returncode:
         return
-    access_violation = completed.returncode in {3221225477, -1073741819}
-    if access_violation:
+    if host_key() == "linux":
         raise BuildError(
-            f"Tkinter crashed in {label} (Windows access violation 0xC0000005). "
-            "If this is the local build environment, it can be recreated automatically. "
-            "If it is the host Python, repair or reinstall the official 64-bit Python with Tcl/Tk enabled, "
-            "then rerun the build."
+            "PyQt6 could not load its GUI runtime. Install the missing native Qt/X11 dependencies for the target Linux distribution "
+            "(the error above commonly names a library such as libxkbcommon), then run the build again."
         )
-    raise BuildError(f"Tkinter is unavailable in {label} (exit code {completed.returncode}). Install Python with Tcl/Tk enabled.")
+    raise BuildError("PyQt6 could not load its GUI runtime in the local build environment. Recreate the venv and repair the host Python runtime, then retry.")
 
 
 def prepare_environment(*, recreate: bool = False) -> Path:
@@ -99,17 +99,11 @@ def prepare_environment(*, recreate: bool = False) -> Path:
     return python
 
 
-def prepare_tkinter_environment(*, recreate: bool = False) -> Path:
-    """Recreate a stale venv once when host Python's Tkinter itself is healthy."""
-    python = prepare_environment(recreate=recreate)
-    try:
-        assert_tkinter(python, "the local build environment")
-        return python
-    except BuildError as first_error:
-        print(f"Local build environment Tkinter check failed: {first_error}", file=sys.stderr)
-        python = prepare_environment(recreate=True)
-        assert_tkinter(python, "the recreated local build environment")
-        return python
+def install_gui_build_dependencies(python: Path) -> None:
+    print("=== Installing local PyQt6 and packaging dependencies ===")
+    run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
+    run([str(python), "-m", "pip", "install", "--upgrade", "-r", REQUIREMENTS_FILE.name])
+    assert_pyqt6(python)
 
 
 def package(python: Path, host: str) -> Path:
@@ -122,7 +116,7 @@ def package(python: Path, host: str) -> Path:
     print(f"=== Packaging a native {host} desktop artifact ===")
     run([
         str(python), "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
-        "--name", name, "--paths", ".", "--distpath", str(output_root),
+        "--collect-all", "PyQt6", "--name", name, "--paths", ".", "--distpath", str(output_root),
         "--workpath", str(work_root), "--specpath", str(spec_root), APP_SOURCE.name,
     ])
     return output_root / (f"{name}.exe" if host == "windows" else name)
@@ -144,14 +138,10 @@ def main() -> int:
             print("=== CHECK PASSED ===")
             return 0
         host = host_key()
-        print("=== Checking Tkinter in the host Python ===")
-        assert_tkinter(Path(sys.executable), "the host Python")
-        python = prepare_tkinter_environment(recreate=arguments.recreate_venv)
+        python = prepare_environment(recreate=arguments.recreate_venv)
         print("=== Running deterministic Python core tests ===")
         run_core_checks(python)
-        print("=== Installing the local packaging dependency ===")
-        run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
-        run([str(python), "-m", "pip", "install", "--upgrade", "pyinstaller>=6.0,<7.0"])
+        install_gui_build_dependencies(python)
         artifact = package(python, host)
         print("\n=== SUCCESS ===")
         print(f"Native {host} artifact: {artifact}")
