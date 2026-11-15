@@ -1,0 +1,181 @@
+//@version=5
+// Drive-book synthesis. Historical Strategy Tester research only; it never sends real orders.
+// Source ideas used here: standard Ichimoku confluence, Chikou clearance, BB squeeze breakout,
+// RSI-50 momentum confirmation, long-term MA alignment, Kijun structural risk, fixed R targets.
+strategy("Ichimoku Book Synthesis | Squeeze & Reclaim", overlay=true, initial_capital=10000, default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0, process_orders_on_close=true)
+
+// ── Standard Ichimoku and book-derived research inputs ──────────────────────
+int conversionLength = input.int(9, "Tenkan length", minval=2)
+int baseLength = input.int(26, "Kijun length", minval=2)
+int spanBLength = input.int(52, "Senkou B length", minval=2)
+int displacement = input.int(26, "Ichimoku displacement", minval=1)
+int bbLength = input.int(20, "Bollinger length", minval=5)
+float bbDeviation = input.float(2.0, "Bollinger deviation", minval=0.5, step=0.1)
+int squeezeBaselineLength = input.int(20, "Bandwidth baseline length", minval=5)
+float squeezeRatio = input.float(0.75, "Squeeze: max width / average width", minval=0.40, maxval=0.95, step=0.05)
+int squeezeBreakoutWindow = input.int(6, "Bars allowed after squeeze release", minval=1, maxval=20)
+int pullbackWindow = input.int(3, "Kijun/Tenkan pullback lookback", minval=1, maxval=10)
+float minBodyRatio = input.float(0.55, "Minimum breakout body / range", minval=0.30, maxval=0.95, step=0.05)
+float maxAdverseWick = input.float(0.25, "Maximum adverse wick / range", minval=0.05, maxval=0.50, step=0.05)
+bool requireLongTermMa = input.bool(true, "Require EMA89 and SMA200 alignment")
+bool requireChikouClearance = input.bool(true, "Require Chikou price clearance")
+float kijunStopAtrBuffer = input.float(0.40, "Kijun stop buffer (ATR)", minval=0.05, maxval=1.50, step=0.05)
+float targetR = input.float(2.50, "Fixed target R multiple", minval=2.00, maxval=3.00, step=0.25)
+float tradeQty = input.float(1.0, "Backtest quantity", minval=0.000001, step=0.01)
+bool allowLong = input.bool(true, "Enable long")
+bool allowShort = input.bool(true, "Enable short")
+bool showBollinger = input.bool(false, "Show Bollinger Bands")
+
+// ── Indicator snapshot ─────────────────────────────────────────────────────
+float tenkan = (ta.highest(high, conversionLength) + ta.lowest(low, conversionLength)) / 2.0
+float kijun = (ta.highest(high, baseLength) + ta.lowest(low, baseLength)) / 2.0
+float spanA = (tenkan + kijun) / 2.0
+float spanB = (ta.highest(high, spanBLength) + ta.lowest(low, spanBLength)) / 2.0
+// The Kumo at the current price bar was calculated displacement bars ago.
+float visibleSpanA = spanA[displacement]
+float visibleSpanB = spanB[displacement]
+float cloudTop = math.max(visibleSpanA, visibleSpanB)
+float cloudBottom = math.min(visibleSpanA, visibleSpanB)
+float futureCloudTop = math.max(spanA, spanB)
+float futureCloudBottom = math.min(spanA, spanB)
+float atr = ta.atr(14)
+float rsi14 = ta.rsi(close, 14)
+float ema89 = ta.ema(close, 89)
+float sma200 = ta.sma(close, 200)
+
+float bbBasis = ta.sma(close, bbLength)
+float bbStdDev = ta.stdev(close, bbLength)
+float bbUpper = bbBasis + bbStdDev * bbDeviation
+float bbLower = bbBasis - bbStdDev * bbDeviation
+float bbWidth = bbBasis > syminfo.mintick ? (bbUpper - bbLower) / bbBasis : na
+float bbAverageWidth = ta.sma(bbWidth, squeezeBaselineLength)
+bool squeezeActive = not na(bbWidth) and not na(bbAverageWidth) and bbWidth <= bbAverageWidth * squeezeRatio
+
+// Keep the actual squeeze boundaries, then allow only a short breakout window.
+var float squeezeHigh = na
+var float squeezeLow = na
+var int squeezeReleasedBar = na
+if squeezeActive
+    bool freshSqueeze = not squeezeActive[1]
+    squeezeHigh := (freshSqueeze or na(squeezeHigh)) ? high : math.max(squeezeHigh, high)
+    squeezeLow := (freshSqueeze or na(squeezeLow)) ? low : math.min(squeezeLow, low)
+if not squeezeActive and squeezeActive[1]
+    squeezeReleasedBar := bar_index
+int squeezeAge = not na(squeezeReleasedBar) ? bar_index - squeezeReleasedBar : na
+bool squeezeRecentlyReleased = not squeezeActive and not na(squeezeAge) and squeezeAge <= squeezeBreakoutWindow
+if not na(squeezeAge) and squeezeAge > squeezeBreakoutWindow
+    squeezeHigh := na
+    squeezeLow := na
+    squeezeReleasedBar := na
+
+float candleRange = math.max(high - low, syminfo.mintick)
+float bodyRatio = math.abs(close - open) / candleRange
+float upperWick = math.max(0.0, (high - math.max(open, close)) / candleRange)
+float lowerWick = math.max(0.0, (math.min(open, close) - low) / candleRange)
+bool strongBullCandle = close > open and bodyRatio >= minBodyRatio and upperWick <= maxAdverseWick
+bool strongBearCandle = close < open and bodyRatio >= minBodyRatio and lowerWick <= maxAdverseWick
+
+// Chikou represents this close at the displacement bar. Clearance is tested against
+// the surrounding historical price corridor rather than a single historical close.
+int chikouCorridorOffset = math.max(displacement - 3, 1)
+float chikouPriceCeiling = ta.highest(high[chikouCorridorOffset], 7)
+float chikouPriceFloor = ta.lowest(low[chikouCorridorOffset], 7)
+bool chikouBullClear = close > chikouPriceCeiling
+bool chikouBearClear = close < chikouPriceFloor
+
+// ── Context: all non-discretionary components must agree ────────────────────
+bool cloudBull = close > cloudTop and visibleSpanA > visibleSpanB
+bool cloudBear = close < cloudBottom and visibleSpanA < visibleSpanB
+bool tkBull = tenkan > kijun and tenkan >= tenkan[1] and kijun >= kijun[1]
+bool tkBear = tenkan < kijun and tenkan <= tenkan[1] and kijun <= kijun[1]
+bool maBull = close > ema89 and close > sma200
+bool maBear = close < ema89 and close < sma200
+bool contextLong = cloudBull and tkBull and rsi14 > 50.0 and (not requireLongTermMa or maBull) and (not requireChikouClearance or chikouBullClear)
+bool contextShort = cloudBear and tkBear and rsi14 < 50.0 and (not requireLongTermMa or maBear) and (not requireChikouClearance or chikouBearClear)
+
+// ── Two entries stated by the reviewed books ────────────────────────────────
+// 1. Squeeze breakout: close decisively beyond the measured base and Kumo.
+bool squeezeBreakoutLong = squeezeRecentlyReleased and not na(squeezeHigh) and strongBullCandle and close > squeezeHigh and close > futureCloudTop
+bool squeezeBreakoutShort = squeezeRecentlyReleased and not na(squeezeLow) and strongBearCandle and close < squeezeLow and close < futureCloudBottom
+// 2. Trend pullback: test Tenkan/Kijun then resume in the pre-existing trend.
+bool pulledBackLong = ta.lowest(low, pullbackWindow) <= math.max(tenkan, kijun)
+bool pulledBackShort = ta.highest(high, pullbackWindow) >= math.min(tenkan, kijun)
+bool reclaimLong = strongBullCandle and close > tenkan and close > high[1]
+bool reclaimShort = strongBearCandle and close < tenkan and close < low[1]
+bool pullbackReclaimLong = pulledBackLong and reclaimLong
+bool pullbackReclaimShort = pulledBackShort and reclaimShort
+
+bool longSetup = contextLong and (squeezeBreakoutLong or pullbackReclaimLong)
+bool shortSetup = contextShort and (squeezeBreakoutShort or pullbackReclaimShort)
+
+// ── Fixed, Kijun-based risk plan ────────────────────────────────────────────
+float longStopCandidate = kijun - atr * kijunStopAtrBuffer
+float shortStopCandidate = kijun + atr * kijunStopAtrBuffer
+float longRisk = close - longStopCandidate
+float shortRisk = shortStopCandidate - close
+bool longRiskValid = longRisk > syminfo.mintick
+bool shortRiskValid = shortRisk > syminfo.mintick
+float longTargetCandidate = close + longRisk * targetR
+float shortTargetCandidate = close - shortRisk * targetR
+
+// A single position only. The stop and target are frozen at the signal close.
+var float activeStop = na
+var float activeTarget = na
+bool flat = strategy.position_size == 0
+bool enterLong = barstate.isconfirmed and flat and allowLong and longSetup and longRiskValid
+bool enterShort = barstate.isconfirmed and flat and allowShort and shortSetup and shortRiskValid
+if enterLong
+    activeStop := longStopCandidate
+    activeTarget := longTargetCandidate
+    strategy.entry("Book Long", strategy.long, qty=tradeQty, comment=squeezeBreakoutLong ? "squeeze breakout" : "kijun reclaim")
+    strategy.exit("Book Long bracket", from_entry="Book Long", stop=activeStop, limit=activeTarget)
+if enterShort
+    activeStop := shortStopCandidate
+    activeTarget := shortTargetCandidate
+    strategy.entry("Book Short", strategy.short, qty=tradeQty, comment=squeezeBreakoutShort ? "squeeze breakout" : "kijun reclaim")
+    strategy.exit("Book Short bracket", from_entry="Book Short", stop=activeStop, limit=activeTarget)
+if strategy.position_size > 0
+    strategy.exit("Book Long bracket", from_entry="Book Long", stop=activeStop, limit=activeTarget)
+if strategy.position_size < 0
+    strategy.exit("Book Short bracket", from_entry="Book Short", stop=activeStop, limit=activeTarget)
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    activeStop := na
+    activeTarget := na
+
+// ── Visuals: the components used by the books; no hidden additional signal ──
+plot(tenkan, "Tenkan", color=color.new(color.blue, 0))
+plot(kijun, "Kijun", color=color.new(color.red, 0), linewidth=2)
+plot(close, "Chikou", offset=-displacement, color=color.new(color.green, 20))
+plotA = plot(spanA, "Senkou A", offset=displacement, color=color.new(color.green, 0))
+plotB = plot(spanB, "Senkou B", offset=displacement, color=color.new(color.maroon, 0))
+fill(plotA, plotB, color=spanA >= spanB ? color.new(color.green, 87) : color.new(color.red, 87), title="Kumo")
+plot(showBollinger ? bbUpper : na, "BB upper", color=color.new(color.gray, 55))
+plot(showBollinger ? bbBasis : na, "BB basis", color=color.new(color.gray, 75))
+plot(showBollinger ? bbLower : na, "BB lower", color=color.new(color.gray, 55))
+plot(strategy.position_size != 0 ? activeStop : na, "Active stop", color=color.red, linewidth=2, style=plot.style_linebr)
+plot(strategy.position_size != 0 ? activeTarget : na, "Active target", color=color.lime, linewidth=2, style=plot.style_linebr)
+
+// Compact, current-bar audit. It does not reinterpret historical bars.
+bool signalReady = (allowLong and longSetup and longRiskValid) or (allowShort and shortSetup and shortRiskValid)
+string setupType = squeezeBreakoutLong or squeezeBreakoutShort ? "SQUEEZE BREAKOUT" : pullbackReclaimLong or pullbackReclaimShort ? "KIJUN RECLAIM" : "-"
+string stateText = strategy.position_size != 0 ? "IN TRADE" : signalReady ? "SIGNAL" : squeezeActive ? "SQUEEZE BUILDING" : squeezeRecentlyReleased ? "WAIT: BREAKOUT" : "WAIT"
+var table audit = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80), border_width=1)
+if barstate.islast
+    table.cell(audit, 0, 0, "BOOK SYNTHESIS")
+    table.cell(audit, 1, 0, "CHART TIMEFRAME")
+    table.cell(audit, 0, 1, "Cloud")
+    table.cell(audit, 1, 1, cloudBull ? "BULLISH" : cloudBear ? "BEARISH" : "INSIDE/CONFLICT", text_color=cloudBull or cloudBear ? color.lime : color.orange)
+    table.cell(audit, 0, 2, "TK / RSI")
+    table.cell(audit, 1, 2, tkBull and rsi14 > 50.0 ? "BULLISH" : tkBear and rsi14 < 50.0 ? "BEARISH" : "NOT ALIGNED", text_color=tkBull and rsi14 > 50.0 or tkBear and rsi14 < 50.0 ? color.lime : color.red)
+    table.cell(audit, 0, 3, "Chikou")
+    table.cell(audit, 1, 3, chikouBullClear ? "BULL CLEAR" : chikouBearClear ? "BEAR CLEAR" : "BLOCKED", text_color=chikouBullClear or chikouBearClear ? color.lime : color.red)
+    table.cell(audit, 0, 4, "Long-term MA")
+    table.cell(audit, 1, 4, not requireLongTermMa ? "OPTIONAL: OFF" : maBull ? "BULLISH" : maBear ? "BEARISH" : "MIXED", text_color=not requireLongTermMa ? color.gray : maBull or maBear ? color.lime : color.red)
+    table.cell(audit, 0, 5, "Base")
+    table.cell(audit, 1, 5, squeezeActive ? "SQUEEZE" : squeezeRecentlyReleased ? "RELEASED" : "NONE", text_color=squeezeActive or squeezeRecentlyReleased ? color.aqua : color.gray)
+    table.cell(audit, 0, 6, "Entry mode")
+    table.cell(audit, 1, 6, setupType, text_color=setupType == "-" ? color.gray : color.aqua)
+    table.cell(audit, 0, 7, "R target")
+    table.cell(audit, 1, 7, str.tostring(targetR, "#.##") + "R")
+    table.cell(audit, 0, 8, "State")
+    table.cell(audit, 1, 8, stateText, text_color=stateText == "SIGNAL" ? color.lime : stateText == "IN TRADE" ? color.yellow : color.orange)
