@@ -229,8 +229,8 @@ android {
         // ریسک ۱٪ هر معامله، حرارت باز ۳٪، کف R:R ۲، حد ضرر بیرون از نویز ATR، ممنوعیت
         // میانگین‌گیری روی ضرر، کوچک‌کردن سایز در سری باخت و افت از قله، قفل سود پس از ۱R.
         // ۳۵ تست قاعده‌محور + آزمایشگاه «ضرر نکن» روی ۵ رژیم ساختگی × هر ۵ مدل.
-        versionCode = 797
-        versionName = "3.9.88"
+        versionCode = 798
+        versionName = "3.9.89"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

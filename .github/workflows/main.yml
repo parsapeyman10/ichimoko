@@ -715,26 +715,41 @@ jobs:
         if: steps.guard.outputs.ready == 'true' && steps.publish.outcome == 'success' && steps.collect.outputs.tag != ''
         env:
           TAG: ${{ steps.collect.outputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.collect.outputs.tag }}
         run: |
           set -uo pipefail
-          if ! python3 tools/refresh_update_manifest.py --tag "$TAG" --output update/aurum-edge.json; then
-            echo "::warning title=Manifest refresh failed::The sidecar of $TAG was not readable after publish; run tools/refresh_update_manifest.py --tag $TAG."
+          # The sidecar that was just uploaded to the release is already on disk
+          # (out/aurum-edge.json) and carries the exact SHA-256 and size of the published APK,
+          # so no download is needed — downloading release assets failed in this job before and
+          # left the default-branch manifest stale for days.
+          MANIFEST=/tmp/aurum-edge-manifest.json
+          if [[ -f out/aurum-edge.json ]]; then
+            cp out/aurum-edge.json "$MANIFEST"
+          elif ! python3 tools/refresh_update_manifest.py --tag "$TAG" --output "$MANIFEST"; then
+            echo "::warning title=Manifest refresh failed::Neither out/aurum-edge.json nor the $TAG sidecar was readable."
             exit 0
           fi
-          if git diff --quiet -- update/aurum-edge.json; then
-            echo "::notice title=Manifest current::update/aurum-edge.json already describes $TAG."
+          echo "::notice title=Published APK fingerprint::$(python3 -c "import json;d=json.load(open('$MANIFEST'));print('sha256='+str(d.get('sha256'))+' size='+str(d.get('sizeBytes'))+' code='+str(d.get('versionCode')))")"
+          TARGET_BRANCH="$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)"
+          CURRENT_SHA="$(gh api "repos/$GITHUB_REPOSITORY/contents/update/aurum-edge.json?ref=$TARGET_BRANCH" --jq .sha 2>/dev/null || true)"
+          CONTENT="$(base64 -w0 "$MANIFEST")"
+          if [[ -z "$CURRENT_SHA" ]]; then
+            gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/update/aurum-edge.json" \
+              -f message="chore(update): manifest $TARGET_BRANCH برای $TAG [skip ci]" \
+              -f content="$CONTENT" -f branch="$TARGET_BRANCH" \
+              && echo "::notice title=Manifest written::update/aurum-edge.json on $TARGET_BRANCH now describes $TAG." \
+              || echo "::warning title=Manifest not written::update/aurum-edge.json on $TARGET_BRANCH still describes an older release."
             exit 0
           fi
-          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "::notice title=Manifest left for the merge::This run is not on main, so $TAG keeps its own manifest asset; run tools/refresh_update_manifest.py --tag $TAG after merging."
-            git checkout -- update/aurum-edge.json
-            exit 0
+          if gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/update/aurum-edge.json" \
+              -f message="chore(update): manifest $TARGET_BRANCH برای $TAG [skip ci]" \
+              -f content="$CONTENT" -f sha="$CURRENT_SHA" -f branch="$TARGET_BRANCH" >/dev/null; then
+            echo "::notice title=Manifest updated::update/aurum-edge.json on $TARGET_BRANCH now describes $TAG."
+          else
+            echo "::warning title=Manifest not updated::update/aurum-edge.json on $TARGET_BRANCH still describes an older release."
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add update/aurum-edge.json
-          git commit -m "chore(update): manifest شاخهٔ پیش‌فرض برای $TAG [skip ci]"
-          git push origin HEAD:main || echo "::warning title=Manifest not pushed::update/aurum-edge.json still describes an older release; run python3 tools/refresh_update_manifest.py --tag $TAG"
 
       - name: Job summary
         if: always() && steps.guard.outputs.ready == 'true'
