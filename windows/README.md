@@ -80,7 +80,7 @@ windows/dist-local/linux/Aurum_Edge_Linux
 5. فقط PyInstaller را در همان محیط نصب می‌کند؛
 6. artifact native مربوط به همان host را می‌سازد.
 
-اگر Tkinter فقط داخل `.build-venv` خراب باشد، builder آن environment تولیدی را یک‌بار خودکار حذف و دوباره می‌سازد. برای اجبار به بازسازی از ابتدا نیز می‌توانید اجرا کنید:
+در Windows، `build_windows.bat` به‌صورت خودکار Pythonهای نصب‌شده را برای Tkinter سالم بررسی می‌کند، یک runtime سالم را انتخاب می‌کند و در هر build محیط تولیدی `.build-venv` را بازسازی می‌کند؛ بنابراین حذف دستی venv لازم نیست. خود builder نیز اگر Tkinter فقط داخل `.build-venv` خراب باشد، آن environment را یک‌بار خودکار حذف و دوباره می‌سازد. برای اجبار به بازسازی از ابتدا در اجرای مستقیم builder نیز می‌توانید اجرا کنید:
 
 ```sh
 python windows/build_desktop.py --recreate-venv

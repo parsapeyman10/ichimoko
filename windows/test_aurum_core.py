@@ -28,6 +28,8 @@ class AurumPythonCoreTests(unittest.TestCase):
         builder = (root / "build_desktop.py").read_text(encoding="utf-8")
         shell = (root / "build_desktop.sh").read_text(encoding="utf-8")
         self.assertIn("build_desktop.py", batch)
+        self.assertIn("--recreate-venv", batch)
+        self.assertIn("import sys, tkinter", batch)
         self.assertIn('"--paths", "."', builder)
         self.assertIn("APP_SOURCE.name", builder)
         self.assertIn("platform.system", builder)
