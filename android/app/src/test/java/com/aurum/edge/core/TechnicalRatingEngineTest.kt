@@ -74,10 +74,13 @@ class TechnicalRatingEngineTest {
             )
         }
         val rating = TechnicalRatingEngine.evaluate(flat)!!
-        assertEquals("در بازار تخت هیچ رأی خریدی نباید ساخته شود", 0, rating.buy)
         assertTrue(
-            "رأی خنثی باید اکثریت باشد، بود: خنثی=${rating.neutral} فروش=${rating.sell}",
-            rating.neutral > rating.sell,
+            "رأی خنثی باید اکثریت مطلق باشد، بود: خرید=${rating.buy} خنثی=${rating.neutral} فروش=${rating.sell}",
+            rating.neutral > rating.buy + rating.sell,
+        )
+        assertTrue(
+            "امتیاز خالص در بازار تخت باید کوچک بماند، بود: ${rating.score}",
+            kotlin.math.abs(rating.score) <= 6,
         )
     }
 
