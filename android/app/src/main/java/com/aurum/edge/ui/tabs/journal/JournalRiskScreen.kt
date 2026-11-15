@@ -1989,7 +1989,7 @@ internal fun OfflineGapBackfillCard(
     isBackfilling: Boolean,
     onSyncGap: (Int?) -> Unit,
     /** پیشرفت به‌روزرسانی دیتای آفلاین همهٔ نمادها (۰ تا ۱۵). */
-    allProgress: com.aurum.edge.ui.shell.OfflineSyncProgress = com.aurum.edge.ui.shell.OfflineSyncProgress(),
+    allProgress: com.aurum.edge.ui.OfflineSyncProgress = com.aurum.edge.ui.OfflineSyncProgress(),
     /** شروع به‌روزرسانی دیتای آفلاین برای همهٔ نمادها؛ `null` = دکمه ساخته نشود. */
     onSyncAll: (() -> Unit)? = null,
 ) {
