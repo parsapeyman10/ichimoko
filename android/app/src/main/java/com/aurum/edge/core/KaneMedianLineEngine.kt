@@ -593,8 +593,8 @@ object KaneMedianLineEngine {
         val timeWindow = max(3.0, 0.15 * abBars)
         var bestCount = 0
         var bestFamilies = 0
-        for ((x1, _) in hits.sortedBy { it.second }) {
-            val inWindow = hits.filter { abs(it.second - x1) <= timeWindow }
+        for ((_, hitX) in hits.sortedBy { it.second }) {
+            val inWindow = hits.filter { abs(it.second - hitX) <= timeWindow }
             if (inWindow.size > bestCount) {
                 bestCount = inWindow.size
                 bestFamilies = inWindow.map { it.first.family }.toSet().size
