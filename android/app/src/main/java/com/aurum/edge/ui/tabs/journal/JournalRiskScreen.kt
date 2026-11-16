@@ -488,6 +488,9 @@ fun JournalRiskScreen(
             trades = filteredTrades,
         )
 
+        // ── ۳.۶ آزمایشگاه استاپ (فاز ۰ کالیبراسیون): بازپخش معاملات واقعی با استاپ‌های جایگزین ──
+        StopAnchorLabCard(viewModel = viewModel)
+
             }
 
             3 -> {
@@ -557,6 +560,80 @@ fun JournalRiskScreen(
                     },
                     onOpenChart = { onChartSymbol(activeSymbol) },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StopAnchorLabCard(viewModel: AurumViewModel) {
+    val lab by viewModel.stopLab.collectAsStateWithLifecycle()
+    SectionCard(
+        title = "🧪 آزمایشگاه استاپ (فاز ۰ کالیبراسیون)",
+        subtitle = "همین معاملاتِ ژورنال با قاعده‌های دیگرِ حد ضرر بازپخش می‌شوند تا معلوم شود «۰٫۲۶ ATR» یا " +
+            "«۰٫۳۸ ATR» واقعاً چه اثری دارد. هیچ تنظیمی تغییر نمی‌کند و هیچ معامله‌ای ساخته نمی‌شود.",
+        collapsible = false,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(
+                onClick = { viewModel.runStopAnchorLab(30) },
+                enabled = !lab.running,
+            ) {
+                Text(
+                    text = if (lab.running) "⏳ در حال اجرا…" else "▶ اجرای آزمایشگاه روی ۳۰ روز اخیر",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Cyan,
+                )
+            }
+            if (lab.messageFa.isNotBlank()) {
+                Text(
+                    text = lab.messageFa,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+            }
+            val report = lab.report
+            if (report != null && report.hasData) {
+                Text(
+                    text = "قرارداد گزارش: ضرر کامل ۵٫۰۰$ · هدف = مضرب R × ۵$ · ابهام هم‌کندل به نفع حد ضرر · " +
+                        "فقط کندل‌های بسته‌شده تا لحظهٔ ورود",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                )
+                report.strategyIds.forEach { strategyId ->
+                    val rows = report.rowsFor(strategyId)
+                    val titleFa = rows.firstOrNull()?.strategyTitleFa ?: strategyId
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            text = "🎯 $titleFa",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        rows.forEach { row ->
+                            val tag = if (row.anchor.name == "ENGINE_CURRENT") {
+                                "مبنا · استاپ فعلی موتور"
+                            } else {
+                                "${row.anchor.labelFa} · ${String.format(Locale.US, "%.2f", row.bufferAtr)} ATR"
+                            }
+                            val sampleNote = if (row.sampleEnough) "" else " · ⚠️ شاهد ضعیف (کمتر از ۲۰ نمونه)"
+                            Text(
+                                text = "$tag — ${row.samples} نمونه · برد ${String.format(Locale.US, "%.1f", row.winRatePct)}٪ · " +
+                                    "انتظار ${formatUsdExact(row.expectancyUsd)} · PF ${String.format(Locale.US, "%.2f", row.profitFactor)} · " +
+                                    "استاپ≤۱۵د ${String.format(Locale.US, "%.0f", row.fastStopPct)}٪ · نجات ${row.rescuedFromStop} · " +
+                                    "هدف از دست‌رفته ${row.lostTargets}" + sampleNote,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (row.anchor.name == "ENGINE_CURRENT") AurumColors.TextSecondary else AurumColors.TextPrimary,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

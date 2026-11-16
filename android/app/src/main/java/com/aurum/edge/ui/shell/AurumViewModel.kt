@@ -3717,6 +3717,96 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         _toast.value = "⚡ پیشنهاد اصلاحی دستیار ایچیموکو روی تنظیمات استراتژی اعمال شد"
     }
 
+    // ─────────────────── آزمایشگاه استاپ (فاز ۰ کالیبراسیون) ───────────────────
+
+    /**
+     * وضعیت «آزمایشگاه استاپ»: بازپخش معاملات واقعی ژورنال با قاعده‌های جایگزین حد ضرر.
+     *
+     * این آزمایشگاه **هیچ رفتاری را تغییر نمی‌دهد**؛ فقط عدد می‌دهد تا کالیبراسیون بعدی روی
+     * شاهد باشد نه حدس (`docs/CALIBRATION_PHASES_FA.md`، فاز ۰).
+     */
+    data class StopLabState(
+        val running: Boolean = false,
+        val report: com.aurum.edge.core.StopAnchorCalibration.Report? = null,
+        val messageFa: String = "",
+        val finishedAt: Long = 0L,
+    )
+
+    private val _stopLab = kotlinx.coroutines.flow.MutableStateFlow(StopLabState())
+    val stopLab: kotlinx.coroutines.flow.StateFlow<StopLabState> = _stopLab
+
+    fun runStopAnchorLab(days: Int = 30) {
+        if (_stopLab.value.running) return
+        _stopLab.value = _stopLab.value.copy(
+            running = true,
+            messageFa = "⏳ در حال بازپخش معاملات بسته‌شدهٔ $days روز اخیر با قاعده‌های جایگزین استاپ…",
+        )
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val since = System.currentTimeMillis() - days.toLong() * 86_400_000L
+            val entries = runCatching {
+                trades.value
+                    .asSequence()
+                    .filter { !it.isOpen && it.openedAt >= since }
+                    .map { t ->
+                        val stop = t.initialStopLoss ?: t.stopLoss
+                        val riskDistance = kotlin.math.abs(t.entry - stop)
+                        val planR = if (riskDistance > 1e-9) {
+                            kotlin.math.abs(t.takeProfit - t.entry) / riskDistance
+                        } else {
+                            t.effectiveOptimalRr
+                        }
+                        com.aurum.edge.core.StopAnchorCalibration.Entry(
+                            tradeId = t.id,
+                            tradeNumber = t.displayTradeNumber,
+                            strategyId = t.strategyId.ifBlank { com.aurum.edge.core.BitcoinStrategyModel.BASE_ICHIMOKU.id },
+                            strategyTitleFa = t.strategyTitleFa.ifBlank { t.strategyId },
+                            symbol = t.symbol,
+                            interval = t.interval,
+                            entryTime = t.openedAt,
+                            entryPrice = t.entry,
+                            isBuy = t.action == com.aurum.edge.domain.SignalAction.BUY,
+                            plannedRiskReward = if (planR.isFinite() && planR > 0.0) planR.coerceIn(0.5, 5.0) else 2.0,
+                            engineStopLoss = stop,
+                            actualNetPnlUsd = t.pnlUsd ?: 0.0,
+                            actualExitReasonFa = t.exitReason.orEmpty(),
+                        )
+                    }
+                    .toList()
+            }.getOrDefault(emptyList())
+
+            val report = runCatching {
+                com.aurum.edge.core.StopAnchorCalibration.sweep(
+                    entries = entries,
+                    candlesBySymbol = { symbol, iv ->
+                        val vaulted = runCatching {
+                            com.aurum.edge.data.PhoneStorageVaultManager.loadPersistedCandles(symbol, iv)
+                        }.getOrDefault(emptyList())
+                        if (vaulted.size >= 30) {
+                            vaulted
+                        } else {
+                            com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(symbol, iv)
+                                .ifEmpty { vaulted }
+                        }
+                    },
+                    days = days,
+                )
+            }.getOrNull()
+
+            _stopLab.value = StopLabState(
+                running = false,
+                report = report,
+                messageFa = when {
+                    report == null -> "⚠️ آزمایشگاه اجرا نشد (خطای داخلی). دوباره تلاش کنید."
+                    !report.hasData -> "⚠️ دادهٔ کافی نبود: ${report.entriesSkipped} معامله کنار گذاشته شد. " +
+                        "اول «به‌روزرسانی دیتای آفلاین همهٔ نمادها» را بزنید تا خزانهٔ کندل پر شود."
+
+                    else -> "✅ ${report.entriesUsed} معامله بازپخش شد · ${report.rows.size} سطر مقایسه ساخته شد"
+                },
+                finishedAt = System.currentTimeMillis(),
+            )
+        }
+    }
+
     fun consumeToast() {
         _toast.value = null
     }
