@@ -205,8 +205,7 @@ class JournalStore(
             val oneHour = entryInstantRating(trade, com.aurum.edge.domain.Interval.H1, candlesProvider)
             val fourHour = entryInstantRating(trade, com.aurum.edge.domain.Interval.H4, candlesProvider)
             if (oneHour == null && fourHour == null) return@map trade
-            changed++
-            trade.copy(
+            val candidate = trade.copy(
                 tech1hBuy = oneHour?.buy ?: trade.tech1hBuy,
                 tech1hNeutral = oneHour?.neutral ?: trade.tech1hNeutral,
                 tech1hSell = oneHour?.sell ?: trade.tech1hSell,
@@ -215,6 +214,10 @@ class JournalStore(
                 tech4hSell = fourHour?.sell ?: trade.tech4hSell,
                 techSnapshotRebuilt = true,
             )
+            // اگر اجرای دوباره هیچ عددی را عوض نکند، نوشتن روی دیسک لازم نیست.
+            if (candidate == trade) return@map trade
+            changed++
+            candidate
         }
         if (changed > 0) persist(updated)
         return changed
