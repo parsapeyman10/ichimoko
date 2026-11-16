@@ -2177,6 +2177,23 @@ private fun AutoMonitoredOpenTradesCard(
                             onOpenChart = { onOpenChart(trade.symbol) },
                         )
 
+                        // ── سنجش تکنیکال ۱ ساعته و ۴ ساعتهٔ لحظهٔ ورود (کادر جدا و همیشه دیده‌شدنی) ──
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(AurumColors.Purple.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .border(1.dp, AurumColors.Purple.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 9.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = trade.techSnapshotLineFa,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Purple,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2221,11 +2238,6 @@ private fun AutoMonitoredOpenTradesCard(
                                 text = "🏦 ${trade.buildVenueRulesAndFeesSummaryFa()}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextSecondary,
-                            )
-                            Text(
-                                text = trade.techSnapshotLineFa,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = AurumColors.Purple,
                             )
                         }
 
@@ -3020,6 +3032,26 @@ private fun ClosedJournalTradeRow(
                     softWrap = false,
                 )
             }
+        }
+
+        // ── ردیف ۴: سنجش تکنیکال ۱ ساعته و ۴ ساعتهٔ لحظهٔ ورود ──
+        // این ردیف همیشه (بدون نیاز به باز کردن جزئیات) دیده می‌شود؛ خواستهٔ صریح کاربر بود که
+        // دادهٔ سنجش در ژورنال هر معامله حاضر باشد.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(AurumColors.Purple.copy(alpha = 0.12f))
+                .border(1.dp, AurumColors.Purple.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 9.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = trade.techSnapshotLineFa,
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Purple,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
 
         if (detailsExpanded) {

@@ -182,6 +182,62 @@ class JournalStore(
         }
     }
 
+    /**
+     * بازسازی اسنپ‌شات سنجش تکنیکال برای معاملاتی که پیش از افزوده شدن این قابلیت ثبت شده‌اند.
+     *
+     * قاعدهٔ صحت داده: فقط از کندل‌های **بسته‌شدهٔ پیش از لحظهٔ ورود** استفاده می‌شود، پس عددِ
+     * بازسازی‌شده همان چیزی است که در لحظهٔ ورود دیده می‌شد (بدون نگاه به آینده). اگر کندلی در
+     * دسترس نباشد، همان «ثبت نشد» می‌ماند و هیچ عدد ساختگی ساخته نمی‌شود.
+     *
+     * @return تعداد معاملاتی که اسنپ‌شاتشان کامل شد.
+     */
+    @Synchronized
+    fun backfillGaugeSnapshots(
+        candlesProvider: (String, com.aurum.edge.domain.Interval) -> List<Candle> = { symbol, interval ->
+            LiveQuoteFetcher.peekCachedCandles(symbol, interval)
+        },
+    ): Int {
+        val current = _trades.value
+        if (current.isEmpty()) return 0
+        var changed = 0
+        val updated = current.map { trade ->
+            if (trade.tech1hBuy >= 0 && trade.tech4hBuy >= 0) return@map trade
+            val oneHour = entryInstantRating(trade, com.aurum.edge.domain.Interval.H1, candlesProvider)
+            val fourHour = entryInstantRating(trade, com.aurum.edge.domain.Interval.H4, candlesProvider)
+            if (oneHour == null && fourHour == null) return@map trade
+            changed++
+            trade.copy(
+                tech1hBuy = oneHour?.buy ?: trade.tech1hBuy,
+                tech1hNeutral = oneHour?.neutral ?: trade.tech1hNeutral,
+                tech1hSell = oneHour?.sell ?: trade.tech1hSell,
+                tech4hBuy = fourHour?.buy ?: trade.tech4hBuy,
+                tech4hNeutral = fourHour?.neutral ?: trade.tech4hNeutral,
+                tech4hSell = fourHour?.sell ?: trade.tech4hSell,
+                techSnapshotRebuilt = true,
+            )
+        }
+        if (changed > 0) persist(updated)
+        return changed
+    }
+
+    /** ارزیابی سنجش تکنیکال در «لحظهٔ ورود»؛ فقط کندل‌هایی که پیش از ورود بسته شده‌اند. */
+    private fun entryInstantRating(
+        trade: PaperTrade,
+        interval: com.aurum.edge.domain.Interval,
+        candlesProvider: (String, com.aurum.edge.domain.Interval) -> List<Candle>,
+    ): com.aurum.edge.core.TechnicalRating? {
+        val all = runCatching { candlesProvider(trade.symbol, interval) }.getOrNull().orEmpty()
+        if (all.isEmpty()) return null
+        val cutoff = trade.openedAt
+        val closedBeforeEntry = all
+            .asSequence()
+            .filter { it.closed && it.time + interval.millis <= cutoff }
+            .sortedBy { it.time }
+            .toList()
+        if (closedBeforeEntry.size < com.aurum.edge.core.TechnicalRatingEngine.MIN_BARS) return null
+        return com.aurum.edge.core.TechnicalRatingEngine.evaluate(closedBeforeEntry.takeLast(150))
+    }
+
     /** پیام فارسی دلیل رد شدن معاملهٔ تازه؛ `null` یعنی مسیر باز است. */
     fun openTradeBlockedByFa(strategyId: String): String? {
         val blocking = openTradeForStrategy(strategyId) ?: return null

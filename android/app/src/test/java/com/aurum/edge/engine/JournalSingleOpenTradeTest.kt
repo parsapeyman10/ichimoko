@@ -7,6 +7,7 @@ import com.aurum.edge.core.RiskAndCalendarEngine
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -156,5 +157,65 @@ class JournalSingleOpenTradeTest {
         // بدون کندل ۱/۴ ساعته در کش، عدد ساختگی ساخته نمی‌شود و در ژورنال هم صریح می‌نویسد «ثبت نشد».
         assertEquals(-1, trade!!.tech1hBuy)
         assertTrue(trade.techSnapshotLineFa.contains("ثبت نشد"))
+    }
+
+    @Test
+    fun unknownEntrySnapshotIsRebuiltOnlyFromCandlesClosedBeforeEntry() {
+        val (journal, _) = freshJournal("test_gauge_backfill.json")
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "EUR/USD",
+            accountBalance = 1_000.0,
+            riskPercent = 0.5,
+            entry = 1.1000,
+            stopLoss = 1.0995,
+            takeProfit = 1.1010,
+        )!!
+        val openedAt = 1_700_000_000_000L
+        val trade = journal.openTrade(calc, note = "معاملهٔ قدیمی", now = openedAt)
+        assertNotNull(trade)
+        assertEquals("بدون کندل، سنجش نامعلوم است", -1, trade!!.tech1hBuy)
+
+        // کندل‌های ۱ ساعته‌ای که همه پیش از لحظهٔ ورود بسته شده‌اند.
+        val hourly = trendingSeries(90, step = 1.2, stepMs = 3_600_000L, start = 200.0)
+        val provider: (String, Interval) -> List<Candle> = { _, interval ->
+            if (interval == Interval.H1) hourly else emptyList()
+        }
+        assertEquals(1, journal.backfillGaugeSnapshots(provider))
+
+        val rebuilt = journal.trades.value.first { it.id == trade.id }
+        val expected = com.aurum.edge.core.TechnicalRatingEngine.evaluate(hourly)!!
+        assertEquals(expected.buy, rebuilt.tech1hBuy)
+        assertEquals(expected.neutral, rebuilt.tech1hNeutral)
+        assertEquals(expected.sell, rebuilt.tech1hSell)
+        assertEquals("۴ ساعته داده‌ای ندارد ⇒ نامعلوم می‌ماند", -1, rebuilt.tech4hBuy)
+        assertTrue(rebuilt.techSnapshotRebuilt)
+        assertTrue(rebuilt.techSnapshotLineFa.contains("بازسازی"))
+        assertTrue(rebuilt.techSnapshotLineFa.contains("ثبت نشد"))
+        // اجرای دوباره کاری برای انجام نمی‌دهد.
+        assertEquals(0, journal.backfillGaugeSnapshots(provider))
+    }
+
+    @Test
+    fun rebuiltSnapshotNeverUsesCandlesThatCloseAfterEntry() {
+        val (journal, _) = freshJournal("test_gauge_backfill_causal.json")
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "EUR/USD",
+            accountBalance = 1_000.0,
+            riskPercent = 0.5,
+            entry = 1.1000,
+            stopLoss = 1.0995,
+            takeProfit = 1.1010,
+        )!!
+        // ورود درست بعد از بسته شدن کندل پنجاهم (۵۰ ساعت بعد از مبدأ) انجام شده است.
+        val hourly = trendingSeries(90, step = 1.2, stepMs = 3_600_000L, start = 200.0)
+        val openedAt = 50 * 3_600_000L
+        val trade = journal.openTrade(calc, note = "ورود وسط سری", now = openedAt)!!
+        val provider: (String, Interval) -> List<Candle> = { _, interval ->
+            if (interval == Interval.H1) hourly else emptyList()
+        }
+        journal.backfillGaugeSnapshots(provider)
+        val rebuilt = journal.trades.value.first { it.id == trade.id }
+        assertEquals("کندل‌های بعد از ورود نباید در بازسازی دخالت کنند", -1, rebuilt.tech1hBuy)
+        assertFalse(rebuilt.techSnapshotRebuilt)
     }
 }

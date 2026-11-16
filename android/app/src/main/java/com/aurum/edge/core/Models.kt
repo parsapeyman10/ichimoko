@@ -263,6 +263,12 @@ data class PaperTrade(
     val tech4hBuy: Int = -1,
     val tech4hNeutral: Int = -1,
     val tech4hSell: Int = -1,
+    /**
+     * `true` یعنی این اسنپ‌شات **بعداً** و فقط از کندل‌های بسته‌شدهٔ تا لحظهٔ ورود بازسازی شده است
+     * (معامله‌های قدیمی‌تر از نسخه‌ای که این فیلد را ثبت می‌کند). عدد همان چیزی است که در لحظهٔ
+     * ورود دیده می‌شد؛ فقط زمانِ ثبتش بعدتر است و همین در ژورنال صریح نوشته می‌شود.
+     */
+    val techSnapshotRebuilt: Boolean = false,
 ) {
     val displayTradeNumber: Int
         get() = if (tradeNumber > 0) tradeNumber else ((kotlin.math.abs(id.hashCode()) % 9000) + 1)
@@ -294,9 +300,10 @@ data class PaperTrade(
                 val known = buy >= 0 && neutral >= 0 && sell >= 0 && (buy + neutral + sell) > 0
                 return if (known) "$label: $buy خرید / $neutral خنثی / $sell فروش ($name)" else "$label: ثبت نشد"
             }
+            val suffix = if (techSnapshotRebuilt) " · بازسازی از کندل‌های تا لحظهٔ ورود" else ""
             return "🧭 سنجش تکنیکال لحظهٔ ورود · " +
                 part("۱ ساعته", tech1hBuy, tech1hNeutral, tech1hSell, tech1hLabelFa) + " · " +
-                part("۴ ساعته", tech4hBuy, tech4hNeutral, tech4hSell, tech4hLabelFa)
+                part("۴ ساعته", tech4hBuy, tech4hNeutral, tech4hSell, tech4hLabelFa) + suffix
         }
 
     /** برچسب وضعیت (خرید قوی/خرید/خنثی/فروش/فروش قوی) برای تایم‌فریم ۱ ساعته. */

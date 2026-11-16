@@ -242,6 +242,10 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 container.neuralEngine.restoreBrainBackupFromPhoneStorage(container.appContext)
             }
 
+            // ── بازسازی اسنپ‌شات سنجش تکنیکال معاملاتی که پیش از این قابلیت ثبت شده‌اند ──
+            // فقط از کندل‌های بسته‌شدهٔ تا لحظهٔ ورود استفاده می‌شود و هیچ تصمیمی را تغییر نمی‌دهد.
+            runCatching { container.journalStore.backfillGaugeSnapshots() }
+
             // ── آموزش شبکهٔ عصبی روی همهٔ استراتژی‌های مشمول یادگیری در هر اجرا ──────────────────
             // بعد از بارگذاری ژورنال/دفتر یادگیری و با فاصله از فریم اول اجرا می‌شود تا UI سبک بماند.
             delay(1_200L)
@@ -673,6 +677,8 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 currentSymbol = "",
                 finishedAt = System.currentTimeMillis(),
             )
+            // با کندل‌های تازه، اسنپ‌شات سنجش معاملات قدیمی هم بازسازی می‌شود.
+            runCatching { container.journalStore.backfillGaugeSnapshots() }
             _toast.value = if (failed == 0) {
                 "✅ دیتای آفلاین هر ${symbols.size} نماد به‌روز شد"
             } else {
