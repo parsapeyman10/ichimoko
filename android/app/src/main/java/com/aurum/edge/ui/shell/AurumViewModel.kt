@@ -1146,6 +1146,11 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
         strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
     ) {
+        // قاعدهٔ «یک معاملهٔ باز برای هر استراتژی»: پیش از هر تماس شبکه‌ای/هوش مصنوعی هم سنجیده می‌شود.
+        container.journalStore.openTradeBlockedByFa(strategyId)?.let { reason ->
+            _toast.value = reason
+            return
+        }
         val cfg = settings.value
         if (!cfg.avalAiEnabled) {
             executeOpenTradeNow(calc, note, entryInterval, strategyId, strategyTitleFa)
@@ -1239,6 +1244,10 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
+        container.journalStore.openTradeBlockedByFa(strategyId)?.let { reason ->
+            _toast.value = reason
+            return
+        }
         // ورود روی نمادی که بازارش بسته است ممنوع می‌شود: قیمت‌ها کهنه‌اند و گپ بازگشایی سشن
         // می‌تواند حد ضرر را بدون امکان خروج رد کند (گزارش کاربر: معاملهٔ DOW در بازار بسته).
         // ورود در بازار بسته و همچنین در «پنجرهٔ خروج پیش از سشن» ممنوع است: معامله‌ای که تا پایان
@@ -1262,6 +1271,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             ?.reportFor(entryInterval, strategyId)
         val matchedBreakdown = matchedReport?.rrBreakdown
         val entryCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
+        // سنجش تکنیکال ۱ ساعته و ۴ ساعته در همان لحظهٔ ورود ثبت می‌شود و بعداً تغییر نمی‌کند.
+        val gauge1h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H1)
+        val gauge4h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H4)
         val openedRaw = container.journalStore.openTrade(
             calc = calc,
             note = effectiveNote,
@@ -1272,12 +1284,19 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             optimalRiskReward = matchedBreakdown?.optimalRiskReward ?: calc.riskReward,
             rrBreakdownFa = matchedBreakdown?.optimalRrReasonFa ?: "",
             preEntryCandles = entryCandles,
+            gaugeCandles1h = gauge1h,
+            gaugeCandles4h = gauge4h,
             stateInputs = com.aurum.edge.core.NeuralStateFeatures.fromReport(
                 report = matchedReport,
                 planRr = matchedBreakdown?.optimalRiskReward ?: calc.riskReward,
                 entryTimeMs = now,
             ),
         )
+        val opened = openedRaw ?: run {
+            _toast.value = container.journalStore.openTradeBlockedByFa(strategyId)
+                ?: "⛔ معامله باز نشد (ورود هم‌زمان برای همین استراتژی)"
+            return
+        }
         val condRecords = matchedReport?.conditions?.map { c ->
             com.aurum.edge.core.PaperConditionRecord(
                 name = c.titleFa,
@@ -1288,11 +1307,11 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         // فیلدهای نئوویو در `PaperTrade` برای سازگاری با ژورنال قدیمی باقی مانده‌اند، اما
         // لایهٔ نئوویو حذف شده است؛ پس هیچ شمارشی روی معاملهٔ تازه ثبت نمی‌شود.
         val trade = if (condRecords.isNotEmpty()) {
-            val enriched = openedRaw.copy(entryConditions = condRecords)
+            val enriched = opened.copy(entryConditions = condRecords)
             container.journalStore.addTrade(enriched)
             enriched
         } else {
-            openedRaw
+            opened
         }
         _liveTicks.value[trade.symbol]?.let { tick ->
             _lastDisplayMarks.value = OpenPositionDisplay.record(_lastDisplayMarks.value, trade, tick, now)

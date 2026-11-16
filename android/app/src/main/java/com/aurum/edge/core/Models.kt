@@ -282,6 +282,23 @@ data class PaperTrade(
     val tech4hFa: String
         get() = techText(tech4hBuy, tech4hNeutral, tech4hSell)
 
+    /**
+     * خط آمادهٔ نمایش «سنجش تکنیکال لحظهٔ ورود» برای ژورنال و کارت معاملات باز.
+     *
+     * اگر داده‌ای برای آن تایم‌فریم ثبت نشده باشد، صریح نوشته می‌شود «ثبت نشد» تا با «خنثی»
+     * اشتباه گرفته نشود. این متن هرگز بازمحاسبه نمی‌شود؛ همان اسنپ‌شات لحظهٔ ورود است.
+     */
+    val techSnapshotLineFa: String
+        get() {
+            fun part(label: String, buy: Int, neutral: Int, sell: Int, name: String): String {
+                val known = buy >= 0 && neutral >= 0 && sell >= 0 && (buy + neutral + sell) > 0
+                return if (known) "$label: $buy خرید / $neutral خنثی / $sell فروش ($name)" else "$label: ثبت نشد"
+            }
+            return "🧭 سنجش تکنیکال لحظهٔ ورود · " +
+                part("۱ ساعته", tech1hBuy, tech1hNeutral, tech1hSell, tech1hLabelFa) + " · " +
+                part("۴ ساعته", tech4hBuy, tech4hNeutral, tech4hSell, tech4hLabelFa)
+        }
+
     /** برچسب وضعیت (خرید قوی/خرید/خنثی/فروش/فروش قوی) برای تایم‌فریم ۱ ساعته. */
     val tech1hLabelFa: String
         get() = techLabel(tech1hBuy, tech1hSell)

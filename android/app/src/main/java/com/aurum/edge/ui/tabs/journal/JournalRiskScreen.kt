@@ -2223,7 +2223,7 @@ private fun AutoMonitoredOpenTradesCard(
                                 color = AurumColors.TextSecondary,
                             )
                             Text(
-                                text = "🧭 سنجش تکنیکال ورود · ۱H: ${trade.tech1hFa} (${trade.tech1hLabelFa}) · ۴H: ${trade.tech4hFa} (${trade.tech4hLabelFa})",
+                                text = trade.techSnapshotLineFa,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Purple,
                             )
@@ -4207,6 +4207,11 @@ private fun InteractiveTearSheetModalDialog(
                                         text = "مرجع: ${t.venueNameFa} · کارمزد: $${String.format(Locale.US, "%.2f", t.estimatedRoundTripFeeUsd)} · وضعیت: ${t.exitReason ?: "در جریان"}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = AurumColors.TextSecondary,
+                                    )
+                                    Text(
+                                        text = t.techSnapshotLineFa,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AurumColors.Purple,
                                     )
                                 }
                             }

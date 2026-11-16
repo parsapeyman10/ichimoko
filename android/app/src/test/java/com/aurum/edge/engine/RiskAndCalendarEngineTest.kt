@@ -100,7 +100,7 @@ class RiskAndCalendarEngineTest {
             stopLoss = 2590.0,
             takeProfit = 2620.0,
         )!!
-        val openedBuy = journalStore.openTrade(calcBuy, note = "تست خرید طلا", now = day1Millis)
+        val openedBuy = journalStore.openTrade(calcBuy, note = "تست خرید طلا", now = day1Millis)!!
         assertTrue(openedBuy.isOpen)
 
         // Price between SL and TP -> remains open
@@ -431,7 +431,7 @@ class RiskAndCalendarEngineTest {
             takeProfit = 71_000.0, // 3.0R (locked in [1.5 .. 3.0])
             preferredAction = SignalAction.BUY,
         )!!
-        val opened = journal.openTrade(calc, note = "تست استراتژی بیس")
+        val opened = journal.openTrade(calc, note = "تست استراتژی بیس")!!
         // قاعدهٔ تازهٔ کاربر (جای قاعدهٔ قدیم «در +۱R ریسک‌فری روی نقطهٔ ورود»):
         // ۱) تا سود باز به ۱٫۵R نرسیده، **هیچ** جابه‌جایی حد ضرر مجاز نیست.
         // ۲) در ۱٫۵R هم جابه‌جایی فقط روی سطح ساختاری و فقط اگر بعد از کارمزد
@@ -735,7 +735,7 @@ class RiskAndCalendarEngineTest {
             preferredAction = SignalAction.BUY,
             fixedRiskUsdOverride = 5.0,
         )!!
-        val opened3R = runnerJournal.openTrade(calc3R, note = "تست بستن کامل در هدف ۱:۳")
+        val opened3R = runnerJournal.openTrade(calc3R, note = "تست بستن کامل در هدف ۱:۳")!!
         // Live tick reaches the stored TP (پول: دقیقاً ۳R = ۱۵ دلار خالص؛ فاصلهٔ قیمتی کمی دورتر)
         val runnerTickHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = calc3R.takeProfit, at = 1_760_002_000_000L))
         assertEquals(1, runnerTickHits.size)

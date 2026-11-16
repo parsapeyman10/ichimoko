@@ -169,6 +169,26 @@ class JournalStore(
         }
     }
 
+    /**
+     * آیا همین حالا یک معاملهٔ **باز** برای این استراتژی وجود دارد؟
+     *
+     * قاعدهٔ سیستم: از هر استراتژی در هر لحظه فقط **یک** معاملهٔ باز مجاز است تا تکلیف آن روشن شود
+     * (حد سود، حد ضرر یا بستن دستی). این تابع همان وضعیت را برای UI و تست‌ها خوانا می‌کند.
+     */
+    fun openTradeForStrategy(strategyId: String): PaperTrade? {
+        val normalized = com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        return _trades.value.firstOrNull {
+            it.isOpen && com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == normalized
+        }
+    }
+
+    /** پیام فارسی دلیل رد شدن معاملهٔ تازه؛ `null` یعنی مسیر باز است. */
+    fun openTradeBlockedByFa(strategyId: String): String? {
+        val blocking = openTradeForStrategy(strategyId) ?: return null
+        return "⛔ تا تکلیف ${blocking.displayTradeNumberBadgeFa} (${blocking.symbol}) روشن نشود، " +
+            "استراتژی «${blocking.strategyTitleFa}» معاملهٔ تازه باز نمی‌کند"
+    }
+
     @Synchronized
     fun openTrade(
         calc: RiskCalculationResult,
@@ -180,9 +200,16 @@ class JournalStore(
         optimalRiskReward: Double = 0.0,
         rrBreakdownFa: String = "",
         preEntryCandles: List<Candle> = emptyList(),
+        /** کندل‌های ۱ ساعته و ۴ ساعتهٔ لحظهٔ ورود برای سنجش تکنیکال؛ خالی یعنی از کش خوانده شود. */
+        gaugeCandles1h: List<Candle> = emptyList(),
+        gaugeCandles4h: List<Candle> = emptyList(),
         /** حالت بازار در لحظهٔ ورود (از گزارش استراتژی). خالی = فقط سشن ثبت می‌شود. */
         stateInputs: com.aurum.edge.core.NeuralStateInputs? = null,
-    ): PaperTrade {
+    ): PaperTrade? {
+        // ── قاعدهٔ «یک معاملهٔ باز برای هر استراتژی» ─────────────────────────────
+        // تا تکلیف معاملهٔ باز روشن نشود، همین استراتژی معاملهٔ تازه نمی‌گیرد. این گارد در خودِ
+        // ژورنال است تا هیچ مسیری (خودکار، دستی، رادار ۱۵ دقیقه یا کارت استراتژی) نتواند دورش بزند.
+        if (openTradeForStrategy(strategyId) != null) return null
         // This synchronous API can be called from a UI action. Use memory-only candles here;
         // parsing the on-device CandleVault is disk I/O and used to freeze the main thread on entry.
         val effectiveCandles = preEntryCandles.ifEmpty {
@@ -209,10 +236,14 @@ class JournalStore(
         // از کش کندل‌های ۱ ساعته و ۴ ساعتهٔ همین نماد خوانده می‌شود. اگر کندلی در کش نبود،
         // عدد `-1` ثبت می‌شود (نامعلوم) — هیچ عدد ساختگی ساخته نمی‌شود.
         val rating1h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(
-            com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H1),
+            gaugeCandles1h.ifEmpty {
+                com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H1)
+            },
         )
         val rating4h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(
-            com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H4),
+            gaugeCandles4h.ifEmpty {
+                com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H4)
+            },
         )
         val trade = rawTrade.copy(
             tradeNumber = nextTradeNum,
