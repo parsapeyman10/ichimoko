@@ -116,8 +116,16 @@ class JournalSingleOpenTradeTest {
         assertNotNull(trade)
         trade!!
 
-        assertEquals("مجموع رأی‌های ۱ ساعته باید ۲۶ باشد", 26, trade.tech1hBuy + trade.tech1hNeutral + trade.tech1hSell)
-        assertEquals("مجموع رأی‌های ۴ ساعته باید ۲۶ باشد", 26, trade.tech4hBuy + trade.tech4hNeutral + trade.tech4hSell)
+        // اسنپ‌شات ذخیره‌شده باید دقیقاً همان ارزیابی لحظهٔ ورود باشد (نه یک محاسبهٔ دیگر).
+        val expected1h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(hourlyUp)!!
+        val expected4h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(fourHourDown)!!
+        assertTrue("سنجش باید رأی داشته باشد", expected1h.total > 0 && expected4h.total > 0)
+        assertEquals(expected1h.buy, trade.tech1hBuy)
+        assertEquals(expected1h.neutral, trade.tech1hNeutral)
+        assertEquals(expected1h.sell, trade.tech1hSell)
+        assertEquals(expected4h.buy, trade.tech4hBuy)
+        assertEquals(expected4h.neutral, trade.tech4hNeutral)
+        assertEquals(expected4h.sell, trade.tech4hSell)
         assertTrue("روند صعودی ۱ ساعته باید خرید بیشتری بدهد", trade.tech1hBuy > trade.tech1hSell)
         assertTrue("روند نزولی ۴ ساعته باید فروش بیشتری بدهد", trade.tech4hSell > trade.tech4hBuy)
         assertFalse(trade.techSnapshotLineFa.contains("ثبت نشد"))
