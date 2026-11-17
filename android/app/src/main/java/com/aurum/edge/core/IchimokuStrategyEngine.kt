@@ -416,6 +416,19 @@ data class BaseStrategyConfig(
      * این پرچم فقط سخت‌تر می‌کند (هرگز شل نمی‌کند) و همان شرط‌ها را در چک‌لیست قابل‌دیدن می‌کند.
      */
     val tuttleStrictEntry: Boolean = true,
+
+    /**
+     * لنگر حد ضرر پاتل و خانواده‌اش: دورترینِ **کیجون ۲۶** و **کف/سقف فرکتال ۵ کندلی**، با بافر ۰٫۳۸ ATR
+     * (نکتهٔ فوری ۴ و ۵ دستیار + اندازه‌گیری فاز ۰).
+     *
+     * روی ۲۰۴ معاملهٔ واقعی: استاپ‌های زیر ۱۵ دقیقه ۳۷٪ → ۱۵٪، ۳۱ معامله از استاپ نجات، هدف‌های
+     * از دست‌رفته ۱، و امید ریاضی −$۱٫۱۹ → −$۰٫۸۸. یعنی «کم‌ضررتر» شد، نه سودده؛ سوددهی از
+     * مسیر کیفیت ورود (فاز ۲) می‌آید.
+     */
+    val patelKijunFractalStopAnchor: Boolean = true,
+
+    /** بافر ATR لنگر پاتل (عدد اندازه‌گیری‌شدهٔ فاز ۰). */
+    val patelKijunFractalStopBufferAtr: Double = 0.38,
     /**
      * ماشهٔ «فشردگی → انبساط» — فقط برای استراتژی بیس.
      *
@@ -2352,6 +2365,10 @@ object IchimokuStrategyEngine {
         forceFractalFiveAnchor: Boolean = false,
         /** بافر ATR همان لنگر (پیش‌فرض = عدد اندازه‌گیری‌شدهٔ فاز ۰). */
         fractalFiveBufferAtr: Double = BASE_FRACTAL_FIVE_BUFFER_ATR,
+        /** لنگر «دورترینِ کیجون ۲۶ و فرکتال ۵» برای پاتل و خانواده‌اش (نکتهٔ ۴ و ۵). */
+        forceKijunFractalAnchor: Boolean = false,
+        /** بافر ATR لنگر پاتل (پیش‌فرض = عدد اندازه‌گیری‌شدهٔ فاز ۰). */
+        kijunFractalBufferAtr: Double = PATEL_KIJUN_FRACTAL_BUFFER_ATR,
     ): Double {
         // ATR مقاوم (برش ATR های گلِیچ‌خورده) تا یک کندل خراب کل ۱R را متورم نکند
         val atr = TradePlanGuard.robustAtr(
@@ -2421,6 +2438,22 @@ object IchimokuStrategyEngine {
             if (measured != null) return measured
         }
 
+        // ── لنگر اندازه‌گیری‌شدهٔ پاتل: دورترینِ کیجون ۲۶ و فرکتال ۵ کندلی (نکتهٔ ۴ و ۵) ──────
+        // ترتیب مهم است: خانوادهٔ بیس (۴گانه) لنگر خودش را بالاتر می‌گیرد و به اینجا نمی‌رسد.
+        if (forceKijunFractalAnchor) {
+            val measured = kijunFractalAnchorStopPrice(
+                referenceEntry = referenceEntry,
+                isLong = isLong,
+                kijun = trigSnap.kijun,
+                fractal5 = if (isLong) min(trigSnap.lastDownFractalLow, trigSnap.low) else max(trigSnap.lastUpFractalHigh, trigSnap.high),
+                atr = atr,
+                bufferAtr = kijunFractalBufferAtr,
+                floorDist = costAwareFloorDist,
+                ceilingDist = maxStructuralDist,
+            )
+            if (measured != null) return measured
+        }
+
         return if (isLong) {
             val anchorFractal5 = min(trigSnap.lastDownFractalLow, trigSnap.low) - sweepShieldBuffer
             val anchorKijun26 = trigSnap.kijun - sweepShieldBuffer
@@ -2479,6 +2512,9 @@ object IchimokuStrategyEngine {
     /** بافر ATR لنگر «فرکتال ۵ کندلی» برای استراتژی بیس — عدد اندازه‌گیری‌شدهٔ فاز ۰. */
     const val BASE_FRACTAL_FIVE_BUFFER_ATR: Double = 0.52
 
+    /** بافر ATR لنگر «کیجون ۲۶ + فرکتال ۵» برای پاتل — عدد اندازه‌گیری‌شدهٔ فاز ۰. */
+    const val PATEL_KIJUN_FRACTAL_BUFFER_ATR: Double = 0.38
+
     /** سقف کشیدگی از کیجون برای ورودهای تاتل (سخت‌گیری فاز ۰). */
     const val TUTTLE_STRICT_MAX_KIJUN_EXTENSION_ATR: Double = 1.45
 
@@ -2490,6 +2526,61 @@ object IchimokuStrategyEngine {
 
     /** حداقل هم‌گرایی لایه‌های کتاب برای ورودهای تاتل (سخت‌گیری فاز ۰). */
     const val TUTTLE_STRICT_MIN_DRIVE_BOOKS_CONSENSUS: Int = 7
+
+    /** سیاست حد ضررِ فعال برای یک استراتژی (منبع واحد حقیقت برای موتور و تست‌ها). */
+    enum class StopAnchorPolicyFa(val labelFa: String) {
+        STRUCTURAL_DEFAULT("پنج سنگر ساختاری موتور (رفتار قبلی)"),
+        FRACTAL_FIVE_MEASURED("فرکتال ۵ کندلی + ۰٫۵۲ ATR (اندازه‌گیری فاز ۰)"),
+        KIJUN_FRACTAL_MEASURED("دورترینِ کیجون ۲۶ و فرکتال ۵ + ۰٫۳۸ ATR (نکتهٔ ۴ و ۵)"),
+    }
+
+    /**
+     * تعیین سیاست حد ضرر از روی استراتژی و تنظیمات.
+     *
+     * ترتیب اهمیت: لنگر اندازه‌گیری‌شدهٔ بیس (فرکتال ۵) بر لنگر پاتل مقدم است، چون خودِ بیس هم
+     * اجزای پاتل را دارد ولی بهترین نتیجهٔ اندازه‌گیری‌شده‌اش لنگر فرکتال ۵ با بافر ۰٫۵۲ بود.
+     */
+    fun resolveStopAnchorPolicy(
+        model: BitcoinStrategyModel,
+        config: BaseStrategyConfig,
+    ): StopAnchorPolicyFa = when {
+        model == BitcoinStrategyModel.BASE_ICHIMOKU && config.baseFractalFiveStopAnchor ->
+            StopAnchorPolicyFa.FRACTAL_FIVE_MEASURED
+
+        model != BitcoinStrategyModel.BASE_ICHIMOKU && model.hasPatel && config.patelKijunFractalStopAnchor ->
+            StopAnchorPolicyFa.KIJUN_FRACTAL_MEASURED
+
+        else -> StopAnchorPolicyFa.STRUCTURAL_DEFAULT
+    }
+
+    /**
+     * قیمت حد ضرر با لنگر «دورترینِ کیجون ۲۶ و فرکتال ۵ کندلی ± بافر ATR» (نکتهٔ ۴ و ۵ دستیار).
+     *
+     * همان دالان ایمنی [کف نویز/هزینه .. سقف ساختاری] حاکم است و ورودی نامعتبر `null` می‌دهد.
+     */
+    fun kijunFractalAnchorStopPrice(
+        referenceEntry: Double,
+        isLong: Boolean,
+        kijun: Double,
+        fractal5: Double,
+        atr: Double,
+        bufferAtr: Double,
+        floorDist: Double,
+        ceilingDist: Double,
+    ): Double? {
+        if (!kijun.isFinite() || kijun <= 0.0) return null
+        if (!fractal5.isFinite() || fractal5 <= 0.0) return null
+        val extreme = if (isLong) min(kijun, fractal5) else max(kijun, fractal5)
+        return fractalFiveAnchorStopPrice(
+            referenceEntry = referenceEntry,
+            isLong = isLong,
+            fractal5 = extreme,
+            atr = atr,
+            bufferAtr = bufferAtr,
+            floorDist = floorDist,
+            ceilingDist = ceilingDist,
+        )
+    }
 
     /**
      * قیمت حد ضرر با لنگر «فرکتال ۵ کندلی ± بافر ATR».
@@ -3588,6 +3679,7 @@ object IchimokuStrategyEngine {
 
         // متود روز دنیا برای حد ضرر: هم‌پوشانی ۵ سنگر ابطال ساختاری (فرکتال ۵ کندلی بیل ویلیامز، کیجون۲۶، کیجون۳۰/EMA34، لبه کومو و نقطه S هوسودا)
         // به‌علاوه بافر تطبیقی ضد استاپ‌هانت و محصور در دالان طلایی نوسان [minSafeStopDist .. 2.10 * ATR14]
+        val baseSlPolicy = resolveStopAnchorPolicy(activeModel, effectiveConfig)
         val baseTechnicalSl = computeOptimalStructuralStopLoss(
             symbol = normalizedSymbol,
             isLong = isLong,
@@ -3598,9 +3690,10 @@ object IchimokuStrategyEngine {
             slBufferAtr = effectiveConfig.slBufferAtr,
             triggerInterval = effectiveConfig.triggerInterval,
             activeModel = activeModel,
-            forceFractalFiveAnchor = activeModel == BitcoinStrategyModel.BASE_ICHIMOKU &&
-                effectiveConfig.baseFractalFiveStopAnchor,
+            forceFractalFiveAnchor = baseSlPolicy == StopAnchorPolicyFa.FRACTAL_FIVE_MEASURED,
             fractalFiveBufferAtr = effectiveConfig.baseFractalFiveStopBufferAtr,
+            forceKijunFractalAnchor = baseSlPolicy == StopAnchorPolicyFa.KIJUN_FRACTAL_MEASURED,
+            kijunFractalBufferAtr = effectiveConfig.patelKijunFractalStopBufferAtr,
         )
         val specialStopAnchor: Double? = null
         val rawTechnicalSl = specialStopAnchor?.let { structural ->

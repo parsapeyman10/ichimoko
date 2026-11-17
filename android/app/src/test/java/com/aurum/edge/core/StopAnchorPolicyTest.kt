@@ -155,4 +155,122 @@ class StopAnchorPolicyTest {
                 .minRiskReward == config.minRiskReward,
         )
     }
+
+    // ── نکته‌های فوری ۴ و ۵ دستیار: لنگر «کیجون ۲۶ + فرکتال ۵» برای پاتل ──────────────
+
+    @Test
+    fun `patel anchor defaults come from the measured report`() {
+        val config = BaseStrategyConfig()
+        assertTrue(config.patelKijunFractalStopAnchor)
+        assertEquals(0.38, config.patelKijunFractalStopBufferAtr, 1e-9)
+        assertEquals(0.38, IchimokuStrategyEngine.PATEL_KIJUN_FRACTAL_BUFFER_ATR, 1e-9)
+    }
+
+    @Test
+    fun `stop anchor policy follows the measured precedence`() {
+        val config = BaseStrategyConfig()
+        assertEquals(
+            "خانوادهٔ بیس لنگر خودش را دارد، هرچند اجزای پاتل را هم دارد",
+            IchimokuStrategyEngine.StopAnchorPolicyFa.FRACTAL_FIVE_MEASURED,
+            IchimokuStrategyEngine.resolveStopAnchorPolicy(BitcoinStrategyModel.BASE_ICHIMOKU, config),
+        )
+        assertEquals(
+            IchimokuStrategyEngine.StopAnchorPolicyFa.KIJUN_FRACTAL_MEASURED,
+            IchimokuStrategyEngine.resolveStopAnchorPolicy(BitcoinStrategyModel.PATEL_KIJUN_PULLBACK, config),
+        )
+        listOf(
+            BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT,
+            BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE,
+            BitcoinStrategyModel.PELOILLE_MTF_PLATEAU,
+        ).forEach { model ->
+            assertEquals(
+                "استراتژی ${model.id} نباید لنگر اندازه‌گیری‌شده بگیرد",
+                IchimokuStrategyEngine.StopAnchorPolicyFa.STRUCTURAL_DEFAULT,
+                IchimokuStrategyEngine.resolveStopAnchorPolicy(model, config),
+            )
+        }
+        val off = config.copy(baseFractalFiveStopAnchor = false, patelKijunFractalStopAnchor = false)
+        assertEquals(
+            IchimokuStrategyEngine.StopAnchorPolicyFa.STRUCTURAL_DEFAULT,
+            IchimokuStrategyEngine.resolveStopAnchorPolicy(BitcoinStrategyModel.BASE_ICHIMOKU, off),
+        )
+        assertEquals(
+            IchimokuStrategyEngine.StopAnchorPolicyFa.STRUCTURAL_DEFAULT,
+            IchimokuStrategyEngine.resolveStopAnchorPolicy(BitcoinStrategyModel.PATEL_KIJUN_PULLBACK, off),
+        )
+    }
+
+    @Test
+    fun `kijun fractal anchor sits behind the farther of kijun and the five bar fractal`() {
+        // کیجون ۹۹٫۵ و فرکتال ۹۸٫۸ ⇒ خرید باید پشت فرکتال (دورتر) بنشیند.
+        val buy = IchimokuStrategyEngine.kijunFractalAnchorStopPrice(
+            referenceEntry = 100.0,
+            isLong = true,
+            kijun = 99.5,
+            fractal5 = 98.8,
+            atr = 1.0,
+            bufferAtr = 0.38,
+            floorDist = 0.20,
+            ceilingDist = 3.0,
+        )
+        assertNotNull(buy)
+        assertEquals(98.42, buy!!, 1e-6)
+
+        // برعکس: کیجون دورتر از فرکتال ⇒ کیجون مبنا می‌شود.
+        val buyKijun = IchimokuStrategyEngine.kijunFractalAnchorStopPrice(
+            referenceEntry = 100.0,
+            isLong = true,
+            kijun = 98.0,
+            fractal5 = 99.2,
+            atr = 1.0,
+            bufferAtr = 0.38,
+            floorDist = 0.20,
+            ceilingDist = 3.0,
+        )
+        assertNotNull(buyKijun)
+        assertEquals(97.62, buyKijun!!, 1e-6)
+
+        // فروش، آینه: دورترینِ کیجون و سقف فرکتال + بافر.
+        val sell = IchimokuStrategyEngine.kijunFractalAnchorStopPrice(
+            referenceEntry = 100.0,
+            isLong = false,
+            kijun = 100.4,
+            fractal5 = 101.2,
+            atr = 1.0,
+            bufferAtr = 0.38,
+            floorDist = 0.20,
+            ceilingDist = 3.0,
+        )
+        assertNotNull(sell)
+        assertEquals(101.58, sell!!, 1e-6)
+    }
+
+    @Test
+    fun `kijun fractal anchor keeps the same safety rails and never fabricates a level`() {
+        val floorBound = IchimokuStrategyEngine.kijunFractalAnchorStopPrice(
+            referenceEntry = 100.0,
+            isLong = true,
+            kijun = 99.9,
+            fractal5 = 99.9,
+            atr = 0.05,
+            bufferAtr = 0.38,
+            floorDist = 0.60,
+            ceilingDist = 3.0,
+        )
+        assertNotNull(floorBound)
+        assertEquals(99.40, floorBound!!, 1e-6)
+
+        assertNull(
+            IchimokuStrategyEngine.kijunFractalAnchorStopPrice(
+                referenceEntry = 100.0,
+                isLong = true,
+                kijun = 100.5,
+                fractal5 = 101.0,
+                atr = 1.0,
+                bufferAtr = 0.38,
+                floorDist = 0.20,
+                ceilingDist = 3.0,
+            ),
+        )
+    }
 }
