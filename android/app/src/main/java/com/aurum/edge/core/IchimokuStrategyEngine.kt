@@ -396,6 +396,26 @@ data class BaseStrategyConfig(
      * لایه‌ای که هیچ اثری ندارد ولی می‌تواند معاملهٔ سالم را ببندد، نباید پیش‌فرض روشن باشد.
      */
     val includeHiddenCrossLayer: Boolean = false,
+
+    /**
+     * لنگر حد ضررِ **اندازه‌گیری‌شده** برای استراتژی بیس جامع (فاز ۰ کالیبراسیون، ۲۰۲۶-۱۱-۱۷).
+     *
+     * روی ۱۶۷ معاملهٔ واقعیِ همین ژورنال (۳۰ روز) بازپخش شد: با لنگر «کف فرکتال ۵ کندلی + ۰٫۵۲ ATR»
+     * نرخ برد ۳۴٫۷٪ → ۳۷٫۳٪، Profit Factor ۱٫۲۱ → ۱٫۲۴ و سهم استاپ‌های زیر ۱۵ دقیقه ۳۷٪ → ۱۸٪ شد.
+     * هیچ استراتژی دیگری این لنگر را نمی‌گیرد؛ برای آن‌ها تغییرِ اندازه‌گیری‌شده بهتر نبود.
+     */
+    val baseFractalFiveStopAnchor: Boolean = true,
+
+    /** بافر ATR همان لنگر (عدد اندازه‌گیری‌شدهٔ بالا؛ بدون ترم شدو تا دوباره‌شماری نشود). */
+    val baseFractalFiveStopBufferAtr: Double = 0.52,
+
+    /**
+     * سخت‌گیری اندازه‌گیری‌شدهٔ ورودیِ استراتژی تاتل (فاز ۰، ۲۰۲۶-۱۱-۱۷).
+     *
+     * در ۳۰ روز، ۷۹ معامله با نرخ برد ۱۶٫۵٪ و PF ۰٫۴۵ ثبت شد؛ حد سربه‌سرِ ۲٫۳R حدود ۳۰٪ است.
+     * این پرچم فقط سخت‌تر می‌کند (هرگز شل نمی‌کند) و همان شرط‌ها را در چک‌لیست قابل‌دیدن می‌کند.
+     */
+    val tuttleStrictEntry: Boolean = true,
     /**
      * ماشهٔ «فشردگی → انبساط» — فقط برای استراتژی بیس.
      *
@@ -2324,6 +2344,14 @@ object IchimokuStrategyEngine {
          * (پاتل: کیجون، تاتل: کومو/چیکو، هوسودا: نقطه S، پلویل: فلت/کومو، لایه‌های ۱ تا ۹: ریبون نهادی).
          */
         activeModel: BitcoinStrategyModel = BitcoinStrategyModel.BASE_ICHIMOKU,
+        /**
+         * لنگر «کف فرکتال ۵ کندلی + بافر» — فقط برای استراتژی بیس و فقط وقتی کالیبراسیون
+         * اندازه‌گیری‌شده آن را بهتر دانسته است. پیش‌فرض خاموش ⇒ رفتار بقیهٔ استراتژی‌ها
+         * مو‌به‌مو همان قبل می‌ماند.
+         */
+        forceFractalFiveAnchor: Boolean = false,
+        /** بافر ATR همان لنگر (پیش‌فرض = عدد اندازه‌گیری‌شدهٔ فاز ۰). */
+        fractalFiveBufferAtr: Double = BASE_FRACTAL_FIVE_BUFFER_ATR,
     ): Double {
         // ATR مقاوم (برش ATR های گلِیچ‌خورده) تا یک کندل خراب کل ۱R را متورم نکند
         val atr = TradePlanGuard.robustAtr(
@@ -2376,6 +2404,23 @@ object IchimokuStrategyEngine {
             .coerceIn(0.0, COST_FLOOR_MAX_PCT)
         val costAwareFloorDist = max(minSafeDist, entryRef * costFloorPct)
 
+        // ── لنگر اندازه‌گیری‌شدهٔ فاز ۰ (فقط استراتژی بیس) ────────────────────────────
+        // کف فرکتال ۵ کندلی + بافر ۰٫۵۲ ATR، بدون ترم شدو (تا بافر دوباره شمرده نشود)؛ ولی
+        // همچنان داخل همان دالان ایمنی [کف نویز/هزینه .. سقف ساختاری] می‌ماند. اگر عدد معتبری
+        // درنیاید، به مسیر عادی برمی‌گردیم و هیچ استاپ ساختگی ساخته نمی‌شود.
+        if (forceFractalFiveAnchor) {
+            val measured = fractalFiveAnchorStopPrice(
+                referenceEntry = referenceEntry,
+                isLong = isLong,
+                fractal5 = if (isLong) min(trigSnap.lastDownFractalLow, trigSnap.low) else max(trigSnap.lastUpFractalHigh, trigSnap.high),
+                atr = atr,
+                bufferAtr = fractalFiveBufferAtr,
+                floorDist = costAwareFloorDist,
+                ceilingDist = maxStructuralDist,
+            )
+            if (measured != null) return measured
+        }
+
         return if (isLong) {
             val anchorFractal5 = min(trigSnap.lastDownFractalLow, trigSnap.low) - sweepShieldBuffer
             val anchorKijun26 = trigSnap.kijun - sweepShieldBuffer
@@ -2427,6 +2472,79 @@ object IchimokuStrategyEngine {
             ) ?: max(referenceEntry + costAwareFloorDist, referenceEntry + atr * 0.5)
             round2(chosenSl)
         }
+    }
+
+    // ─────────────────────── کالیبراسیون اندازه‌گیری‌شده (فاز ۰) ───────────────────────
+
+    /** بافر ATR لنگر «فرکتال ۵ کندلی» برای استراتژی بیس — عدد اندازه‌گیری‌شدهٔ فاز ۰. */
+    const val BASE_FRACTAL_FIVE_BUFFER_ATR: Double = 0.52
+
+    /** سقف کشیدگی از کیجون برای ورودهای تاتل (سخت‌گیری فاز ۰). */
+    const val TUTTLE_STRICT_MAX_KIJUN_EXTENSION_ATR: Double = 1.45
+
+    /** حداقل پاداش/ریسک ورودهای تاتل (سخت‌گیری فاز ۰). */
+    const val TUTTLE_STRICT_MIN_RISK_REWARD: Double = 1.80
+
+    /** حداقل کارایی روند برای ورودهای تاتل (سخت‌گیری فاز ۰). */
+    const val TUTTLE_STRICT_MIN_EFFICIENCY_RATIO: Double = 0.26
+
+    /** حداقل هم‌گرایی لایه‌های کتاب برای ورودهای تاتل (سخت‌گیری فاز ۰). */
+    const val TUTTLE_STRICT_MIN_DRIVE_BOOKS_CONSENSUS: Int = 7
+
+    /**
+     * قیمت حد ضرر با لنگر «فرکتال ۵ کندلی ± بافر ATR».
+     *
+     * خروجی همیشه داخل دالان ایمنی می‌ماند: کوچک‌تر از کف نویز/هزینه نشود و از سقف ساختاری
+     * بیرون نزند. ورودی نامعتبر ⇒ `null` (یعنی «مسیر عادی موتور را برو»)، نه عدد ساختگی.
+     */
+    fun fractalFiveAnchorStopPrice(
+        referenceEntry: Double,
+        isLong: Boolean,
+        fractal5: Double,
+        atr: Double,
+        bufferAtr: Double,
+        floorDist: Double,
+        ceilingDist: Double,
+    ): Double? {
+        if (!referenceEntry.isFinite() || referenceEntry <= 0.0) return null
+        if (!fractal5.isFinite() || fractal5 <= 0.0) return null
+        if (!atr.isFinite() || atr <= 0.0) return null
+        if (!floorDist.isFinite() || floorDist <= 0.0) return null
+        val buffer = atr * bufferAtr.coerceIn(0.0, 1.20)
+        val raw = if (isLong) fractal5 - buffer else fractal5 + buffer
+        if (!raw.isFinite() || raw <= 0.0) return null
+        if (isLong && raw >= referenceEntry) return null
+        if (!isLong && raw <= referenceEntry) return null
+        val distance = abs(referenceEntry - raw)
+        val ceiling = if (ceilingDist.isFinite() && ceilingDist > floorDist) ceilingDist else distance
+        val clamped = when {
+            distance < floorDist -> floorDist
+            distance > ceiling -> ceiling
+            else -> distance
+        }
+        val price = if (isLong) referenceEntry - clamped else referenceEntry + clamped
+        if (!price.isFinite() || price <= 0.0) return null
+        return round2(price)
+    }
+
+    /**
+     * سخت‌گیری ورودیِ استراتژی تاتل بر اساس اندازه‌گیری فاز ۰.
+     *
+     * قانون: این تابع **فقط سخت‌تر می‌کند**؛ هیچ‌وقت مقداری را شل نمی‌کند، پس اگر کاربر یا
+     * شبکهٔ عصبی از قبل سخت‌گیرانه‌تر تنظیم کرده باشد، همان می‌ماند.
+     */
+    fun applyMeasuredTuttleTightening(
+        config: BaseStrategyConfig,
+        model: BitcoinStrategyModel,
+        enabled: Boolean,
+    ): BaseStrategyConfig {
+        if (!enabled || model != BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT) return config
+        return config.copy(
+            maxKijunExtensionAtr = min(config.maxKijunExtensionAtr, TUTTLE_STRICT_MAX_KIJUN_EXTENSION_ATR),
+            minRiskReward = max(config.minRiskReward, TUTTLE_STRICT_MIN_RISK_REWARD),
+            minEfficiencyRatio = max(config.minEfficiencyRatio, TUTTLE_STRICT_MIN_EFFICIENCY_RATIO),
+            minDriveBooksConsensus = max(config.minDriveBooksConsensus, TUTTLE_STRICT_MIN_DRIVE_BOOKS_CONSENSUS),
+        )
     }
 
     /** سنگرهای ابطال ساختاری؛ هر استراتژی «مطمئن‌ترین» سنگر خودش را دارد. */
@@ -3137,7 +3255,7 @@ object IchimokuStrategyEngine {
             symbolOverride?.minRiskReward ?: 0.0,
         )
         val minAllowedRr = max(baseMinRr, 1.5)
-        val effectiveConfig = modelConfig.copy(
+        val untightenedConfig = modelConfig.copy(
             enablePullbackTrigger = activeModel.hasPatel || activeModel.hasHosoda || activeModel.hasPeloille || !activeModel.hasTuttle,
             enableBreakoutTrigger = activeModel.hasTuttle || activeModel.hasHosoda || activeModel.hasPeloille || !activeModel.hasPatel,
             requireHigherTfAlignment = activeModel.hasPeloille || activeModel.combinationCount >= 2 || config.requireHigherTfAlignment,
@@ -3164,6 +3282,13 @@ object IchimokuStrategyEngine {
                 .coerceIn(0.20, 0.55),
             minDriveBooksConsensus = (symbolOverride?.minDriveBooksConsensus
                 ?: stratOverride?.minDriveBooksConsensus ?: modelConfig.minDriveBooksConsensus).coerceIn(4, 9),
+        )
+
+        // سخت‌گیری اندازه‌گیری‌شدهٔ ورودیِ تاتل: فقط سخت‌تر می‌کند، هرگز شل نمی‌کند.
+        val effectiveConfig = applyMeasuredTuttleTightening(
+            config = untightenedConfig,
+            model = activeModel,
+            enabled = modelConfig.tuttleStrictEntry,
         )
 
         val livePrice = livePriceOverride?.takeIf { it.isFinite() && it > 0.0 } ?: trigSnap.close
@@ -3473,6 +3598,9 @@ object IchimokuStrategyEngine {
             slBufferAtr = effectiveConfig.slBufferAtr,
             triggerInterval = effectiveConfig.triggerInterval,
             activeModel = activeModel,
+            forceFractalFiveAnchor = activeModel == BitcoinStrategyModel.BASE_ICHIMOKU &&
+                effectiveConfig.baseFractalFiveStopAnchor,
+            fractalFiveBufferAtr = effectiveConfig.baseFractalFiveStopBufferAtr,
         )
         val specialStopAnchor: Double? = null
         val rawTechnicalSl = specialStopAnchor?.let { structural ->
