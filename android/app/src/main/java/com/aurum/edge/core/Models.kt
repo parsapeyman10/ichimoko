@@ -64,9 +64,13 @@ enum class StrategyKind(val id: String, val label: String, val description: Stri
     );
 
     companion object {
+        /**
+         * تنها سبک موجود در برنامه، ایچیموکو + پرایس‌اکشن است. شناسه‌های سبک‌های حذف‌شده
+         * (`SUPER_PLUS`، `ICT_SMC`، `EMA_VWAP`، `VOLUME_BREAKOUT`، `MEAN_REVERSION`) دیگر
+         * پذیرفته نمی‌شوند و تنظیم قدیمی به همین سبک ایچیموکو برمی‌گردد.
+         */
         fun fromId(raw: String?): StrategyKind? = when (raw?.trim()?.uppercase(java.util.Locale.ROOT)) {
-            null, "", "ICHIMOKU_PRICE_ACTION", "ICHIMOKU", "SUPER_PLUS", "ICT_SMC",
-            "EMA_VWAP", "VOLUME_BREAKOUT", "MEAN_REVERSION" -> ICHIMOKU_PRICE_ACTION
+            null, "", "ICHIMOKU_PRICE_ACTION", "ICHIMOKU" -> ICHIMOKU_PRICE_ACTION
             else -> null
         }
     }

@@ -2744,57 +2744,6 @@ object IchimokuStrategyEngine {
     // ۳) وضعیت ابرها (قیمت نسبت به کومو + جهت ابر آینده) تأیید کند
     // ─────────────────────────────────────────────────────────────────────────
 
-    /** خروجی گیت کیجون/ابر/خطوط پیش‌بینی برای استراتژی ۱۶. */
-    data class KijunPredictiveGate(
-        /** کراس تنکان ۹ و کیجون ۲۶ در جهت معامله برقرار است. */
-        val tkAligned: Boolean,
-        /** چند کندل پیش آخرین کراس در جهت معامله رخ داده (‑۱ = در پنجرهٔ بررسی نبود). */
-        val crossBarsAgo: Int,
-        /** فاصلهٔ تنکان از کیجون بر حسب ATR (قدرمطلق، در جهت معامله مثبت). */
-        val tkSpreadAtr: Double,
-        /** چند جفت از خطوط پیش‌بینی (۸/۲۵، ۷/۲۴، ۶/۲۳) جهت را تأیید کردند. */
-        val predictiveAligned: Int,
-        val predictiveTotal: Int,
-        /** وضعیت ابر تأییدکننده است. */
-        val cloudAligned: Boolean,
-        val cloudLabelFa: String,
-        val passed: Boolean,
-        val summaryFa: String,
-    )
-
-    /**
-     * محاسبهٔ میانگین سقف/کف برای یک دوره (همان تعریف تنکان/کیجون در ایچیموکو).
-     * خروجی، سریِ مقدار خط از کندلِ `period‑1` تا آخرین کندل است.
-     */
-    private fun midpointSeries(candles: List<Candle>, period: Int): List<Double> {
-        if (period < 2 || candles.size < period) return emptyList()
-        val out = ArrayList<Double>(candles.size - period + 1)
-        for (i in (period - 1) until candles.size) {
-            var highest = Double.NEGATIVE_INFINITY
-            var lowest = Double.POSITIVE_INFINITY
-            for (j in (i - period + 1)..i) {
-                val bar = candles[j]
-                if (bar.high > highest) highest = bar.high
-                if (bar.low < lowest) lowest = bar.low
-            }
-            if (highest.isFinite() && lowest.isFinite() && highest > 0.0) {
-                out.add((highest + lowest) / 2.0)
-            }
-        }
-        return out
-    }
-
-
-    /** خروجی قاعدهٔ حد ضرر کیجون. */
-    data class KijunStopRule(
-        /** حد ضرر نهایی پس از قاعده. */
-        val stop: Double,
-        /** آیا مقدار اولیه تغییر کرد؟ */
-        val adjusted: Boolean,
-        /** آیا شرایط (بالای خط ۲۶ + فاصله از کندل) با هم جمع نمی‌شوند؟ */
-        val blocked: Boolean,
-        val noteFa: String,
-    )
 
 
 

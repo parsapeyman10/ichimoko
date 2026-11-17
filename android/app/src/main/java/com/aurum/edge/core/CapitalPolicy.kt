@@ -328,10 +328,6 @@ data class CapitalPolicy(
         return out
     }
 
-    /** بدترین شدتِ یافته‌ها — رنگ سرصفحهٔ کارت از همین می‌آید. */
-    fun worstSeverity(): CapitalSeverity? =
-        findings().maxByOrNull { severityRank(it.severity) }?.severity
-
     companion object {
         /** کف و سقف نسبت پاداش به ریسک — همان دالانی که موتور معامله اعمال می‌کند. */
         const val MIN_RR = 1.5
@@ -368,12 +364,6 @@ data class CapitalPolicy(
 }
 
 /** رتبهٔ عددی شدت (برای مرتب‌سازی و انتخاب بدترین). */
-internal fun severityRank(severity: CapitalSeverity): Int = when (severity) {
-    CapitalSeverity.INFO -> 0
-    CapitalSeverity.WARNING -> 1
-    CapitalSeverity.DANGER -> 2
-}
-
 /** «۵٫۰۰» با دو رقم اعشار. */
 internal fun money(v: Double): String =
     if (!v.isFinite()) "—" else String.format(java.util.Locale.US, "%,.2f", v)

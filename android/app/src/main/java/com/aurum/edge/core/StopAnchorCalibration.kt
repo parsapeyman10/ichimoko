@@ -411,13 +411,4 @@ object StopAnchorCalibration {
             generatedAt = nowMillis,
         )
     }
-
-    /** بهترین سطر هر استراتژی: بیشترین امید ریاضی دلاری با نمونهٔ کافی. */
-    fun bestRowPerStrategy(report: Report): List<Row> =
-        report.strategyIds.mapNotNull { id ->
-            report.rowsFor(id)
-                .filter { it.anchor != AnchorMode.ENGINE_CURRENT }
-                .filter { it.sampleEnough }
-                .maxByOrNull { it.expectancyUsd }
-        }
 }

@@ -59,9 +59,6 @@ data class TechnicalRating(
 
     val labelFa: String get() = if (available) bucket.titleFa else "—"
 
-    fun compactFa(): String =
-        if (!available) "—" else "$buy خرید · $neutral خنثی · $sell فروش"
-
     companion object {
         const val STRONG_SCORE = 10
         val UNKNOWN = TechnicalRating(0, 0, 0)

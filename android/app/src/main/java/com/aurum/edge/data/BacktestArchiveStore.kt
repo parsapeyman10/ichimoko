@@ -97,23 +97,6 @@ class BacktestArchiveStore(private val context: Context) {
         return files
     }
 
-    /** فهرست آرشیوهای ذخیره‌شده روی حافظه، تازه‌ترین اول (برای نمایش/اشتراک‌گذاری). */
-    fun listArchives(): List<ArchiveFiles> = runCatching {
-        root.listFiles()
-            ?.filter { it.isFile && it.name.endsWith(".json") && it.name != "ledger.json" }
-            ?.sortedByDescending { it.lastModified() }
-            ?.mapNotNull { j ->
-                val csv = File(j.path.removeSuffix(".json") + ".csv")
-                if (csv.isFile) ArchiveFiles(csv = csv, json = j) else null
-            }
-            .orEmpty()
-    }.getOrDefault(emptyList())
-
-    fun deleteArchive(files: ArchiveFiles) {
-        runCatching { files.csv.delete() }
-        runCatching { files.json.delete() }
-    }
-
     fun storagePathFa(): String = root.path
 
     data class ArchiveFiles(val csv: File, val json: File) {

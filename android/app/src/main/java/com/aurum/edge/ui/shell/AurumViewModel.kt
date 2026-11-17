@@ -906,61 +906,6 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         }
     }
 
-    // ───────────────────── عمق یادگیری عصبی (ضریب حجم هر حالت) ─────────────────────
-
-    private var depthCacheKey: String = ""
-    private var depthCacheReport: com.aurum.edge.core.NeuralDepthReport? = null
-
-    /**
-     * گزارش عمق یادگیری برای ژورنال فعلی، با کش.
-     *
-     * کلید کش عمداً «تعداد معامله + موجودی + شمارهٔ آخرین بسته‌شدن» است: تا وقتی ژورنال عوض
-     * نشده، محاسبه تکرار نمی‌شود (این تابع در مسیر تیک زنده صدا زده می‌شود).
-     */
-    private fun neuralDepthReportFor(cfg: com.aurum.edge.core.AppSettings): com.aurum.edge.core.NeuralDepthReport? {
-        val list = trades.value
-        val key = list.size.toString() + "|" + list.lastOrNull()?.closedAt.orZeroText() + "|" + cfg.accountBalance
-        if (key == depthCacheKey) return depthCacheReport
-        val report = runCatching {
-            com.aurum.edge.core.NeuralDepthAudit.fromTrades(
-                trades = list,
-                targets = com.aurum.edge.core.NeuralDepthTargets.from(
-                    com.aurum.edge.core.CapitalPolicy.from(cfg),
-                ),
-            )
-        }.getOrNull()
-        depthCacheKey = key
-        depthCacheReport = report
-        return report
-    }
-
-    private fun Long?.orZeroText(): String = (this ?: 0L).toString()
-
-    /**
-     * ضریب حجم همین حالت: ۱ = بدون تغییر، ۰٫۵ = نصف ریسک، ۰ = ورود ممنوع.
-     * با کمتر از ۱۲ معاملهٔ بستهٔ دارای ریسک، همیشه ۱ برمی‌گردد (هیچ قضاوتی بدون شواهد).
-     */
-    private fun neuralDepthMultiplier(
-        report: com.aurum.edge.core.StrategyEvaluationReport,
-        tick: com.aurum.edge.core.PriceTick,
-        cfg: com.aurum.edge.core.AppSettings,
-    ): Double {
-        val closedWithRisk = trades.value.count {
-            !it.isOpen && it.pnlUsd != null && it.fixedRiskUsd.isFinite() && it.fixedRiskUsd > 0.0
-        }
-        if (closedWithRisk < com.aurum.edge.core.NeuralDepthAudit.MIN_EVIDENCE_WEIGHTED.toInt()) return 1.0
-        val depth = neuralDepthReportFor(cfg) ?: return 1.0
-        val atr = report.triggerSnapshot?.atr14 ?: 0.0
-        val atrPct = if (tick.price > 0.0 && atr > 0.0) atr / tick.price * 100.0 else null
-        val multiplier = depth.sizeMultiplierFor(
-            phase = report.trendPhase.name,
-            session = com.aurum.edge.core.NeuralDepthAudit.sessionCodeOf(tick.at),
-            vol = com.aurum.edge.core.NeuralDepthAudit.volBandOf(atrPct),
-            rr = com.aurum.edge.core.NeuralDepthAudit.rrBandOf(report.optimalRiskReward),
-        )
-        return multiplier.coerceIn(0.0, 1.0)
-    }
-
     fun saveRiskAndCapitalSettings(
         accountBalance: Double,
         initialCapital: Double,
@@ -1206,7 +1151,6 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             }
         }
     }
-
 
     val phoneVaultStatus: StateFlow<com.aurum.edge.data.PhoneVaultStatusSummary> =
         com.aurum.edge.data.PhoneStorageVaultManager.vaultStatus
@@ -2548,10 +2492,6 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         _toast.value = "⏰ آلارم ${kind.channelNameFa}: $stateFa (۱ اعلان + ۱ صدا)"
     }
 
-    fun setShowSettingsDescriptions(show: Boolean) {
-        container.settingsStore.update { it.copy(showSettingsDescriptions = show) }
-    }
-
     fun setCustomAlarmSoundForKind(
         kind: com.aurum.edge.notify.TradeAlarmKind?,
         uri: String,
@@ -3885,7 +3825,6 @@ class AurumViewModelFactory(private val container: AppContainer) : ViewModelProv
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = AurumViewModel(container) as T
 }
-
 
 /** یک بخش از توضیحات هوش عصبی که دکمهٔ کپی دارد. */
 private data class NeuralCopySection(

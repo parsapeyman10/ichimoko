@@ -1,6 +1,46 @@
 # فهرست تغییرات Aurum Edge
 
-## منتشرنشده — ۳.۹.۹۷ (۸۰۶): آزمایشگاه کیفیت ورود (فاز ۲) — بُرش معاملات + بازپخش قاعده‌ها
+## منتشرنشده — ۳.۹.۹۸ (۸۰۷): حذف کد مرده و استراتژی‌های ناموجود
+
+**هیچ استراتژی زنده‌ای دست نخورده‌است.** هیچ قاعدهٔ ورود/خروج، هیچ استاپ، هیچ هدف و هیچ تنظیمی
+تغییر نکرد. این نسخه فقط چیزهایی را برمی‌دارد که هیچ‌جا صدا زده نمی‌شدند.
+
+### ۱) استراتژی‌های ناموجود
+
+`StrategyKind.fromId` پنج شناسهٔ سبک را می‌پذیرفت که **در برنامه وجود ندارند** و هیچ‌جا هم
+پیاده نشده‌اند: `SUPER_PLUS` · `ICT_SMC` · `EMA_VWAP` · `VOLUME_BREAKOUT` · `MEAN_REVERSION`.
+این‌ها فقط از تنظیمات قدیمی به ایچیموکو نگاشت می‌شدند؛ حالا حذف شده‌اند و تنظیم قدیمی همان‌طور
+به سبک ایچیموکو برمی‌گردد. هفت استراتژی واقعی (بیس، پاتل، تاتل، هوسودا، پلویل، کین، چنگال)
+سر جایشان هستند.
+
+### ۲) کد مرده‌ای که حذف شد
+
+با اسکن کل ۱۰۶ فایل کاتلین، ۱۷ اعلان که **صفر ارجاع** داشتند پیدا و حذف شدند:
+
+| فایل | چه چیزی |
+|---|---|
+| `IchimokuStrategyEngine.kt` | `KijunPredictiveGate` · `KijunStopRule` · `midpointSeries` (استراتژی ۱۶ که هرگز ساخته نشد) |
+| `NeuralSelfLearningEngine.kt` | `evaluateMarketConditions` (۱۷۷ خط) و مدل خروجی‌اش `NeuralMarketInference` |
+| `AurumViewModel.kt` | `neuralDepthMultiplier` · `neuralDepthReportFor` + کش آن · `setShowSettingsDescriptions` |
+| `BacktestArchiveStore.kt` | `listArchives` · `deleteArchive` |
+| `BackgroundTradingService.kt` | `postTradeEventNotification` |
+| `TradingHabitsPolicy.kt` | `summaryLineFa` |
+| `CapitalPolicy.kt` | `worstSeverity` · `severityRank` |
+| `BacktestSeries.kt` | `barsUntil` |
+| `StopAnchorCalibration.kt` | `bestRowPerStrategy` |
+| `TechnicalRatingEngine.kt` | `compactFa` |
+| `BacktestViewModel.kt` | `archiveNoteFa` · `neuralMemorySize` |
+
+چک‌شده که هیچ‌کدام از این‌ها از تست‌ها، صفحه‌ها یا مسیر معامله صدا زده نمی‌شدند؛ و هیچ
+`@Composable` بی‌استفاده‌ای وجود ندارد (۰ مورد).
+
+### ۳) آنچه عمداً دست نخورد
+
+موتور ایچیموکو، موتور کین، موتور چنگال، موتور ریسک/تقویم، ژورنال، یادگیری عصبی و همهٔ
+صفحه‌های زنده. اگر بعداً تصمیم گرفتید استراتژی‌ای هم حذف شود (مثلاً کین یا چنگال که در ۳۰ روز
+به‌ترتیب ۰ و ۱ نمونه ساخته‌اند)، آن کار جداگانه و با تأیید صریح شما انجام می‌شود.
+
+## ۳.۹.۹۷ (۸۰۶) — منتشرشده: آزمایشگاه کیفیت ورود (فاز ۲) — بُرش معاملات + بازپخش قاعده‌ها
 
 **کد تغییر کرده است؛ رفتار معاملاتی تغییر نکرده است.** `versionCode = 806` و `versionName = "3.9.97"`.
 
