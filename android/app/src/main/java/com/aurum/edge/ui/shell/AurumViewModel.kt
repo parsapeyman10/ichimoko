@@ -3807,6 +3807,75 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         }
     }
 
+    // ─────────────────── آزمایشگاه کیفیت ورود (فاز ۲ کالیبراسیون) ───────────────────
+
+    /** وضعیت «آزمایشگاه کیفیت ورود»: بریدن معاملات واقعی بر اساس ویژگی‌های لحظهٔ ورود. */
+    data class EntryLabState(
+        val running: Boolean = false,
+        val report: com.aurum.edge.core.EntryQualityLab.Report? = null,
+        val messageFa: String = "",
+        val finishedAt: Long = 0L,
+    )
+
+    private val _entryLab = kotlinx.coroutines.flow.MutableStateFlow(EntryLabState())
+    val entryLab: kotlinx.coroutines.flow.StateFlow<EntryLabState> = _entryLab
+
+    fun runEntryQualityLab(days: Int = 30) {
+        if (_entryLab.value.running) return
+        _entryLab.value = _entryLab.value.copy(
+            running = true,
+            messageFa = "⏳ در حال بُرش معاملات بسته‌شدهٔ $days روز اخیر بر اساس ویژگی‌های لحظهٔ ورود…",
+        )
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val since = System.currentTimeMillis() - days.toLong() * 86_400_000L
+            val report = runCatching {
+                val samples = trades.value
+                    .asSequence()
+                    .filter { !it.isOpen && it.openedAt >= since }
+                    .map { t ->
+                        com.aurum.edge.core.EntryQualityLab.Sample(
+                            tradeId = t.id,
+                            strategyId = t.strategyId.ifBlank { com.aurum.edge.core.BitcoinStrategyModel.BASE_ICHIMOKU.id },
+                            strategyTitleFa = t.strategyTitleFa.ifBlank { t.strategyId },
+                            symbol = t.symbol,
+                            intervalLabel = t.interval.label,
+                            openedAt = t.openedAt,
+                            isBuy = t.action == com.aurum.edge.domain.SignalAction.BUY,
+                            pnlUsd = t.pnlUsd ?: 0.0,
+                            rMultiple = t.rMultiple ?: 0.0,
+                            categoryCode = t.preEntry3CandleCategoryCode,
+                            categoryLabelFa = t.preEntry3CandleCategoryFa.ifBlank {
+                                com.aurum.edge.core.PreEntry3CandleCategory
+                                    .fromCode(t.preEntry3CandleCategoryCode).badgeFa
+                            },
+                            distKijunAtr = t.stateDistKijunAtr,
+                            er14 = t.stateEr14,
+                            tech1hBuy = t.tech1hBuy,
+                            tech1hNeutral = t.tech1hNeutral,
+                            tech1hSell = t.tech1hSell,
+                            tech4hBuy = t.tech4hBuy,
+                            tech4hNeutral = t.tech4hNeutral,
+                            tech4hSell = t.tech4hSell,
+                        )
+                    }
+                    .toList()
+                com.aurum.edge.core.EntryQualityLab.analyze(samples = samples, days = days)
+            }.getOrNull()
+
+            _entryLab.value = EntryLabState(
+                running = false,
+                report = report,
+                messageFa = when {
+                    report == null -> "⚠️ آزمایشگاه کیفیت ورود اجرا نشد (خطای داخلی)."
+                    !report.hasData -> "⚠️ معاملهٔ بسته‌شده‌ای در $days روز اخیر نبود."
+                    else -> "✅ ${report.samples} معامله بُرش خورد · " +
+                        (if (report.unknownGaugeSamples > 0) "${report.unknownGaugeSamples} معامله بدون دادهٔ سنجش" else "همهٔ معاملات دادهٔ سنجش دارند")
+                },
+                finishedAt = System.currentTimeMillis(),
+            )
+        }
+    }
+
     fun consumeToast() {
         _toast.value = null
     }

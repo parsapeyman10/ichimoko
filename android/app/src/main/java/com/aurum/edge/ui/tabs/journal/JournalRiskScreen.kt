@@ -491,6 +491,9 @@ fun JournalRiskScreen(
         // ── ۳.۶ آزمایشگاه استاپ (فاز ۰ کالیبراسیون): بازپخش معاملات واقعی با استاپ‌های جایگزین ──
         StopAnchorLabCard(viewModel = viewModel)
 
+        // ── ۳.۷ آزمایشگاه کیفیت ورود (فاز ۲): بُرش معاملات بر اساس ویژگی‌های لحظهٔ ورود ──
+        EntryQualityLabCard(viewModel = viewModel)
+
             }
 
             3 -> {
@@ -560,6 +563,101 @@ fun JournalRiskScreen(
                     },
                     onOpenChart = { onChartSymbol(activeSymbol) },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EntryQualityLabCard(viewModel: AurumViewModel) {
+    val lab by viewModel.entryLab.collectAsStateWithLifecycle()
+    SectionCard(
+        title = "🔬 آزمایشگاه کیفیت ورود (فاز ۲ کالیبراسیون)",
+        subtitle = "معاملات بسته‌شده بر اساس ویژگی‌های لحظهٔ ورود بُرش می‌خورند: دستهٔ ۳ کندل، فاصله از کیجون، " +
+            "سنجش ۱ و ۴ ساعته و سشن. سپس بازپخش می‌شود که «اگر فقط فلان دسته را می‌گرفتیم، سود چه می‌شد». " +
+            "هیچ رفتاری تغییر نمی‌کند.",
+        collapsible = false,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(
+                onClick = { viewModel.runEntryQualityLab(30) },
+                enabled = !lab.running,
+            ) {
+                Text(
+                    text = if (lab.running) "⏳ در حال اجرا…" else "▶ اجرای آزمایشگاه کیفیت ورود (۳۰ روز)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Cyan,
+                )
+            }
+            if (lab.messageFa.isNotBlank()) {
+                Text(
+                    text = lab.messageFa,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+            }
+            val report = lab.report
+            if (report != null && report.hasData) {
+                report.dimensions.filter { it.key != "all" }.forEach { dimension ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            text = "📊 ${dimension.titleFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        dimension.buckets.take(6).forEach { bucket ->
+                            Text(
+                                text = "• ${bucket.labelFa} — ${bucket.samples} نمونه (${String.format(Locale.US, "%.0f", bucket.sharePct)}٪) · " +
+                                    "برد ${String.format(Locale.US, "%.1f", bucket.winRatePct)}٪ · " +
+                                    "انتظار ${formatUsdExact(bucket.expectancyUsd)} · جمع ${formatUsdExact(bucket.totalPnlUsd)}" +
+                                    if (bucket.reliable) "" else " · ⚠️ نمونه کم",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (bucket.expectancyUsd > 0.0) AurumColors.Green else AurumColors.TextPrimary,
+                            )
+                        }
+                    }
+                }
+                if (report.rules.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(AurumColors.Purple.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                            .border(1.dp, AurumColors.Purple.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            text = "🧪 بازپخش قاعده‌ها روی همان معاملات (درون‌نمونه‌ای — نیازمند تأیید روی نمونهٔ بعدی)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Purple,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        report.rules.forEach { rule ->
+                            Text(
+                                text = (if (rule.better) "✅ " else "▫️ ") + rule.labelFa +
+                                    " — ${rule.kept} معامله (${String.format(Locale.US, "%.0f", rule.keptSharePct)}٪) · " +
+                                    "انتظار ${formatUsdExact(rule.keptExpectancyUsd)} (مبنا ${formatUsdExact(rule.baselineExpectancyUsd)}) · " +
+                                    "تغییر جمع ${formatUsdExact(rule.deltaPnlUsd)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (rule.better) AurumColors.Green else AurumColors.TextSecondary,
+                            )
+                        }
+                        if (report.unknownGaugeSamples > 0) {
+                            Text(
+                                text = "ℹ️ ${report.unknownGaugeSamples} معامله دادهٔ سنجش ۱/۴ ساعته نداشتند و در قاعده‌های سنجش بدون داوری نگه داشته شدند.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextMuted,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
