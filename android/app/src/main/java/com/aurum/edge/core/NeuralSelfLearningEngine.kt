@@ -567,6 +567,26 @@ data class NeuralSignalEvaluation(
     val newsCatalystFa: String = "",
 )
 
+/**
+ * گزارش پاک‌سازی داده‌های هوش مصنوعی استراتژی‌های حذف‌شده.
+ * هیچ عددی در آن ساختگی نیست؛ همه از نقشه‌های واقعی مغز شمرده می‌شوند.
+ */
+data class OrphanStrategyDataPurgeReport(
+    val knownStrategyIds: Int,
+    val removedProfiles: Int,
+    val removedCategoryBestStrategy: Int,
+    val removedReplaySamples: Int,
+    val remainingProfiles: Int,
+) {
+    val summaryFa: String
+        get() = if (removedProfiles == 0 && removedCategoryBestStrategy == 0 && removedReplaySamples == 0) {
+            "هیچ دادهٔ یتیمی از استراتژی‌های حذف‌شده پیدا نشد؛ $remainingProfiles مدل فعلی دست‌نخورده است."
+        } else {
+            "پاک‌شد: $removedProfiles پروفایل تیونینگ، $removedCategoryBestStrategy برچسب «بهترین استراتژی دسته» " +
+                "و $removedReplaySamples نمونهٔ تجربهٔ مربوط به استراتژی‌های حذف‌شده. " +
+                "$remainingProfiles مدل فعلی دست‌نخورده ماند."
+        }
+}
 class NeuralSelfLearningEngine(
     context: Context? = null,
     private val storageFile: File? = context?.let { File(it.filesDir, "neural_self_learning_v1.json") },
@@ -1183,27 +1203,6 @@ class NeuralSelfLearningEngine(
      * برچسب «بهترین استراتژی دسته») و تجربه‌های بافر تکرار مربوط به آن مدل‌ها را حذف می‌کند
      * و به هیچ وزن شبکهٔ عصبی دست نمی‌زند.
      */
-    @Synchronized
-
-/**
- * گزارش پاک‌سازی داده‌های هوش مصنوعی استراتژی‌های حذف‌شده.
- * هیچ عددی در آن ساختگی نیست؛ همه از نقشه‌های واقعی مغز شمرده می‌شوند.
- */
-data class OrphanStrategyDataPurgeReport(
-    val knownStrategyIds: Int,
-    val removedProfiles: Int,
-    val removedCategoryBestStrategy: Int,
-    val removedReplaySamples: Int,
-    val remainingProfiles: Int,
-) {
-    val summaryFa: String
-        get() = if (removedProfiles == 0 && removedCategoryBestStrategy == 0 && removedReplaySamples == 0) {
-            "هیچ دادهٔ یتیمی از استراتژی‌های حذف‌شده پیدا نشد؛ $remainingProfiles مدل فعلی دست‌نخورده است."
-        } else {
-            "پاک‌شد: $removedProfiles پروفایل تیونینگ، $removedCategoryBestStrategy برچسب «بهترین استراتژی دسته» " +
-                "و $removedReplaySamples نمونهٔ تجربهٔ مربوط به استراتژی‌های حذف‌شده. " +
-                "$remainingProfiles مدل فعلی دست‌نخورده ماند."
-        }
 
     fun purgeOrphanStrategyData(): OrphanStrategyDataPurgeReport {
         val knownIds = BitcoinStrategyModel.entries.map { it.id }.toSet()
