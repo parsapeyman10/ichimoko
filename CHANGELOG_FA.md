@@ -1,6 +1,23 @@
 # فهرست تغییرات Aurum Edge
 
-## منتشرنشده — ۳.۹.۹۸ (۸۰۷): حذف کد مرده و استراتژی‌های ناموجود
+## منتشرنشده — ۳.۹.۹۹ (۸۰۸): همان پاک‌سازی، این بار واقعاً از شاخهٔ کار ساخته شد
+
+**اشتباه انتشار، صریح:** بیلدهای ۳.۹.۹۷ و ۳.۹.۹۸ به‌جای شاخهٔ `arena/10fe7d3f-ichimoko` از شاخهٔ
+پیش‌فرض (`main`، نسخهٔ ۳.۹.۷۹) ساخته شدند؛ نسخه فقط از روی ورودی دستی مهر خورده بود. هر دو
+ریلیز حذف شدند و این نسخه با `--ref` صریح روی شاخهٔ کار ساخته می‌شود.
+
+محتوای این نسخه همان پاک‌سازی ۳.۹.۹۸ است:
+
+- حذف پنج شناسهٔ سبک ناموجود (`SUPER_PLUS` · `ICT_SMC` · `EMA_VWAP` · `VOLUME_BREAKOUT` ·
+  `MEAN_REVERSION`) از `StrategyKind.fromId`.
+- حذف ۱۹ اعلان با صفر ارجاع: `KijunPredictiveGate` · `KijunStopRule` · `midpointSeries` ·
+  `evaluateMarketConditions` (۱۷۷ خط) · `NeuralMarketInference` · `neuralDepthMultiplier` ·
+  `neuralDepthReportFor` + کش · `setShowSettingsDescriptions` · `listArchives` · `deleteArchive` ·
+  `postTradeEventNotification` · `summaryLineFa` · `worstSeverity` · `severityRank` · `barsUntil` ·
+  `bestRowPerStrategy` · `compactFa` · `archiveNoteFa` · `neuralMemorySize` (جمعاً ~۴۶۰ خط).
+- هیچ قاعدهٔ ورود/خروج، استاپ، هدف، ریسک یا استراتژی زنده‌ای تغییر نکرده است.
+
+## ۳.۹.۹۸ (۸۰۷) — منتشرنشده/حذف‌شده (بیلد از شاخهٔ اشتباه): حذف کد مرده و استراتژی‌های ناموجود
 
 **هیچ استراتژی زنده‌ای دست نخورده‌است.** هیچ قاعدهٔ ورود/خروج، هیچ استاپ، هیچ هدف و هیچ تنظیمی
 تغییر نکرد. این نسخه فقط چیزهایی را برمی‌دارد که هیچ‌جا صدا زده نمی‌شدند.
