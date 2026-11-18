@@ -715,9 +715,19 @@ jobs:
         run: |
           set -euo pipefail
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          python3 tools/verify_public_updater.py --repo "$GITHUB_REPOSITORY" \
-            --version "$VERSION_NAME" --code "$VERSION_CODE" --certificate "$UPDATER_CERT_SHA256" \
-            --sdk "$SDK/build-tools/$ANDROID_BUILD_TOOLS" --output "$RUNNER_TEMP/public-updater"
+          # The audit retries the anonymous Release API/digest cache; if it still fails, its
+          # attempt lines are the only clue. Echo them as annotations so the reason survives
+          # the log link, instead of a bare "exit code 1".
+          if ! python3 tools/verify_public_updater.py --repo "$GITHUB_REPOSITORY" \
+              --version "$VERSION_NAME" --code "$VERSION_CODE" --certificate "$UPDATER_CERT_SHA256" \
+              --sdk "$SDK/build-tools/$ANDROID_BUILD_TOOLS" --output "$RUNNER_TEMP/public-updater" \
+              2>&1 | tee "$RUNNER_TEMP/public-updater-audit.log"; then
+            tail -n 6 "$RUNNER_TEMP/public-updater-audit.log" | while IFS= read -r line; do
+              [[ -z "$line" ]] && continue
+              echo "::error title=Public updater audit::$line"
+            done
+            exit 1
+          fi
 
       # A published release makes update/aurum-edge.json on the default branch stale in the same
       # second. That copy is what a phone reads when it cannot reach the release assets, and a
