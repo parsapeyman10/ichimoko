@@ -15,6 +15,9 @@ package com.aurum.edge.core
  */
 object ChartScale {
 
+    /** یک کندل سالم برای محاسبهٔ کادر. */
+    private class Bar(val low: Double, val high: Double)
+
     /** کمینه/بیشینهٔ محور قیمت. `span` همیشه مثبت و متناهی است. */
     data class Window(val min: Double, val max: Double) {
         val span: Double get() = (max - min).coerceAtLeast(1e-9)
@@ -39,15 +42,40 @@ object ChartScale {
         extraBands: Double = 8.0,
         fallback: Double? = null,
     ): Window {
-        var cMin = Double.POSITIVE_INFINITY
-        var cMax = Double.NEGATIVE_INFINITY
+        // ۱) فقط کندل‌های سالم و مثبت وارد محاسبه می‌شوند.
+        val sane = ArrayList<Bar>(lows.size)
         for (i in lows.indices) {
             val low = lows.getOrNull(i) ?: continue
             val high = highs.getOrNull(i) ?: continue
             if (!low.isFinite() || !high.isFinite()) continue
-            if (low <= 0.0 && high <= 0.0) continue
-            if (low < cMin) cMin = low
-            if (high > cMax) cMax = high
+            if (low <= 0.0 || high <= 0.0) continue
+            if (high < low) continue
+            sane += Bar(low, high)
+        }
+
+        // ۲) کندل پرت: اگر تأمین‌کننده یک کندل با سقف/کفی چند برابر بقیه بدهد، همان یک کندل کل
+        //    مقیاس را خراب می‌کند. میانهٔ وسط کندل‌ها مرجع می‌شود و کندل‌های بیرون از بازهٔ
+        //    [میانه/۳ ، میانه×۳] کنار گذاشته می‌شوند.
+        var cMin = Double.POSITIVE_INFINITY
+        var cMax = Double.NEGATIVE_INFINITY
+        if (sane.isNotEmpty()) {
+            val mids = sane.map { (it.low + it.high) / 2.0 }.sorted()
+            val median = mids[mids.size / 2]
+            if (median.isFinite() && median > 0.0) {
+                for (bar in sane) {
+                    val mid = (bar.low + bar.high) / 2.0
+                    if (mid < median / 3.0 || mid > median * 3.0) continue
+                    if (bar.low < cMin) cMin = bar.low
+                    if (bar.high > cMax) cMax = bar.high
+                }
+            }
+        }
+        if (!cMin.isFinite() || !cMax.isFinite() || cMax < cMin) {
+            // اگر همهٔ کندل‌ها پرت بودند، دست‌کم همان بازهٔ خام را برمی‌داریم.
+            for (bar in sane) {
+                if (bar.low < cMin) cMin = bar.low
+                if (bar.high > cMax) cMax = bar.high
+            }
         }
 
         if (!cMin.isFinite() || !cMax.isFinite() || cMax < cMin) {

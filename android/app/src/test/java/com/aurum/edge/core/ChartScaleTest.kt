@@ -82,6 +82,25 @@ class ChartScaleTest {
     }
 
     @Test
+    fun aSingleGlitchedCandleCannotRescaleTheChart() {
+        // سناریوی دوم خرابی چارت: یک کندل با سقف چند میلیونی بین ۶۰ کندل سالم.
+        val lows = MutableList(60) { 3_770.0 }
+        val highs = MutableList(60) { 3_780.0 }
+        highs[17] = 9_999_999.0
+        lows[17] = 3_769.0
+        val w = window(lows, highs)
+        assertTrue("کادر نباید باز شود، بود ${w.max}", w.max <= 3_800.0)
+        assertEquals(3_770.0, w.min, 1e-9)
+    }
+
+    @Test
+    fun aZeroPricedCandleIsIgnored() {
+        val w = window(listOf(0.0, 3_770.0, 3_772.0), listOf(0.0, 3_780.0, 3_776.0))
+        assertEquals(3_770.0, w.min, 1e-9)
+        assertEquals(3_780.0, w.max, 1e-9)
+    }
+
+    @Test
     fun paddingKeepsTheWindowFiniteAndOrdered() {
         val padded = ChartScale.padded(ChartScale.Window(100.0, 200.0), 0.10)
         assertEquals(90.0, padded.min, 1e-9)
