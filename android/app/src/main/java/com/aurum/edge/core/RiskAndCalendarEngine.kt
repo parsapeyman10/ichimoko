@@ -394,12 +394,12 @@ object RiskAndCalendarEngine {
     fun fixedRiskUsdOrNull(configuredUsd: Double): Double? =
         if (configuredUsd.isFinite() && configuredUsd > 0.0) configuredUsd else null
 
-    const val MIN_REQUIRED_RISK_REWARD: Double = 1.5
+    const val MIN_REQUIRED_RISK_REWARD: Double = 2.0
     const val MAX_ALLOWED_RISK_REWARD: Double = 3.0
     const val TREND_RUNNER_THRESHOLD_R: Double = 2.85
 
     /**
-     * تضمین می‌کند نسبت سود به ضرر (R:R) هر معامله همیشه دقیقاً در بازه قفل‌شده `1:1.5` تا `1:3.0` (`1.5 <= R:R <= 3.0`) باشد.
+     * تضمین می‌کند نسبت سود به ضرر (R:R) هر معامله همیشه دقیقاً در بازه قفل‌شده `1:2.0` تا `1:3.0` (`2.0 <= R:R <= 3.0`) باشد.
      */
     fun enforceMinimumRiskReward(
         symbolInput: String,

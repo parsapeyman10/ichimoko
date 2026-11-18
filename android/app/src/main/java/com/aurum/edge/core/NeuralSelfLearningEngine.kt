@@ -3676,9 +3676,9 @@ class NeuralSelfLearningEngine(
         val wickPenalty = abs(betaR[13]).coerceIn(0.10, 1.20)
         val sniperSlope = betaR[15].coerceIn(0.10, 1.20)
 
-        val baseOptRr = (modelOrNull?.baseOptimalRr ?: 2.35).coerceIn(1.50, 3.00)
-        val regOptRr = round((baseOptRr + (erSlope - 0.45) * 0.25).coerceIn(1.85, 2.85) * 100.0) / 100.0
-        val regMinRr = round((1.55 + (erSlope * 0.22)).coerceIn(1.50, 2.15) * 100.0) / 100.0
+        val baseOptRr = (modelOrNull?.baseOptimalRr ?: 2.35).coerceIn(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD, RiskAndCalendarEngine.MAX_ALLOWED_RISK_REWARD)
+        val regOptRr = round((baseOptRr + (erSlope - 0.45) * 0.25).coerceIn(2.00, 2.85) * 100.0) / 100.0
+        val regMinRr = round((1.55 + (erSlope * 0.22)).coerceIn(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD, 2.15) * 100.0) / 100.0
         val regSlBuf = round((0.22 + wickPenalty * 0.12).coerceIn(0.20, 0.36) * 100.0) / 100.0
         val regMaxSlAtr = round((2.10 - extPenalty * 0.22).coerceIn(1.65, 2.10) * 100.0) / 100.0
         val regMinSlAtr = round((0.82 + wickPenalty * 0.14).coerceIn(0.80, 1.10) * 100.0) / 100.0

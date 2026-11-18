@@ -345,7 +345,7 @@ data class PaperTrade(
         if (rrBreakdownFa.isNotBlank()) return rrBreakdownFa
         val optStr = String.format(java.util.Locale.US, "%.2f", effectiveOptimalRr)
         val model = BitcoinStrategyModel.fromId(strategyId)
-        val modelHint = "${model.badgeFa} (${model.combinationCategoryFa} · پایه 1:${String.format(java.util.Locale.US, "%.2f", model.baseOptimalRr.coerceIn(1.5, 3.0))})"
+        val modelHint = "${model.badgeFa} (${model.combinationCategoryFa} · پایه 1:${String.format(java.util.Locale.US, "%.2f", model.baseOptimalRr.coerceIn(2.0, 3.0))})"
         return "عدد مناسب R:R این معامله: 1:$optStr (در بازه قفل‌شده ۱.۵ تا ۳.۰) — بر اساس $modelHint · 🔒 حد ضرر ساختاری کاملاً ثابت و غیرپله‌ای"
     }
 

@@ -564,7 +564,7 @@ class RiskAndCalendarEngineTest {
         assertEquals(15_000L, openTier.tickIntervalMs)
 
         // 5. تنها ۵ مدل باقی مانده‌اند (بیس + چهار تک‌استراتژی) و همگی هم‌زمان روی ۱۵m و ۵m ارزیابی می‌شوند.
-        assertEquals(7, BitcoinStrategyModel.entries.size) // + kane_median_line_fibonacci_synergy + pitchfork_strategy
+        assertEquals(5, BitcoinStrategyModel.entries.size) // بیس + چهار تک‌استراتژی ایچیموکو
         assertEquals(5, BitcoinStrategyModel.neuralLearningModels.size)
         assertEquals(5, dualReport.reports15mByStrategy.size)
         assertEquals(5, dualReport.reports5mByStrategy.size)

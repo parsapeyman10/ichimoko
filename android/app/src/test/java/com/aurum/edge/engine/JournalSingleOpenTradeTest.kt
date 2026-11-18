@@ -81,7 +81,7 @@ class JournalSingleOpenTradeTest {
         assertTrue(reason!!.contains("تکلیف"))
 
         // استراتژی دیگر آزاد است.
-        val other = journal.openTrade(calc, note = "استراتژی دیگر", strategyId = BitcoinStrategyModel.PITCHFORK_DEROOS.id)
+        val other = journal.openTrade(calc, note = "استراتژی دیگر", strategyId = BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT.id)
         assertNotNull(other)
         assertEquals(2, journal.trades.value.count { it.isOpen })
 

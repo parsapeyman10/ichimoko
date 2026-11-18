@@ -57,7 +57,7 @@ enum class BitcoinStrategyModel(
         hasTuttle = false,
         hasHosoda = false,
         hasPeloille = false,
-        baseOptimalRr = 1.85,
+        baseOptimalRr = 2.00,
     ),
 
     TUTTLE_KUMO_BREAKOUT(
@@ -96,55 +96,9 @@ enum class BitcoinStrategyModel(
         hasTuttle = false,
         hasHosoda = false,
         hasPeloille = true,
-        baseOptimalRr = 1.95,
-    ),
-
-    // ── ۶. خط میانه و هم‌افزایی فیبوناچی (کین) ──────────────────────────────
-    /**
-     * این مدل هیچ‌کدام از چهار ستون ایچیموکو را به ارث نمی‌برد؛ یک موتور مستقل هندسی است.
-     * نامش همان نامی است که کاربر خواسته و شناسه‌اش (`id`) نیز همان است.
-     * یادگیری عصبی و تیونینگ خودکار برایش خاموش است تا پارامترهای ثابت تئوری دست‌نخورده بمانند.
-     */
-    KANE_ML_FIB_SYNERGY(
-        id = "kane_median_line_fibonacci_synergy",
-        titleFa = "kane_median_line_fibonacci_synergy — خط میانهٔ اندروز + هم‌افزایی فیبوناچی (کین)",
-        badgeFa = "مستقل · خط میانه/فیبو",
-        authorRefFa = "Jim Kane (Median Line and Fibonacci Synergy)",
-        summaryFa = "پورت کامل فایل مرجع kane_median_line_fibonacci_synergy.py: زیگزاگ علّی، الگوی ABCD، " +
-            "گروه‌بندی فیبوناچی برای ناحیهٔ PTA، همهٔ خانواده‌های خط میانه (استاندارد، Modified Schiff، " +
-            "Adjusted، روند/کلون، Offset)، امتیاز Synergy ۱ تا ۱۰، تریگر اجباری EMA 5/13 و هدف ۱٫۲۷۲ " +
-            "اکستنشن با قفل R در بازهٔ ۱٫۵ تا ۳٫۰.",
-        hasPatel = false,
-        hasTuttle = false,
-        hasHosoda = false,
-        hasPeloille = false,
-        baseOptimalRr = 2.0,
-        requiresExplicitOptIn = true,
-        neuralLearningEnabled = false,
-    ),
-
-    // ── ۷. چنگال اندروز / Trading with the Pitchfork (Gordon DeRoos) ──────────
-    /**
-     * استراتژی کاملاً مستقل: نه ایچیموکو، نه Kane، نه گیت کتاب، نه یادگیری عصبی.
-     * تنها اتصالش به بقیهٔ سیستم لایهٔ سرمایه است (ریسک دقیقاً ۵ دلار و سود `R × ۵`).
-     */
-    PITCHFORK_DEROOS(
-        id = "pitchfork_strategy",
-        titleFa = "pitchfork_strategy — Trading with the Pitchfork (چنگال اندروز / DeRoos)",
-        badgeFa = "مستقل · چنگال اندروز",
-        authorRefFa = "Gordon DeRoos (Trading with the Pitchfork)",
-        summaryFa = "پورت کامل pitchfork_strategy.py: مینی‌خط میانه (واگرایی معکوس + کراس SMA ۵ + " +
-            "چنگال از کلوزها + عبور از موازی و موازی لغزان) و شکست قیمت (چنگال بدون لمس خط میانه + " +
-            "موازی لغزان + خط هاگوپیان + واگرایی استاندارد)؛ حد ضرر چند تیک پشت سطح و هدف خط میانه " +
-            "با قفل R در بازهٔ ۱٫۵ تا ۳٫۰.",
-        hasPatel = false,
-        hasTuttle = false,
-        hasHosoda = false,
-        hasPeloille = false,
-        baseOptimalRr = 2.0,
-        requiresExplicitOptIn = true,
-        neuralLearningEnabled = false,
+        baseOptimalRr = 2.00,
     );
+
 
     /**
      * استراتژی‌هایی که کاربر موقتاً خاموش کرده است. شناسه و آموخته‌های شبکه‌شان حفظ می‌شود،
@@ -228,44 +182,6 @@ val BitcoinStrategyModel.isDrivePdfStrategy: Boolean
     get() = false
 
 fun BitcoinStrategyModel.driveBookPlaybook(): DriveBookPlaybookSpec = when (this) {
-    BitcoinStrategyModel.PITCHFORK_DEROOS -> DriveBookPlaybookSpec(
-        strategyId = id,
-        bookFileTitle = "pitchfork_strategy.py (پورت کتاب Trading with the Pitchfork)",
-        authorAndEdition = "$badgeFa — $authorRefFa",
-        ichimokuSettingsFa = "بدون ایچیموکو: تک‌تایم‌فریم ۴ ساعته (سوینگ k=۳، SMA ۵ و SMA ۵۰ روند)",
-        auxiliaryIndicatorsFa = "واگرایی RSI 14 + کراس SMA ۵ + چنگال اندروز از کلوزها + موازی لغزان " +
-            "+ خط هاگوپیان + شکست قیمت (price failure)",
-        entryChecklistStepsFa = listOf(
-            "۱. روند غالب با SMA ۵۰ صعودی (یا نزولی) و واگرایی معکوس/استاندارد تأییدشده",
-            "۲. ستاپ چنگال: مینی‌خط میانه پس از کراس SMA ۵، یا چنگالی که به خط میانه نرسیده",
-            "۳. عبور بیش از نیمی از دامنهٔ کندل از موازی بالایی و ساخت موازی لغزان",
-            "۴. ورود با عبور از موازی لغزان (یا هاگوپیان) و حد ضرر چند تیک پشت سطح",
-        ),
-        stopLossFormulaFa = "۲ تیک پشت موازی بالایی (مینی‌خط میانه) یا پشت کف بازگشتی (شکست قیمت)",
-        takeProfitAndExitRulesFa = "هدف خط میانهٔ چنگال؛ اگر R خارج از قرارداد ۱٫۵ تا ۳٫۰ بود، هدف روی " +
-            "کف یا سقف قرارداد بسته می‌شود و دلیلش در چک‌لیست نوشته می‌شود",
-        specialEdgeAdvantageFa = summaryFa,
-    )
-
-    BitcoinStrategyModel.KANE_ML_FIB_SYNERGY -> DriveBookPlaybookSpec(
-        strategyId = id,
-        bookFileTitle = "kane_median_line_fibonacci_synergy.py (پورت کتاب Median Line and Fibonacci Synergy)",
-        authorAndEdition = "$badgeFa — $authorRefFa",
-        ichimokuSettingsFa = "بدون ایچیموکو: ساختار روی ۴ ساعته، تریگر روی ۱ ساعته",
-        auxiliaryIndicatorsFa = "زیگزاگ علّی ۱٫۶/۴٫۵ ATR + الگوی ABCD + گروه‌بندی فیبوناچی " +
-            "+ خانواده‌های خط میانه (BIG / ABCD-ML / ABCD-MS / ADJ / TL / OFF) + EMA 5/13",
-        entryChecklistStepsFa = listOf(
-            "۱. ADCD معتبر با BC/AB بین ۰٫۳۸۲ و ۱٫۲۷۲ و روند X→H حداقل ۶ ATR",
-            "۲. گروه‌بندی فیبوناچی ناحیهٔ PTA (هم‌زمان عدد pattern و position) و پهنای مجاز ۰٫۸ ATR",
-            "۳. برخورد خطوط چند خانواده با ناحیه + «دیده‌شدن» ست + هم‌زمانی زمانی و امتیاز ≥ ۷ از ۱۰",
-            "۴. لمس ناحیه و سپس تریگر اجباری EMA 5/13 در حداکثر ۱۲ کندل (بدون fade)",
-        ),
-        stopLossFormulaFa = "کف بعد از لمس (یا کف ناحیه) منهای ۰٫۳۵×ATR؛ سقف ریسک ۳٫۵ ATR",
-        takeProfitAndExitRulesFa = "هدف ۱٫۲۷۲ اکستنشن ساق CD با خروج پله‌ای ۵۰٪ و تریل ۲ ATR؛ " +
-            "قفل قرارداد این اپ: R بین ۱٫۵ و ۳٫۰ (کف/سقف گزارش‌شده در چک‌لیست)",
-        specialEdgeAdvantageFa = summaryFa,
-    )
-
     else -> DriveBookPlaybookSpec(
         strategyId = id,
         bookFileTitle = authorRefFa,
@@ -314,7 +230,7 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
 @Serializable
 data class PerStrategyConfigOverride(
     val strategyId: String,
-    val minRiskReward: Double = 1.65,
+    val minRiskReward: Double = 2.00,
     val maxKijunExtensionAtr: Double = 1.75,
     val slBufferAtr: Double = 0.25,
     val breakoutBufferAtr: Double = 0.15,
@@ -343,7 +259,7 @@ data class PerStrategyConfigOverride(
 @Serializable
 data class PerSymbolConfigOverride(
     val symbol: String,
-    val minRiskReward: Double = 1.60,
+    val minRiskReward: Double = 2.00,
     val maxKijunExtensionAtr: Double = 1.65,
     val slBufferAtr: Double = 0.26,
     val breakoutBufferAtr: Double = 0.16,
@@ -368,7 +284,7 @@ data class BaseStrategyConfig(
     val maxKijunExtensionAtr: Double = 1.8,
     val slBufferAtr: Double = 0.25,
     val breakoutBufferAtr: Double = 0.15,
-    val minRiskReward: Double = 1.5,
+    val minRiskReward: Double = 2.00,
     val enablePullbackTrigger: Boolean = true,
     val enableBreakoutTrigger: Boolean = true,
     val enablePreserveMode: Boolean = true,
@@ -475,7 +391,7 @@ data class BaseStrategyConfig(
         // دقیق‌ترین سطح یادگیری، اولویت دارد: شخصیت نماد ← پروفایل استراتژی ← مقدار پایه.
         // برای R:R همیشه سخت‌گیرانه‌ترین مقدار انتخاب می‌شود تا هیچ نمادی ریسک را کم نکند.
         return copy(
-            minRiskReward = max(1.5, max(symOv?.minRiskReward ?: 0.0, ov?.minRiskReward ?: minRiskReward)),
+            minRiskReward = max(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD, max(symOv?.minRiskReward ?: 0.0, ov?.minRiskReward ?: minRiskReward)),
             maxKijunExtensionAtr = (symOv?.maxKijunExtensionAtr ?: ov?.maxKijunExtensionAtr ?: maxKijunExtensionAtr)
                 .coerceIn(1.25, 2.40),
             slBufferAtr = (symOv?.slBufferAtr ?: ov?.slBufferAtr ?: slBufferAtr).coerceIn(0.15, 0.50),
@@ -775,8 +691,6 @@ enum class StrategyTriggerType(val titleFa: String) {
     COMPRESSION_EXPANSION_RETEST("بازآزمایی موفق شکست ناحیهٔ فشردگی"),
     MEDIAN_LINE_REJECTION("ماشه خط میانه ۱: رد در موازی فورک و بازگشت به خط میانه (کین)"),
     MEDIAN_LINE_CONTINUATION("ماشه خط میانه ۲: پولبک به خط میانه در جهت فورک (کین)"),
-    PITCHFORK_MINI_MEDIAN("ماشه چنگال ۱: مینی‌خط میانه — عبور از موازی لغزان (DeRoos)"),
-    PITCHFORK_PRICE_FAILURE("ماشه چنگال ۲: شکست قیمت و عبور از خط هاگوپیان (DeRoos)"),
     NONE("در انتظار ماشهٔ بسته‌شده"),
 }
 
@@ -2925,7 +2839,7 @@ object IchimokuStrategyEngine {
             count >= 6 -> 2.55
             count >= 5 -> 2.40
             else -> 2.25
-        }.coerceIn(1.50, 3.00)
+        }.coerceIn(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD, RiskAndCalendarEngine.MAX_ALLOWED_RISK_REWARD)
 
         val badges = buildList {
             if (book1) add("لایهٔ ۱ (فشردگی بولینگر)")
@@ -2972,197 +2886,6 @@ object IchimokuStrategyEngine {
     /**
      * ارزیابی کامل هر یک از ۱۵ نماد داخل اپ (`V1Universe.allSymbols`) بر اساس تنها استراتژی فعال انتخاب‌شده.
      */
-    /**
-     * پل میان مدل `PITCHFORK_DEROOS` و گزارش استاندارد استراتژی.
-     *
-     * این تابع هیچ چیزی از ایچیموکو، کین یا گیت‌های کتاب نمی‌خواند. تنها ورودی‌اش کندل ۴ ساعته و تنها
-     * خروجی‌اش همان قرارداد سرمایه است (ریسک ۵ دلار و سود `R × ۵` که در لایهٔ اجرا اعمال می‌شود).
-     */
-    fun evaluatePitchforkReport(
-        activeModel: BitcoinStrategyModel,
-        macroCandles: List<Candle>,
-        macroSnapshot: IchimokuBarSnapshot?,
-        strategySnapshot: IchimokuBarSnapshot?,
-        triggerSnapshot: IchimokuBarSnapshot?,
-        livePriceOverride: Double?,
-        effectiveId: String,
-        effectiveTitle: String,
-        nowMillis: Long,
-        symbol: String,
-    ): StrategyEvaluationReport {
-        val params = PitchforkParams()
-        val evaluation = PitchforkStrategyEngine.evaluate(
-            candles = macroCandles,
-            params = params,
-            livePriceOverride = livePriceOverride,
-        )
-        if (macroCandles.size < params.minBars) {
-            return StrategyEvaluationReport(
-                symbol = symbol,
-                strategyId = effectiveId,
-                strategyTitleFa = effectiveTitle,
-                strategyBadgeFa = activeModel.badgeFa,
-                macroInterval = Interval.H4,
-                strategyInterval = Interval.H4,
-                triggerInterval = Interval.H4,
-                readiness = StrategyReadinessState.INSUFFICIENT_DATA,
-                action = SignalAction.NO_TRADE,
-                triggerType = StrategyTriggerType.NONE,
-                confidence = 0.0,
-                livePrice = livePriceOverride ?: macroCandles.lastOrNull()?.close ?: 0.0,
-                suggestedEntry = null,
-                suggestedStopLoss = null,
-                targetV = null,
-                targetN = null,
-                targetE = null,
-                primaryTakeProfit = null,
-                riskReward = null,
-                macroSnapshot = macroSnapshot,
-                strategySnapshot = strategySnapshot,
-                triggerSnapshot = triggerSnapshot,
-                waveProjection = null,
-                conditions = emptyList(),
-                summaryFa = evaluation.summaryFa,
-                triggerBarTime = macroCandles.lastOrNull()?.time ?: 0L,
-                evaluatedAt = nowMillis,
-            )
-        }
-        return StrategyEvaluationReport(
-            symbol = symbol,
-            strategyId = effectiveId,
-            strategyTitleFa = effectiveTitle,
-            strategyBadgeFa = activeModel.badgeFa,
-            macroInterval = Interval.H4,
-            strategyInterval = Interval.H4,
-            triggerInterval = Interval.H4,
-            readiness = evaluation.readiness,
-            action = evaluation.action,
-            triggerType = evaluation.triggerType,
-            confidence = evaluation.confidence,
-            livePrice = evaluation.livePrice,
-            suggestedEntry = evaluation.entry,
-            suggestedStopLoss = evaluation.stopLoss,
-            targetV = evaluation.medianTarget.takeIf { it > 0.0 },
-            targetN = null,
-            targetE = null,
-            primaryTakeProfit = evaluation.takeProfit,
-            riskReward = evaluation.riskReward,
-            macroSnapshot = macroSnapshot,
-            strategySnapshot = strategySnapshot,
-            triggerSnapshot = triggerSnapshot,
-            waveProjection = null,
-            conditions = evaluation.conditions,
-            summaryFa = evaluation.summaryFa,
-            triggerBarTime = evaluation.triggerBarTime,
-            evaluatedAt = nowMillis,
-            optimalRiskReward = evaluation.riskReward,
-            entryPathFa = evaluation.entryPathFa,
-        )
-    }
-
-    /**
-     * پل میان مدل `KANE_ML_FIB_SYNERGY` و گزارش استاندارد استراتژی.
-     *
-     * قواعد این تابع عمداً کم است: هیچ اورراید عصبی، هیچ تیونینگ نماد و هیچ گیت ایچیموکویی این‌جا
-     * اعمال نمی‌شود. فقط سه چیز از تنظیمات کاربر خوانده می‌شود: حداقل R (که هرگز زیر ۱٫۵ نمی‌رود)،
-     * بافر حد ضرر و حداقل نسبت کارایی. تایم‌فریم هم قفل است: ساختار ۴ ساعته، ورود ۱ ساعته.
-     */
-    fun evaluateKaneMedianLineReport(
-        activeModel: BitcoinStrategyModel,
-        config: BaseStrategyConfig,
-        macroCandles: List<Candle>,
-        entryCandles: List<Candle>,
-        macroSnapshot: IchimokuBarSnapshot?,
-        strategySnapshot: IchimokuBarSnapshot?,
-        triggerSnapshot: IchimokuBarSnapshot?,
-        livePriceOverride: Double?,
-        effectiveId: String,
-        effectiveTitle: String,
-        nowMillis: Long,
-        symbol: String,
-    ): StrategyEvaluationReport {
-        val onLockedTimeframes = config.macroInterval == Interval.H4 && config.strategyInterval == Interval.H1
-        if (!onLockedTimeframes || macroCandles.size < KaneConfig().minMacroBars || entryCandles.size < KaneConfig().minEntryBars) {
-            val note = if (!onLockedTimeframes) {
-                "مدل کین فقط روی ساختار ۴ ساعته و ورود ۱ ساعته سنجیده می‌شود " +
-                    "(الان: ${config.macroInterval.label}/${config.strategyInterval.label})."
-            } else {
-                "کندل کافی برای فورک خط میانه نیست (${macroCandles.size} ساختار / ${entryCandles.size} ورود)."
-            }
-            return StrategyEvaluationReport(
-                symbol = symbol,
-                strategyId = effectiveId,
-                strategyTitleFa = effectiveTitle,
-                strategyBadgeFa = activeModel.badgeFa,
-                macroInterval = Interval.H4,
-                strategyInterval = Interval.H1,
-                triggerInterval = Interval.H1,
-                readiness = StrategyReadinessState.INSUFFICIENT_DATA,
-                action = SignalAction.NO_TRADE,
-                triggerType = StrategyTriggerType.NONE,
-                confidence = 0.0,
-                livePrice = livePriceOverride ?: entryCandles.lastOrNull()?.close ?: 0.0,
-                suggestedEntry = null,
-                suggestedStopLoss = null,
-                targetV = null,
-                targetN = null,
-                targetE = null,
-                primaryTakeProfit = null,
-                riskReward = null,
-                macroSnapshot = macroSnapshot,
-                strategySnapshot = strategySnapshot,
-                triggerSnapshot = triggerSnapshot,
-                waveProjection = null,
-                conditions = emptyList(),
-                summaryFa = note,
-                triggerBarTime = entryCandles.lastOrNull()?.time ?: 0L,
-                evaluatedAt = nowMillis,
-            )
-        }
-
-        val kaneConfig = KaneConfig(
-            minRiskReward = max(config.minRiskReward, 1.5),
-        )
-        val evaluation = KaneMedianLineEngine.evaluate(
-            macroCandles = macroCandles,
-            entryCandles = entryCandles,
-            config = kaneConfig,
-            livePriceOverride = livePriceOverride,
-        )
-
-        return StrategyEvaluationReport(
-            symbol = symbol,
-            strategyId = effectiveId,
-            strategyTitleFa = effectiveTitle,
-            strategyBadgeFa = activeModel.badgeFa,
-            macroInterval = Interval.H4,
-            strategyInterval = Interval.H1,
-            triggerInterval = Interval.H1,
-            readiness = evaluation.readiness,
-            action = evaluation.action,
-            triggerType = evaluation.triggerType,
-            confidence = evaluation.confidence,
-            livePrice = evaluation.livePrice,
-            suggestedEntry = evaluation.entry,
-            suggestedStopLoss = evaluation.stopLoss,
-            targetV = evaluation.zoneLow.takeIf { it > 0.0 },
-            targetN = evaluation.zoneHigh.takeIf { it > 0.0 },
-            targetE = null,
-            primaryTakeProfit = evaluation.takeProfit,
-            riskReward = evaluation.riskReward,
-            macroSnapshot = macroSnapshot,
-            strategySnapshot = strategySnapshot,
-            triggerSnapshot = triggerSnapshot,
-            waveProjection = null,
-            conditions = evaluation.conditions,
-            summaryFa = evaluation.summaryFa,
-            triggerBarTime = evaluation.triggerBarTime,
-            evaluatedAt = nowMillis,
-            optimalRiskReward = evaluation.riskReward,
-            entryPathFa = evaluation.entryPathFa,
-        )
-    }
-
     fun evaluateBitcoinStrategy(
         activeModel: BitcoinStrategyModel,
         config: BaseStrategyConfig,
@@ -3232,43 +2955,6 @@ object IchimokuStrategyEngine {
                 summaryFa = "در حال تکمیل کندل‌های ۳ تایم‌فریم (${config.macroInterval.label}/${config.strategyInterval.label}/${config.triggerInterval.label}) برای $normalizedSymbol...",
                 triggerBarTime = trigSnap?.time ?: 0L,
                 evaluatedAt = nowMillis,
-            )
-        }
-
-        // ── مدل مستقل «چنگال اندروز / Trading with the Pitchfork» (DeRoos) ──
-        // عیناً مثل مدل کین: هیچ شرط، اورراید یا گیت ایچیموکویی روی آن اعمال نمی‌شود.
-        if (activeModel == BitcoinStrategyModel.PITCHFORK_DEROOS) {
-            return evaluatePitchforkReport(
-                activeModel = activeModel,
-                macroCandles = alignedMacroCandles,
-                macroSnapshot = macroSnap,
-                strategySnapshot = stratSnap,
-                triggerSnapshot = trigSnap,
-                livePriceOverride = livePriceOverride,
-                effectiveId = effectiveId,
-                effectiveTitle = effectiveTitle,
-                nowMillis = nowMillis,
-                symbol = normalizedSymbol,
-            )
-        }
-
-        // ── مدل مستقل «خط میانهٔ اندروز + هم‌افزایی فیبوناچی» (کین) ──
-        // این مدل منطق ایچیموکوی خودش را ندارد؛ سنجشش کاملاً در KaneMedianLineEngine انجام می‌شود
-        // و همین‌جا قبل از هر اورراید/فیلتر ایچیموکو برمی‌گردد تا هیچ شرط ایچیموکویی روی آن اثر نگذارد.
-        if (activeModel == BitcoinStrategyModel.KANE_ML_FIB_SYNERGY) {
-            return evaluateKaneMedianLineReport(
-                activeModel = activeModel,
-                config = config,
-                macroCandles = alignedMacroCandles,
-                entryCandles = alignedStrategyCandles,
-                macroSnapshot = macroSnap,
-                strategySnapshot = stratSnap,
-                triggerSnapshot = trigSnap,
-                livePriceOverride = livePriceOverride,
-                effectiveId = effectiveId,
-                effectiveTitle = effectiveTitle,
-                nowMillis = nowMillis,
-                symbol = normalizedSymbol,
             )
         }
 
@@ -3692,7 +3378,7 @@ object IchimokuStrategyEngine {
             driveBookExtraDetail,
         )
 
-        val requiredMinRr = effectiveConfig.minRiskReward.coerceIn(1.50, 2.85)
+        val requiredMinRr = effectiveConfig.minRiskReward.coerceIn(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD, 2.85)
         val maxAllowedRr = 3.00
 
         // Check 13 & 15 early inputs so Optimal R:R (عدد مناسب R:R) can adapt to Trend Phase & Efficiency
@@ -3720,8 +3406,8 @@ object IchimokuStrategyEngine {
             else -> TrendPhase.CORE_EXPANSION
         }
 
-        // ── محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:1.50 .. 1:3.00] برای هر مدل ──
-        val modelBaseOptimalRr = activeModel.baseOptimalRr.coerceIn(1.50, 3.00)
+        // ── محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:2.00 .. 1:3.00] برای هر مدل ──
+        val modelBaseOptimalRr = activeModel.baseOptimalRr.coerceIn(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD, RiskAndCalendarEngine.MAX_ALLOWED_RISK_REWARD)
         val phaseRrBonus = when (trendPhase) {
             TrendPhase.GENESIS -> 0.25
             TrendPhase.CORE_EXPANSION -> 0.12
@@ -3800,7 +3486,7 @@ object IchimokuStrategyEngine {
             allPlateaus.lastOrNull { it < livePrice - trigSnap.atr14 * 0.4 }
         }
 
-        // ── Check 12: Room to HTF Plateau & Optimal R:R strictly in [1:1.50 .. 1:3.00] ──
+        // ── Check 12: Room to HTF Plateau & Optimal R:R strictly in [1:2.00 .. 1:3.00] ──
         val unclampedTp = if (nearestObstacle != null) {
             val distToObstacle = min(abs(nearestObstacle - livePrice), abs(nearestObstacle - sniperOptimal))
             if (distToObstacle / stopDist >= requiredMinRr) {
@@ -3822,7 +3508,7 @@ object IchimokuStrategyEngine {
             rawPrimaryTp
         }
 
-        // قفل قطعی تارگت سود در بازه [1.50R .. 3.00R] نسبت به نقطه ورود.
+        // قفل قطعی تارگت سود در بازه [2.00R .. 3.00R] نسبت به نقطه ورود.
         // هر دو کران با **یک** لنگر (`sniperOptimal` = همان قیمت ورودی پلن) و **یک** ۱R
         // (`stopDist` = همان ۱R شرط ۱۲ و انتخاب موج) سنجیده می‌شوند. پیش‌تر کران پایین روی
         // «ورود دورتر از SL» و کران بالا روی «ورود نزدیک‌تر به SL» بسته می‌شد؛ نتیجه این بود که
@@ -3865,11 +3551,11 @@ object IchimokuStrategyEngine {
         val finalTargetDist = if (guardedPlan.isUsable) guardedPlan.targetDistance else abs(effectiveTp - sniperOptimal)
 
         val rr = if (guardedPlan.isUsable) {
-            round2(guardedPlan.riskReward.coerceIn(1.50, 3.00))
+            round2(guardedPlan.riskReward.coerceIn(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD, RiskAndCalendarEngine.MAX_ALLOWED_RISK_REWARD))
         } else {
-            round2(computedOptimalRr.coerceIn(1.50, 3.00))
+            round2(computedOptimalRr.coerceIn(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD, RiskAndCalendarEngine.MAX_ALLOWED_RISK_REWARD))
         }
-        val effectiveOptimalRr = round2(max(computedOptimalRr, rr).coerceIn(1.50, 3.00))
+        val effectiveOptimalRr = round2(max(computedOptimalRr, rr).coerceIn(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD, RiskAndCalendarEngine.MAX_ALLOWED_RISK_REWARD))
 
         val obstacleClear = if (nearestObstacle == null) {
             true
@@ -3887,7 +3573,7 @@ object IchimokuStrategyEngine {
         }
         val tpBasisTextFa = buildString {
             append(selectedWaveLabel)
-            append(" (${round2(finalTakeProfit)}) · قفل در بازه [1:1.50 .. 1:3.00]")
+            append(" (${round2(finalTakeProfit)}) · قفل در بازه [1:2.00 .. 1:3.00]")
             if (nearestObstacle != null) {
                 append(" · قبل از دیوار فلت تایم بالاتر ($nearestObstacle)")
             }
@@ -3901,7 +3587,7 @@ object IchimokuStrategyEngine {
         )
         val optimalRrReasonTextFa = buildString {
             append(String.format(Locale.US, "عدد مناسب R:R = 1:%.2f", rr))
-            append(" (در بازه قفل‌شده [1:1.50 .. 1:3.00] · پایه ${activeModel.badgeFa}: 1:${String.format(Locale.US, "%.2f", modelBaseOptimalRr)}")
+            append(" (در بازه قفل‌شده [1:2.00 .. 1:3.00] · پایه ${activeModel.badgeFa}: 1:${String.format(Locale.US, "%.2f", modelBaseOptimalRr)}")
             append(" + ${trendPhase.badgeFa}")
             append(" + کارایی ER=${(erStrat * 100).toInt()}%")
             append(" ← هدف: $selectedWaveLabel · 🔒 حد ضرر ساختاری کاملاً ثابت و غیرپله‌ای)")
