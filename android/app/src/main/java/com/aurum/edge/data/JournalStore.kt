@@ -280,6 +280,7 @@ class JournalStore(
         symbolInput: String?,
         strategyId: String,
         ignoreTradeId: String? = null,
+        now: Long = System.currentTimeMillis(),
     ): String? {
         if (!symbolInput.isNullOrBlank()) {
             openTradeForSymbol(symbolInput)?.takeIf { it.id != ignoreTradeId }?.let { blocking ->
@@ -291,8 +292,44 @@ class JournalStore(
             return "⛔ تا تکلیف ${blocking.displayTradeNumberBadgeFa} (${blocking.symbol}) روشن شود، " +
                 "استراتژی «${blocking.strategyTitleFa}» معاملهٔ تازه باز نمی‌کند"
         }
+        // ── قاعدهٔ چهارم: دورهٔ خنک‌شدن پس از بسته شدن ─────────────────────────────
+        // کاربر: «معامله رو بستی و دقیقاً دوباره ادامهٔ همون روند رو باز کردی؛ این اشتباهه.»
+        // یک معاملهٔ بسته‌شده یعنی ساختار تست شد و جواب نداد؛ ورود فوری بعدی معمولاً همان
+        // روندِ شکست‌خورده را دوباره می‌خرد. جزئیات در `ReentryGuard`.
+        if (!symbolInput.isNullOrBlank()) {
+            reentryBlockReasonFa(symbolInput, strategyId, now)?.let { return it }
+        }
         return null
     }
+
+    /**
+     * دلیل فارسی مسدود بودن ورود تازه به‌خاطر دورهٔ خنک‌شدن بعد از بسته شدن معامله؛ `null` = آزاد.
+     *
+     * قاعده فقط به (نماد، استراتژی) حساس است؛ همین استراتژی روی نماد دیگر یا استراتژی دیگر روی
+     * همین نماد آزاد است.
+     */
+    fun reentryBlockReasonFa(
+        symbolInput: String,
+        strategyId: String,
+        now: Long = System.currentTimeMillis(),
+    ): String? {
+        val symbolKey = com.aurum.edge.core.V1Universe.normalize(symbolInput)
+        val strategyKey = com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        val list = _trades.value
+        val lastClosed = list.asSequence()
+            .filter { !it.isOpen && !it.isBacktest }
+            .filter { com.aurum.edge.core.V1Universe.normalize(it.symbol) == symbolKey }
+            .filter { com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == strategyKey }
+            .maxByOrNull { it.closedAt ?: 0L }
+            ?: return null
+        val losses = com.aurum.edge.core.ReentryGuard.consecutiveLosses(list, symbolKey, strategyKey)
+        val decision = com.aurum.edge.core.ReentryGuard.evaluate(lastClosed, losses, now)
+        return decision.reasonFa.takeIf { decision.blocked }
+    }
+
+    /** خلاصهٔ فارسی پنجرهٔ خنک‌شدن برای نمایش در کارت استراتژی؛ `null` یعنی آزاد. */
+    fun reentryStatusFa(symbolInput: String, strategyId: String): String? =
+        reentryBlockReasonFa(symbolInput, strategyId)
 
     /**
      * نگه‌داشتن فقط **یک** معاملهٔ باز به ازای هر نماد و هر استراتژی (قدیمی‌ترین برنده است).
@@ -727,12 +764,25 @@ class JournalStore(
         val target = _trades.value.firstOrNull { it.id == tradeId && it.isOpen } ?: return null
         val (_, netPnl) = RiskAndCalendarEngine.computeExitPnlUsd(target, exitPrice)
         val roundedNet = round(netPnl * 100.0) / 100.0
-        val closed = target.copy(
+        var closed = target.copy(
             closedAt = max(now, target.openedAt + 1L),
             exitPrice = exitPrice,
             exitReason = reason,
             pnlUsd = roundedNet,
         )
+        // دلیل برد/باخت همین حالا نوشته می‌شود تا در ژورنال و آمار هوش عصبی بمانَد.
+        // کندل‌ها فقط از حافظه خوانده می‌شوند (بدون شبکه و بدون دیسک) تا بستن معامله کند نشود.
+        closed = runCatching {
+            val candles = com.aurum.edge.data.LiveQuoteFetcher
+                .peekCachedCandles(closed.symbol, closed.interval)
+            val explanation = com.aurum.edge.core.TradeOutcomeExplainer.explain(closed, candles)
+            closed.copy(
+                outcomeReasonFa = explanation.textFa(),
+                outcomeTags = explanation.tags,
+                mfeR = explanation.mfeR,
+                maeR = explanation.maeR,
+            )
+        }.getOrDefault(closed)
         persist(_trades.value.map { if (it.id == tradeId) closed else it })
         settingsStore?.adjustBalance(roundedNet)
         val cfg = settingsStore?.read()

@@ -121,6 +121,9 @@ fun NeuralBrainScreen(
         // 🧠 عمق یادگیری: شبکهٔ ۱۸۰حالتی (فاز × سشن × نوسان × دالان R) از معامله‌های واقعی
         NeuralDepthCard(trades = trades, settings = settings)
 
+        // 🧾 «دلیل برد و دلیل باخت»: کدام حالت‌های بازار با برد و کدام‌ها با باخت همراه بوده‌اند.
+        TradeOutcomeReasonCard(trades = trades)
+
         // ── نوار خروجی فوری PDF تمام دیتاهای هوش مصنوعی و رگرسیون پارامترها ──
         Column(
             modifier = Modifier
@@ -2578,3 +2581,59 @@ private fun PerStrategyParamTuneRow(
     }
 }
 
+
+/**
+ * کارت «دلیل برد/باخت» در صفحهٔ هوش عصبی.
+ *
+ * هر معاملهٔ بسته در لحظهٔ بسته شدن یک متن دلیل می‌گیرد (`PaperTrade.outcomeReasonFa`) و چند
+ * برچسب قابل شمارش (`outcomeTags`). این کارت همان برچسب‌ها را می‌شمارد و می‌گوید کدام حالت
+ * بازار بیشترین همراهی را با باخت (و با برد) داشته است — بدون حدس، فقط از آمار معامله‌های خودتان.
+ */
+@Composable
+private fun TradeOutcomeReasonCard(trades: List<com.aurum.edge.core.PaperTrade>) {
+    val closed = remember(trades) {
+        trades.filter { !it.isOpen && !it.isBacktest && it.pnlUsd != null }
+    }
+    if (closed.isEmpty()) return
+    val explained = remember(closed) { closed.count { it.outcomeReasonFa.isNotBlank() } }
+    val summary = remember(closed) { com.aurum.edge.core.TradeOutcomeExplainer.summaryFa(closed) }
+    val stats = remember(closed) { com.aurum.edge.core.TradeOutcomeExplainer.aggregate(closed) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(AurumColors.SurfaceAlt)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "🧾 دلیل برد و باخت",
+            color = AurumColors.Gold,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "از ${closed.size} معاملهٔ بسته، برای $explained معامله دلیل نوشته شده است.",
+            color = AurumColors.TextSecondary,
+            fontSize = 10.sp,
+        )
+        Text(
+            text = summary,
+            color = AurumColors.TextPrimary,
+            fontSize = 11.sp,
+            lineHeight = 16.sp,
+        )
+        stats.take(5).forEach { stat ->
+            Text(
+                text = "• ${stat.titleFa}: ${stat.wins} برد / ${stat.losses} باخت · " +
+                    "نرخ برد ${"%.0f".format(java.util.Locale.US, stat.winRatePct)}٪ · " +
+                    "خالص ${"%+.2f".format(java.util.Locale.US, stat.netPnlUsd)} دلار",
+                color = if (stat.losses > stat.wins) Color(0xFFFF8A80) else AurumColors.TextSecondary,
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+            )
+        }
+    }
+}

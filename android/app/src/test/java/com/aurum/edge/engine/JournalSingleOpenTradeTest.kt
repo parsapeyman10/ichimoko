@@ -105,12 +105,26 @@ class JournalSingleOpenTradeTest {
         assertNotNull(other)
         assertEquals(2, journal.trades.value.count { it.isOpen })
 
-        // با روشن شدن تکلیف معاملهٔ اول، همان استراتژی دوباره مجاز می‌شود.
+        // با روشن شدن تکلیف معاملهٔ اول، پوزیشن باز نمی‌مانَد…
         journal.onLiveTick("BTC/USDT", PriceTick(price = first.takeProfit + 5.0, at = first.openedAt + 5_000L))
         assertNull(journal.openTradeForStrategy(BitcoinStrategyModel.BASE_ICHIMOKU.id))
-        assertNull(journal.openTradeBlockedByFa(BitcoinStrategyModel.BASE_ICHIMOKU.id))
-        val reopened = journal.openTrade(calc, note = "بعد از بسته شدن", strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id)
-        assertNotNull(reopened)
+        // …ولی ورود فوری دوباره به همان (نماد، استراتژی) ممنوع است: دورهٔ خنک‌شدن.
+        val blockRightAfterClose = journal.openTradeBlockedByFa("BTC/USDT", BitcoinStrategyModel.BASE_ICHIMOKU.id)
+        assertNotNull("بعد از بسته شدن باید دورهٔ خنک‌شدن فعال باشد", blockRightAfterClose)
+        assertTrue(blockRightAfterClose!!.contains("خنک"))
+        assertNull(
+            journal.openTrade(calc, note = "بلافاصله بعد از بسته شدن", strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id),
+        )
+        // بعد از گذشتن پنجرهٔ خنک‌شدن، همان استراتژی آزاد است.
+        val closedAt = journal.trades.value.first { !it.isOpen }.closedAt!!
+        val later = closedAt + com.aurum.edge.core.ReentryGuard.cooldownMs(first.interval, 0) + 60_000L
+        val reopened = journal.openTrade(
+            calc,
+            note = "بعد از دورهٔ خنک‌شدن",
+            now = later + 1_000L,
+            strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+        )
+        assertNotNull("پس از پایان پنجره باید ورود مجاز باشد", reopened)
     }
 
     @Test

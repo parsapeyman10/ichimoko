@@ -3278,6 +3278,36 @@ private fun ClosedJournalTradeRow(
                 }
             }
 
+            if (!trade.isOpen && trade.outcomeReasonFa.isNotBlank()) {
+                // «دلیل برد/باخت» که موتور عصبی هنگام بسته شدن معامله نوشته است.
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = if ((trade.pnlUsd ?: 0.0) >= 0.0) "🧠 دلیل این برد:" else "🧠 دلیل این باخت:",
+                        color = if ((trade.pnlUsd ?: 0.0) >= 0.0) Color(0xFF00E676) else Color(0xFFFF5252),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = trade.outcomeReasonFa,
+                        color = AurumColors.TextSecondary,
+                        fontSize = 10.sp,
+                        lineHeight = 15.sp,
+                    )
+                    if (trade.outcomeTags.isNotEmpty()) {
+                        Text(
+                            text = "برچسب‌ها: " + trade.outcomeTags.joinToString("، ") {
+                                com.aurum.edge.core.TradeOutcomeExplainer.Tags.titleFa(it)
+                            },
+                            color = AurumColors.Gold,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp,
+                        )
+                    }
+                }
+            }
             if (trade.isBacktest && trade.lessonFa.isNotBlank()) {
                 Text(
                     text = "🎓 درس این معامله: ${trade.lessonFa}",
