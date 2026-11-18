@@ -195,7 +195,9 @@ class SettingsStore(context: Context) {
             .takeIf { it.isFinite() && it >= 10.0 } ?: 100_000.0,
         targetCapital = prefs.getFloat(KEY_TARGET_CAPITAL, 100_000f).toDouble()
             .takeIf { it.isFinite() && it >= 100.0 } ?: 100_000.0,
-        useFixedDollarRisk = prefs.getBoolean(KEY_USE_FIXED_DOLLAR_RISK, true),
+        // ریسک هر معامله همیشه «مبلغ ثابت دلاری» است. کلید درصدی فقط به‌عنوان مقدار ذخیره‌شده
+        // نگه داشته می‌شود و هرگز مبلغ ثابت را کوچک نمی‌کند (خواستهٔ صریح کاربر: دقیقاً $5).
+        useFixedDollarRisk = true,
         fixedRiskUsd = prefs.getFloat(KEY_FIXED_RISK_USD, 5.0f).toDouble()
             .takeIf { it.isFinite() && it >= 0.5 } ?: 5.0,
         dailyLossLimitPercent = prefs.getFloat(KEY_DAILY_LOSS_LIMIT, 100.0f).toDouble()
@@ -325,20 +327,34 @@ class SettingsStore(context: Context) {
     fun update(transform: (AppSettings) -> AppSettings) {
         val proposed = transform(_settings.value)
         if (proposed.accountBalance != _settings.value.accountBalance) dayOpeningEquity()
+        // سقف‌های مدیریت سرمایه فقط از یک‌جا می‌آیند (CapitalPolicy) تا UI و ذخیره‌سازی هرگز
+        // دو عدد ناهمخوان نشان ندهند؛ قبلاً UI سقف ۳۰٪ را نشان می‌داد و این‌جا بی‌صدا ۲۵٪ می‌شد.
+        val capital = com.aurum.edge.core.CapitalPolicy(
+            accountBalance = proposed.accountBalance,
+            initialCapital = proposed.initialCapital,
+            targetCapital = proposed.targetCapital,
+            riskPercent = proposed.riskPercent,
+            useFixedDollarRisk = proposed.useFixedDollarRisk,
+            fixedRiskUsd = proposed.fixedRiskUsd,
+            dailyLossLimitPercent = proposed.dailyLossLimitPercent,
+            maxDrawdownLimitPercent = proposed.maxDrawdownLimitPercent,
+            maxOpenTrades = proposed.maxOpenTrades,
+            maxOpenTradesPerSymbol = proposed.maxOpenTradesPerSymbol,
+        ).sanitized().policy
         val next = proposed.copy(
             symbol = V1Universe.normalize(proposed.symbol).takeIf(V1Universe::valid) ?: "XAU/USD",
             interval = Interval.M5,
-            riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 10.0) ?: 0.5,
-            initialCapital = proposed.initialCapital.takeIf { it.isFinite() && it >= 10.0 } ?: proposed.accountBalance.coerceAtLeast(10.0),
-            targetCapital = proposed.targetCapital.takeIf { it.isFinite() && it >= 100.0 } ?: 100_000.0,
-            fixedRiskUsd = proposed.fixedRiskUsd.takeIf { it.isFinite() && it >= 0.5 } ?: 5.0,
-            dailyLossLimitPercent = proposed.dailyLossLimitPercent.takeIf { it.isFinite() }?.coerceIn(0.5, 25.0) ?: 3.0,
-            maxDrawdownLimitPercent = proposed.maxDrawdownLimitPercent.takeIf { it.isFinite() }?.coerceIn(1.0, 50.0) ?: 10.0,
+            riskPercent = capital.riskPercent,
+            initialCapital = capital.initialCapital,
+            targetCapital = capital.targetCapital,
+            fixedRiskUsd = capital.fixedRiskUsd,
+            dailyLossLimitPercent = capital.dailyLossLimitPercent,
+            maxDrawdownLimitPercent = capital.maxDrawdownLimitPercent,
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
             // سقف پوزیشن‌ها به‌صورت عدد صحیح و محدود ذخیره می‌شود تا مقدار خراب ذخیره‌شده
             // هرگز دروازهٔ ایمنی را باز نکند.
-            maxOpenTrades = proposed.maxOpenTrades.coerceIn(0, 12),
-            maxOpenTradesPerSymbol = proposed.maxOpenTradesPerSymbol.coerceIn(0, 4),
+            maxOpenTrades = capital.maxOpenTrades,
+            maxOpenTradesPerSymbol = capital.maxOpenTradesPerSymbol,
         )
         prefs.edit()
             .putString(KEY_API, next.apiKey.trim())
@@ -460,10 +476,33 @@ class SettingsStore(context: Context) {
     }
 
     /**
+     * مهاجرت یک‌بارهٔ «قانون دلار دقیق».
+     *
+     * اگر مبلغ ریسک ثابت ذخیره‌شده کمتر از یک دلار باشد (نتیجهٔ حالت درصدی یا یک مقدار
+     * جامانده از نسخه‌های قدیمی)، همان مبلغی که کاربر صریحاً خواسته — `$5.00` — بازگردانده
+     * می‌شود، تا معاملهٔ بعدی با زیان چند سنتی باز نشود. مقدارهای یک دلار و بالاتر دست‌نخورده
+     * می‌مانند. این مهاجرت فقط یک‌بار اجرا می‌شود.
+     */
+    @Synchronized
+    private fun applyExactDollarRiskMigration() {
+        if (prefs.getBoolean(KEY_EXACT_DOLLAR_V3986, false)) return
+        val stored = prefs.getFloat(KEY_FIXED_RISK_USD, 5.0f).toDouble()
+        val needsRestore = !stored.isFinite() || stored < 1.0
+        val editor = prefs.edit()
+        if (needsRestore) editor.putFloat(KEY_FIXED_RISK_USD, 5.0f)
+        editor.putBoolean(KEY_EXACT_DOLLAR_V3986, true).commit()
+        if (needsRestore) {
+            val fresh = read()
+            _settings.value = fresh.copy(fixedRiskUsd = 5.0, useFixedDollarRisk = true)
+        }
+    }
+
+    /**
      * مهاجرت یک‌باره موجودی حساب به ۱۰۰,۰۰۰ دلار و تنظیم کلید پیش‌فرض AvalAI در زمان اجرای برنامه روی دستگاه کاربر
      */
     fun ensureBalance100kMigrated() {
         runCatching { applyRiskBrakeMigration() }
+        runCatching { applyExactDollarRiskMigration() }
         val cur = read()
         val needsBalanceUpgrade = !prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false) && cur.accountBalance < 50_000.0
         val needsKeyPreload = cur.newsAiApiKey.isBlank()
@@ -573,6 +612,7 @@ class SettingsStore(context: Context) {
         private const val KEY_TARGET_CAPITAL = "target_capital_usd"
         private const val KEY_USE_FIXED_DOLLAR_RISK = "use_fixed_dollar_risk"
         private const val KEY_FIXED_RISK_USD = "fixed_risk_usd"
+        private const val KEY_EXACT_DOLLAR_V3986 = "exact_dollar_risk_v3986"
         private const val KEY_BALANCE_100K_MIGRATED_V3903 = "balance_100k_migrated_v3903"
         private const val KEY_ALL_15_COMBOS_MIGRATED_V3908 = "all_15_combos_migrated_v3908"
         private const val KEY_BASE_STRATEGY_CONFIG_JSON = "btc_base_strategy_config_json"

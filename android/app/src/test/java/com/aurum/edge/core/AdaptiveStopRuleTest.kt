@@ -51,7 +51,9 @@ class AdaptiveStopRuleTest {
         val strong = threshold(atrPercent = 0.40, spreadAtr = 0.80, cloudAtr = 1.00)
         val weak = threshold(atrPercent = 0.40, spreadAtr = 0.10, cloudAtr = 0.40)
         assertTrue("$strong must be lower than $weak", strong < weak)
-        assertTrue("strong trend should lock by 1.3R, was $strong", strong <= 1.3)
+        // قاعدهٔ کاربر: قفل سود هرگز پیش از ۱٫۵R شروع نمی‌شود؛ روند قوی فقط می‌تواند زودتر از
+        // حالت ضعیف باشد، نه زودتر از کف ۱٫۵R.
+        assertEquals("strong trend locks exactly on the 1.5R floor, was $strong", 1.5, strong, 1e-9)
     }
 
     @Test

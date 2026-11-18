@@ -64,9 +64,13 @@ enum class StrategyKind(val id: String, val label: String, val description: Stri
     );
 
     companion object {
+        /**
+         * تنها سبک موجود در برنامه، ایچیموکو + پرایس‌اکشن است. شناسه‌های سبک‌های حذف‌شده
+         * (`SUPER_PLUS`، `ICT_SMC`، `EMA_VWAP`، `VOLUME_BREAKOUT`، `MEAN_REVERSION`) دیگر
+         * پذیرفته نمی‌شوند و تنظیم قدیمی به همین سبک ایچیموکو برمی‌گردد.
+         */
         fun fromId(raw: String?): StrategyKind? = when (raw?.trim()?.uppercase(java.util.Locale.ROOT)) {
-            null, "", "ICHIMOKU_PRICE_ACTION", "ICHIMOKU", "SUPER_PLUS", "ICT_SMC",
-            "EMA_VWAP", "VOLUME_BREAKOUT", "MEAN_REVERSION" -> ICHIMOKU_PRICE_ACTION
+            null, "", "ICHIMOKU_PRICE_ACTION", "ICHIMOKU" -> ICHIMOKU_PRICE_ACTION
             else -> null
         }
     }
@@ -239,6 +243,19 @@ data class PaperTrade(
     /** متن درسِ همین معامله (اگر موتور یادگیری برایش درسی ساخته باشد). */
     val lessonFa: String = "",
     /**
+     * دلیل برد یا باختِ همین معامله، نوشتهٔ [TradeOutcomeExplainer] در لحظهٔ بسته شدن.
+     *
+     * خواستهٔ کاربر: «هوش عصبی باید دلیل هر برد و ضرر را بنویسد.» متن از داده‌های واقعی همان
+     * معامله ساخته می‌شود (مسیر قیمت، ابر لحظهٔ ورود، فاصله از کیه‌جین، ER، حجم، تعداد کندل).
+     */
+    val outcomeReasonFa: String = "",
+    /** برچسب‌های قابل شمارشِ همان دلیل (برای آمار «کدام حالت بیشتر باخت می‌دهد»). */
+    val outcomeTags: List<String> = emptyList(),
+    /** بیشترین سود شناور بر حسب R تا لحظهٔ خروج (-۱ = محاسبه نشد). */
+    val mfeR: Double = -1.0,
+    /** بیشترین ضرر شناور بر حسب R تا لحظهٔ خروج (-۱ = محاسبه نشد). */
+    val maeR: Double = -1.0,
+    /**
      * ── وضعیت بازار در لحظهٔ ورود (برای آموزش شبکهٔ عصبی) ─────────────────────
      *
      * چرا روی خود معامله ذخیره می‌شود؟ چون «آموزش از ژورنال» باید بتواند معاملات قدیمی را
@@ -252,6 +269,23 @@ data class PaperTrade(
     val stateDistKijunAtr: Double = -1.0,
     val stateKumoThicknessAtr: Double = -1.0,
     val stateVolumeRatio20: Double = -1.0,
+
+    // ── سنجش تکنیکال در لحظهٔ ورود (فقط داده — هیچ اثری در تصمیم ندارد) ──────────
+    // تعداد رأی‌های «خرید / خنثی / فروش» نوار سنجش تکنیکال در تایم‌فریم ۱ ساعته و ۴ ساعته.
+    // مقدار `-1` یعنی داده کافی نبود (کندل‌های آن تایم‌فریم در کش نبودند) — عدد ساختگی
+    // جای آن نمی‌نشیند. از این داده برای سنجش «نرخ برد در هر وضعیت بازار» استفاده می‌شود.
+    val tech1hBuy: Int = -1,
+    val tech1hNeutral: Int = -1,
+    val tech1hSell: Int = -1,
+    val tech4hBuy: Int = -1,
+    val tech4hNeutral: Int = -1,
+    val tech4hSell: Int = -1,
+    /**
+     * `true` یعنی این اسنپ‌شات **بعداً** و فقط از کندل‌های بسته‌شدهٔ تا لحظهٔ ورود بازسازی شده است
+     * (معامله‌های قدیمی‌تر از نسخه‌ای که این فیلد را ثبت می‌کند). عدد همان چیزی است که در لحظهٔ
+     * ورود دیده می‌شد؛ فقط زمانِ ثبتش بعدتر است و همین در ژورنال صریح نوشته می‌شود.
+     */
+    val techSnapshotRebuilt: Boolean = false,
 ) {
     val displayTradeNumber: Int
         get() = if (tradeNumber > 0) tradeNumber else ((kotlin.math.abs(id.hashCode()) % 9000) + 1)
@@ -262,6 +296,50 @@ data class PaperTrade(
     val assetClass: AssetClass get() = AssetClass.of(symbol)
 
     val riskPerOz: Double get() = kotlin.math.abs(entry - (initialStopLoss ?: stopLoss))
+
+    /** متن خوانای سنجش تکنیکال ۱ ساعته در لحظهٔ ورود؛ «—» یعنی داده نبود. */
+    val tech1hFa: String
+        get() = techText(tech1hBuy, tech1hNeutral, tech1hSell)
+
+    /** متن خوانای سنجش تکنیکال ۴ ساعته در لحظهٔ ورود؛ «—» یعنی داده نبود. */
+    val tech4hFa: String
+        get() = techText(tech4hBuy, tech4hNeutral, tech4hSell)
+
+    /**
+     * خط آمادهٔ نمایش «سنجش تکنیکال لحظهٔ ورود» برای ژورنال و کارت معاملات باز.
+     *
+     * اگر داده‌ای برای آن تایم‌فریم ثبت نشده باشد، صریح نوشته می‌شود «ثبت نشد» تا با «خنثی»
+     * اشتباه گرفته نشود. این متن هرگز بازمحاسبه نمی‌شود؛ همان اسنپ‌شات لحظهٔ ورود است.
+     */
+    val techSnapshotLineFa: String
+        get() {
+            fun part(label: String, buy: Int, neutral: Int, sell: Int, name: String): String {
+                val known = buy >= 0 && neutral >= 0 && sell >= 0 && (buy + neutral + sell) > 0
+                return if (known) "$label: $buy خرید / $neutral خنثی / $sell فروش ($name)" else "$label: ثبت نشد"
+            }
+            val suffix = if (techSnapshotRebuilt) " · بازسازی از کندل‌های تا لحظهٔ ورود" else ""
+            return "🧭 سنجش تکنیکال لحظهٔ ورود · " +
+                part("۱ ساعته", tech1hBuy, tech1hNeutral, tech1hSell, tech1hLabelFa) + " · " +
+                part("۴ ساعته", tech4hBuy, tech4hNeutral, tech4hSell, tech4hLabelFa) + suffix
+        }
+
+    /** برچسب وضعیت (خرید قوی/خرید/خنثی/فروش/فروش قوی) برای تایم‌فریم ۱ ساعته. */
+    val tech1hLabelFa: String
+        get() = techLabel(tech1hBuy, tech1hSell)
+
+    /** برچسب وضعیت برای تایم‌فریم ۴ ساعته. */
+    val tech4hLabelFa: String
+        get() = techLabel(tech4hBuy, tech4hSell)
+
+    private fun techText(buy: Int, neutral: Int, sell: Int): String =
+        if (buy < 0 || neutral < 0 || sell < 0 || buy + neutral + sell <= 0) {
+            "—"
+        } else {
+            "$buy خرید · $neutral خنثی · $sell فروش"
+        }
+
+    private fun techLabel(buy: Int, sell: Int): String =
+        if (buy < 0 || sell < 0 || buy + sell <= 0) "—" else TechnicalRatingInsight.bucketOf(buy, sell).titleFa
     val effectiveOptimalRr: Double
         get() = if (optimalRiskReward >= 1.5) optimalRiskReward.coerceIn(1.5, 3.0) else riskReward.coerceIn(1.5, 3.0)
 
@@ -280,7 +358,7 @@ data class PaperTrade(
         if (rrBreakdownFa.isNotBlank()) return rrBreakdownFa
         val optStr = String.format(java.util.Locale.US, "%.2f", effectiveOptimalRr)
         val model = BitcoinStrategyModel.fromId(strategyId)
-        val modelHint = "${model.badgeFa} (${model.combinationCategoryFa} · پایه 1:${String.format(java.util.Locale.US, "%.2f", model.baseOptimalRr.coerceIn(1.5, 3.0))})"
+        val modelHint = "${model.badgeFa} (${model.combinationCategoryFa} · پایه 1:${String.format(java.util.Locale.US, "%.2f", model.baseOptimalRr.coerceIn(2.0, 3.0))})"
         return "عدد مناسب R:R این معامله: 1:$optStr (در بازه قفل‌شده ۱.۵ تا ۳.۰) — بر اساس $modelHint · 🔒 حد ضرر ساختاری کاملاً ثابت و غیرپله‌ای"
     }
 

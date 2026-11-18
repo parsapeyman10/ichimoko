@@ -10,6 +10,7 @@ import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.round
@@ -53,7 +54,10 @@ data class RiskCalculationResult(
     val riskBudgetUsd: Double,
     val stopDistance: Double,
     val targetDistance: Double,
+    /** R خالص: (سود خالص در TP) ÷ (زیان خالص در SL). همان عددی که کیف پول نشان می‌دهد. */
     val riskReward: Double,
+    /** R خامِ قیمتی: فاصلهٔ حد سود تا ورود ÷ فاصلهٔ حد ضرر (بدون کارمزد). */
+    val grossRiskReward: Double = 0.0,
     val positionUnits: Double,
     val unitLabel: String,
     val standardLots: Double,
@@ -73,6 +77,8 @@ data class RiskCalculationResult(
     val liquidationBufferR: Double = 0.0,
     /** دلیل انتخاب اهرم (سقف مرجع / سقف ضدلیکویید / نیاز مارجین). */
     val leverageReasonFa: String = "",
+    /** کارمزد + اسپرد رفت‌وبرگشت همان حجم (دلار). */
+    val roundTripFeeUsd: Double = 0.0,
     /** ۱R به‌صورت درصدی از قیمت ورود. */
     val stopPctOfPrice: Double = 0.0,
     /** فاصلهٔ حد سود به‌صورت درصدی از قیمت ورود. */
@@ -83,7 +89,16 @@ data class RiskCalculationResult(
     val planNoteFa: String = "",
 ) {
     val totalRoundTripFeeUsd: Double
-        get() = commissionUsd + spreadCostUsd
+        get() = if (roundTripFeeUsd > 0.0) roundTripFeeUsd else commissionUsd + spreadCostUsd
+
+    /**
+     * R خالص = سود خالص در TP ÷ زیان خالص در SL (کارمزد و اسپرد کسر شده‌اند).
+     *
+     * از نسخهٔ ۳.۹.۸۱ خودِ `riskReward` هم همین عدد است تا هر جا «۱٫۵ تا ۳R» نوشته می‌شود،
+     * با دلاری که واقعاً به حساب می‌رسد یکی باشد. نسبت خامِ قیمتی در `grossRiskReward` است.
+     */
+    val netRiskReward: Double
+        get() = if (netLossAtSlUsd > 1e-9) netProfitAtTpUsd / netLossAtSlUsd else riskReward
 
     fun buildVenueRulesSummaryFa(): String =
         VenueSpecs.of(symbol).buildRulesSummaryFa(entry, positionUnits)
@@ -256,12 +271,21 @@ object RiskAndCalendarEngine {
         val perUnitStopUsd = PaperOrderRules.quotePnlToUsd(symbol, stopDistance, entry)
         if (!perUnitStopUsd.isFinite() || perUnitStopUsd <= 1e-9) return null
 
-        val rawUnits = riskBudgetUsd / perUnitStopUsd
-        val positionUnits = round4(max(0.0001, rawUnits))
+        val spec = VenueSpecs.of(symbol)
+        // ── بودجهٔ ریسک، **خالص** است: همان چیزی که وقتی حد ضرر بخورد از حساب کم می‌شود ──
+        // قبلاً حجم فقط از فاصلهٔ حد ضرر ساخته می‌شد و کارمزد/اسپرد بیرون می‌ماند، پس زیان
+        // واقعی از مبلغ تنظیم‌شده بیشتر بود و «سود در TP» هم به همان اندازه باد می‌کرد.
+        // کارمزد رفت‌وبرگشت با حجم خطی است، پس «کارمزد هر واحد» ثابت است و معادله ساده می‌شود:
+        //   units × (زیان هر واحد در SL + کارمزد هر واحد) = بودجهٔ ریسک
+        val feePerUnitUsd = spec.totalRoundTripFeeUsd(entry, 1.0).coerceAtLeast(0.0)
+        val rawUnits = riskBudgetUsd / (perUnitStopUsd + feePerUnitUsd)
+        // حجم با دقت ریز (۶ رقم اعشار) نگه داشته می‌شود تا زیان خالص **دقیقاً** برابر مبلغ
+        // تنظیم‌شده دربیاید (مثلاً ۵٫۰۰ دلار، نه ۴٫۹۵ با پایین‌گرد به گام ۰٫۰۱ اونس).
+        // این موتور کاغذی است؛ برای سفارش واقعی، گام بازار را کارگزار اعمال می‌کند.
+        val positionUnits = round6(max(0.0001, rawUnits))
         val unitLabel = PaperOrderRules.unitFor(symbol)
         val (standardLots, lotDesc) = computeStandardLots(symbol, positionUnits, unitLabel)
-
-        val spec = VenueSpecs.of(symbol)
+        val roundTripFeeUsd = round2(positionUnits * feePerUnitUsd)
         val notionalUsd = PaperOrderRules.quotePnlToUsd(symbol, positionUnits * entry, entry)
         // اهرم دیگر یک عدد ثابت نیست: از فاصلهٔ حد ضرر، هزینهٔ رفت‌وبرگشت و مارجین نگهداری محاسبه می‌شود
         // تا لیکوییدیشن همیشه حداقل ۲.۵R دورتر از حد ضرر بماند.
@@ -287,22 +311,51 @@ object RiskAndCalendarEngine {
         val commissionUsd = spec.commissionUsd(entry, positionUnits) * 2.0
         val spreadCostUsd = spec.spreadCostUsd(entry, positionUnits)
 
-        val riskReward = targetDistance / stopDistance
-        val exactProfitAtTpUsd = riskBudgetUsd * riskReward
-        val exactLossAtSlUsd = riskBudgetUsd
+        // ── هدف: سود **خالص** در TP باید همان R پلن باشد ───────────────────────────
+        // اگر TP سر جایش بماند، کارمزد از سود کم می‌شود و «۲٫۵R» در عمل کمتر می‌شود.
+        // پس هدف را طوری می‌چینیم که «سود ناخالص − کارمزد» = R پلن × بودجهٔ ریسک شود:
+        //   فاصلهٔ لازم = (سود خالص خواسته‌شده + کارمزد) ÷ (ارزش هر واحد حرکت قیمت)
+        // یعنی اگر ریسک ۵ دلار است، در ۱٫۵R دقیقاً ۷٫۵۰ و در ۳R دقیقاً ۱۵٫۰۰ دلار به حساب
+        // می‌رسد — همان قانون کاربر. اگر کارمزد سنگین باشد، فقط **فاصلهٔ قیمتی** هدف دورتر
+        // می‌رود؛ مقدار دلاری سود عوض نمی‌شود.
+        val perUnitTargetUsd = PaperOrderRules.quotePnlToUsd(symbol, targetDistance, entry)
+        val netFeeUsd = positionUnits * feePerUnitUsd
+        val slopeUsdPerUnitPrice = if (targetDistance > 1e-12) perUnitTargetUsd / targetDistance else 0.0
+        val planR = if (stopDistance > 1e-12) targetDistance / stopDistance else 0.0
+        val desiredNetUsd = planR * riskBudgetUsd
+        val requiredTargetDistance = if (slopeUsdPerUnitPrice > 1e-12 && positionUnits > 1e-12) {
+            (desiredNetUsd + netFeeUsd) / (positionUnits * slopeUsdPerUnitPrice)
+        } else {
+            targetDistance
+        }
+        // سقف ۳R روی «پول» اعمال می‌شود (desiredNetUsd خودش از R پلن می‌آید و R پلن هم
+        // در TradePlanGuard در [1.5 .. 3] قفل است)، نه روی فاصلهٔ قیمتی؛ وگرنه کارمزد
+        // سنگین سود را از قانون پایین‌تر می‌آورد.
+        val adjustedTargetDistance = requiredTargetDistance
+        val dirSign = if (inferredAction == SignalAction.BUY) 1.0 else -1.0
+        val adjustedTakeProfit = TradePlanGuard.roundToTick(symbol, entry + dirSign * adjustedTargetDistance)
+
+        val grossProfitAtTp = positionUnits * PaperOrderRules.quotePnlToUsd(symbol, adjustedTargetDistance, entry)
+        val grossLossAtSl = positionUnits * perUnitStopUsd
+        val exactProfitAtTpUsd = (grossProfitAtTp - netFeeUsd).coerceAtLeast(0.0)
+        val exactLossAtSlUsd = grossLossAtSl + netFeeUsd
+        val netRiskReward = if (exactLossAtSlUsd > 1e-9) exactProfitAtTpUsd / exactLossAtSlUsd else planR
+        val grossRiskReward = if (stopDistance > 1e-12) adjustedTargetDistance / stopDistance else planR
 
         return RiskCalculationResult(
             symbol = symbol,
             action = inferredAction,
             entry = entry,
             stopLoss = stopLoss,
-            takeProfit = takeProfit,
+            // هدفِ ذخیره‌شده همان هدفی است که کارمزد در آن حساب شده است (نه عدد خام پلن).
+            takeProfit = adjustedTakeProfit,
             accountBalance = accountBalance,
             riskPercent = round2(effectiveRiskPct),
             riskBudgetUsd = round2(riskBudgetUsd),
             stopDistance = stopDistance,
             targetDistance = targetDistance,
-            riskReward = round2(riskReward),
+            riskReward = round2(netRiskReward),
+            grossRiskReward = round2(grossRiskReward),
             positionUnits = positionUnits,
             unitLabel = unitLabel,
             standardLots = round4(standardLots),
@@ -312,9 +365,11 @@ object RiskAndCalendarEngine {
             marginRequiredUsd = round2(marginRequiredUsd),
             commissionUsd = round2(commissionUsd),
             spreadCostUsd = round2(spreadCostUsd),
-            grossProfitAtTpUsd = round2(exactProfitAtTpUsd),
+            roundTripFeeUsd = roundTripFeeUsd,
+            grossProfitAtTpUsd = round2(grossProfitAtTp),
             netProfitAtTpUsd = round2(exactProfitAtTpUsd),
-            grossLossAtSlUsd = round2(exactLossAtSlUsd),
+            grossLossAtSlUsd = round2(grossLossAtSl),
+            // زیان خالص = بودجهٔ ریسکِ تنظیم‌شده (کارمزد و اسپرد داخلش هست).
             netLossAtSlUsd = round2(exactLossAtSlUsd),
             liquidationPrice = leverageDecision.liquidationPrice,
             liquidationBufferR = leverageDecision.liquidationBufferR,
@@ -330,12 +385,21 @@ object RiskAndCalendarEngine {
         )
     }
 
-    const val MIN_REQUIRED_RISK_REWARD: Double = 1.5
+    /**
+     * مبلغ ریسک ثابت دلاری که همهٔ مسیرهای ورود باید به موتور بدهند.
+     *
+     * کلید «درصد موجودی» دیگر اجازه ندارد این مبلغ را کوچک کند؛ تنها وقتی هیچ مبلغ ثابت
+     * معتبری تنظیم نشده باشد `null` برمی‌گردد و موتور به درصد موجودی برمی‌گردد.
+     */
+    fun fixedRiskUsdOrNull(configuredUsd: Double): Double? =
+        if (configuredUsd.isFinite() && configuredUsd > 0.0) configuredUsd else null
+
+    const val MIN_REQUIRED_RISK_REWARD: Double = 2.0
     const val MAX_ALLOWED_RISK_REWARD: Double = 3.0
     const val TREND_RUNNER_THRESHOLD_R: Double = 2.85
 
     /**
-     * تضمین می‌کند نسبت سود به ضرر (R:R) هر معامله همیشه دقیقاً در بازه قفل‌شده `1:1.5` تا `1:3.0` (`1.5 <= R:R <= 3.0`) باشد.
+     * تضمین می‌کند نسبت سود به ضرر (R:R) هر معامله همیشه دقیقاً در بازه قفل‌شده `1:2.0` تا `1:3.0` (`2.0 <= R:R <= 3.0`) باشد.
      */
     fun enforceMinimumRiskReward(
         symbolInput: String,
@@ -874,3 +938,4 @@ object RiskAndCalendarEngine {
 
 private fun round2(v: Double): Double = round(v * 100.0) / 100.0
 private fun round4(v: Double): Double = round(v * 10_000.0) / 10_000.0
+private fun round6(v: Double): Double = round(v * 1_000_000.0) / 1_000_000.0

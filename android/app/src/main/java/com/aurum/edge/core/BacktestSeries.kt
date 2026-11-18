@@ -82,13 +82,4 @@ object BacktestSeries {
         val start = if (limit > 0 && end - limit > 0) end - limit else 0
         return candles.subList(start, end)
     }
-
-    /**
-     * کندل‌هایی که کامل داخل بازهٔ `untilMs` تمام شده‌اند (برای نمایش چارت تا لحظهٔ فعلی).
-     */
-    fun barsUntil(candles: List<Candle>, sizeMs: Long, untilMs: Long, count: Int): List<Candle> {
-        val closed = closedUpTo(candles, sizeMs, untilMs + sizeMs, 0)
-        if (count <= 0 || closed.size <= count) return closed
-        return closed.subList(closed.size - count, closed.size)
-    }
 }
