@@ -1039,11 +1039,13 @@ object KaneMedianLineEngine {
         val triggerType = if (breakoutNow) StrategyTriggerType.KANE_CHANNEL_BREAKOUT
         else StrategyTriggerType.KANE_CHANNEL_PULLBACK
         val entry = viewClose
-        // حد ضرر: پشت خط میانی با بافر، و در پولبک پشت نوار پایینی اگر نزدیک‌تر است.
-        val stopCandidate = if (pullbackNow) min(viewMid, viewLower) else viewMid
-        val viewStop = stopCandidate - 0.25 * atr
+        // حد ضرر کلاسیک خط روندی: در «شکست»، پشت همان نوارِ شکسته‌شده (نه خط میانی دور) و در
+        // «پولبک»، پشت خط میانی. بافر ۰٫۱۵ ATR تا نویز کندل ورود، حد ضرر را نزند.
+        val viewStop = if (breakoutNow) viewUpper - 0.15 * atr else viewMid - 0.15 * atr
         val risk = entry - viewStop
         if (risk <= 0.0 || risk > 2.0 * atr) return null
+        // سقف «دویدن دنبال قیمت»: از نوار شکسته‌شده بیشتر از ۱٫۵ ATR دور نشویم.
+        if (breakoutNow && entry - viewUpper > 1.5 * atr) return null
         var rr = 2.5
         if (rr < config.minRiskReward) rr = config.minRiskReward
         if (rr > config.maxRiskReward) rr = config.maxRiskReward

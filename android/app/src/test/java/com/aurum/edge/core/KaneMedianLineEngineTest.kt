@@ -240,16 +240,17 @@ class KaneMedianLineEngineTest {
             val open = price
             val close = price + 0.35
             val step = i.toLong() * 900_000L
-            rising += com.aurum.edge.domain.Candle(step, open, close + 0.10, open - 0.10, close, 1_000.0, true)
+            // دامنهٔ کندل ~۰٫۶۵ (ATR همین حدود) تا نسبت ریسک به ATR واقع‌بینانه بماند.
+            rising += com.aurum.edge.domain.Candle(step, open, close + 0.25, open - 0.25, close, 1_000.0, true)
             price = close
         }
         val breakoutOpen = price
-        val breakoutClose = price + 3.0
+        val breakoutClose = price + 0.80
         rising += com.aurum.edge.domain.Candle(
-            80L * 900_000L, breakoutOpen, breakoutClose + 0.10, breakoutOpen - 0.05, breakoutClose, 1_500.0, true,
+            80L * 900_000L, breakoutOpen, breakoutClose + 0.05, breakoutOpen - 0.10, breakoutClose, 1_500.0, true,
         )
 
-        val channel = KaneMedianLineEngine.trendChannel(rising.dropLast(1), 40, 1.0)
+        val channel = KaneMedianLineEngine.trendChannel(rising.dropLast(1), 40, 0.65)
         assertTrue("کانال باید ساخته شود", channel != null)
         assertTrue("قیمت باید روی خط راه رفته باشد", channel!!.r2 >= 0.9)
 
