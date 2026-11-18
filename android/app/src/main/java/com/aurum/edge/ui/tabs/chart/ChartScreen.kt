@@ -135,7 +135,7 @@ fun ChartScreen(
         allTrades
             .asSequence()
             .filter { !it.isOpen && !it.isBacktest && V1Universe.normalize(it.symbol) == appSymbol }
-            .maxByOrNull { it.closedAt }
+            .maxByOrNull { it.closedAt ?: 0L }
     }
     val markerTrade = activePositionTrade ?: lastClosedForSymbol
 
@@ -1176,7 +1176,7 @@ private fun NativeIchimokuCanvasChart(
                         drawCircle(color = color, radius = radius, center = Offset(xOfSlot(slot), cy), style = Stroke(width = 2.6f))
                     }
                     val entrySlot = slotOfTime(markerTrade.openedAt)
-                    val exitSlot = if (!markerTrade.isOpen) slotOfTime(markerTrade.closedAt) else null
+                    val exitSlot = if (!markerTrade.isOpen) slotOfTime(markerTrade.closedAt ?: 0L) else null
                     // بهترین کندل مسیر: بیشترین سود شناور در جهت معامله (بالاترین سقف در خرید،
                     // پایین‌ترین کف در فروش) بین کندل ورود تا خروج (یا آخرین کندل باز).
                     val lastPathSlot = exitSlot ?: visibleSlice.lastIndex
@@ -1188,7 +1188,7 @@ private fun NativeIchimokuCanvasChart(
                     } else null
                     if (entrySlot != null) ring(entrySlot, Color(0xFFFF9800), 10f)
                     if (exitSlot != null && exitSlot != entrySlot) {
-                        val win = markerTrade.pnlUsd >= 0.0
+                        val win = (markerTrade.pnlUsd ?: 0.0) >= 0.0
                         ring(exitSlot, if (win) Color(0xFF00E676) else Color(0xFFFF5252), 10f)
                     }
                     if (bestSlot != null && bestSlot != entrySlot && bestSlot != exitSlot) {
