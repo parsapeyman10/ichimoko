@@ -1000,7 +1000,9 @@ object KaneMedianLineEngine {
         val atr = atrSeries.lastOrNull() ?: 0.0
         if (!atr.isFinite() || atr <= 0.0) return null
         val lookback = 40
-        val channel = trendChannel(candles, lookback, atr) ?: return null
+        // کانال باید از کندل‌های **قبل از** کندل تصمیم ساخته شود؛ اگر کندل شکست داخل رگرسیون
+        // بیاید، خودش نوار را بالا می‌کشد و «شکست» هرگز دیده نمی‌شود.
+        val channel = trendChannel(candles.dropLast(1), lookback, atr) ?: return null
         // کانال فقط وقتی معنا دارد که قیمت واقعاً روی خط راه رفته باشد و عرضش از نوسان عادی
         // بزرگ‌تر نباشد؛ وگرنه «هر شکستی» سیگنال می‌شود.
         if (channel.r2 < 0.55) return null
@@ -1016,13 +1018,11 @@ object KaneMedianLineEngine {
         val viewUpper = view(channel.upperNow)
         val viewLower = view(channel.lowerNow)
 
-        // نوار همان کندل قبلی (برای تشخیص «عبور» نه «بودن»)
+        // «عبور» یعنی کلوز قبلی داخل کانال بوده و کلوز فعلی بیرون آن بسته شده؛ نه اینکه قیمت
+        // از قبل بیرون بوده باشد.
         val previousClose = candles[candles.lastIndex - 1].close
-        val previousChannel = trendChannel(candles.dropLast(1), lookback, atr) ?: return null
-        val viewPrevUpper = view(previousChannel.upperNow)
         val viewPrevClose = view(previousClose)
-
-        val breakoutNow = viewPrevClose <= viewPrevUpper && viewClose > viewUpper
+        val breakoutNow = viewPrevClose <= viewUpper && viewClose > viewUpper
         // پولبک: شکست در ۱۰ کندل اخیر، بازگشت به داخل کانال، حفظ خط میانی
         var breakoutIdx = -1
         for (i in max(lookback, candles.lastIndex - 10)..candles.lastIndex) {
