@@ -15,6 +15,10 @@ import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.round
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,8 +47,38 @@ class JournalStore(
         }
     }
 
-    private val _trades = MutableStateFlow(loadFromDisk())
+    /**
+     * خواندن دفترچه در دو مرحله انجام می‌شود و این عمدی است:
+     *
+     * ۱) فایل اصلی (`user_journal_v1.json`) همان لحظه و همگام خوانده می‌شود — چند کیلوبایت است و
+     *    رابط کاربری بلافاصله معامله‌ها را می‌بیند.
+     * ۲) ادغام شاردهای روزانه و بک‌آپ‌ها که صدها فایل و چند مگابایت است، روی رشتهٔ پس‌زمینه
+     *    انجام می‌شود و نتیجه‌اش بعداً در همان StateFlow می‌نشیند.
+     *
+     * دلیل: در نسخهٔ ۳٫۱۲٫۰ همین ادغام داخل سازنده و روی رشتهٔ اصلی اجرا می‌شد و روی گوشی کاربر
+     * ۲۶۵۳ میلی‌ثانیه رشتهٔ اصلی را قفل می‌کرد (گزارش STALL در `AppContainer.<init>`). حالا
+     * `onCreate` هیچ I/O سنگینی ندارد.
+     */
+    private val _trades = MutableStateFlow(loadLocalJournal())
     val trades: StateFlow<List<PaperTrade>> = _trades.asStateFlow()
+
+    /** وضعیت ادغام شاردهای پس‌زمینه؛ برای تست و برای شفافیت در گزارش خطا. */
+    private val _shardsMerged = MutableStateFlow(false)
+    val shardsMerged: StateFlow<Boolean> = _shardsMerged.asStateFlow()
+
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        if (isDefaultJournalFile) {
+            runCatching {
+                ioScope.launch {
+                    runCatching { mergePhoneShardsInBackground() }
+                }
+            }
+        } else {
+            _shardsMerged.value = true
+        }
+    }
 
     private fun ensureSequentialTradeNumbers(list: List<PaperTrade>): List<PaperTrade> {
         if (list.isEmpty()) return list
@@ -102,47 +136,81 @@ class JournalStore(
         }.sortedByDescending { it.openedAt }
     }
 
+    /** خواندن همگام و سبک فایل اصلی دفترچه (بدون شاردها). */
     @Synchronized
-    private fun loadFromDisk(): List<PaperTrade> {
-        val localList = run {
-            val candidates = listOf(file, File(file.path + ".bak"))
-            var found: List<PaperTrade>? = null
-            for (candidate in candidates) {
-                if (!candidate.exists()) continue
-                val parsed = runCatching {
-                    json.decodeFromString(listSerializer, candidate.readText())
-                }.getOrNull()
-                if (parsed != null) {
-                    found = parsed
-                    break
-                }
-            }
-            found.orEmpty()
-        }
+    private fun loadLocalJournal(): List<PaperTrade> = ensureSequentialTradeNumbers(readLocalFile())
 
-        if (!isDefaultJournalFile) {
-            return ensureSequentialTradeNumbers(localList)
-        }
-
-        // ادغام هوشمند با شاردهای روزانه و بک‌آپ‌های خودکار روزانه در حافظه گوشی
+    /**
+     * ادغام پس‌زمینه‌ای شاردهای روزانه با آنچه همین حالا در حافظه است.
+     *
+     * اگر در این فاصله کاربر معامله‌ای ثبت/بسته کرده باشد، لیست جاری دوباره با شاردها ادغام
+     * می‌شود؛ چیزی از دست نمی‌رود و لیست شاردها جای لیست زنده را نمی‌گیرد.
+     */
+    @Synchronized
+    private fun mergePhoneShardsInBackground() {
         val shardList = runCatching {
             PhoneStorageVaultManager.loadAllTradesFromPhoneShards(appContext)
         }.getOrDefault(emptyList())
-
+        val current = _trades.value
         if (shardList.isEmpty()) {
-            return ensureSequentialTradeNumbers(localList)
+            _shardsMerged.value = true
+            return
         }
         val merged = LinkedHashMap<String, PaperTrade>()
-        for (t in localList) {
-            merged[t.id] = t
-        }
+        for (t in current) merged[t.id] = t
+        var changed = false
         for (t in shardList) {
             val existing = merged[t.id]
-            if (existing == null || (!t.isOpen && existing.isOpen)) {
+            if (existing == null) {
                 merged[t.id] = t
+                changed = true
+            } else if (!t.isOpen && existing.isOpen && existing.isBacktest == t.isBacktest) {
+                // شارد بسته‌شدنِ معامله را می‌داند ولی حافظه نه: نسخهٔ شارد برنده است.
+                merged[t.id] = t
+                changed = true
             }
         }
-        return ensureSequentialTradeNumbers(merged.values.toList())
+        if (changed) {
+            _trades.value = ensureSequentialTradeNumbers(merged.values.toList())
+        }
+        _shardsMerged.value = true
+    }
+
+    @Synchronized
+    private fun readLocalFile(): List<PaperTrade> = run {
+        val candidates = listOf(file, File(file.path + ".bak"))
+        var found: List<PaperTrade>? = null
+        for (candidate in candidates) {
+            if (!candidate.exists()) continue
+            val parsed = runCatching {
+                json.decodeFromString(listSerializer, candidate.readText())
+            }.getOrNull()
+            if (parsed != null) {
+                found = parsed
+                break
+            }
+        }
+        found.orEmpty()
+    }
+
+    /**
+     * انتظار برای پایان ادغام پس‌زمینهٔ شاردها (حداکثر [timeoutMs]).
+     *
+     * @return true اگر ادغام تمام شده باشد.
+     */
+    fun awaitShardMerge(timeoutMs: Long = 5_000): Boolean {
+        if (_shardsMerged.value) return true
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (_shardsMerged.value) return true
+            try {
+                Thread.sleep(20)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return _shardsMerged.value
+            }
+        }
+        return _shardsMerged.value
     }
 
     @Synchronized
