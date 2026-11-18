@@ -80,8 +80,28 @@ class JournalSingleOpenTradeTest {
         assertNotNull(reason)
         assertTrue(reason!!.contains("تکلیف"))
 
-        // استراتژی دیگر آزاد است.
-        val other = journal.openTrade(calc, note = "استراتژی دیگر", strategyId = BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT.id)
+        // استراتژی دیگر روی **همین نماد** هم آزاد نیست: تا تکلیف پوزیشن باز BTC روشن نشود،
+        // هیچ استراتژی روی BTC وارد نمی‌شود (قاعدهٔ «یک معامله روی هر نماد»).
+        val blockedSameSymbol = journal.openTrade(
+            calc,
+            note = "استراتژی دیگر روی همان نماد",
+            strategyId = BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT.id,
+        )
+        assertNull("روی نمادِ دارای پوزیشن باز، معاملهٔ تازه نباید باز شود", blockedSameSymbol)
+        val sameSymbolReason = journal.openTradeBlockedByFa("BTC/USDT", BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT.id)
+        assertNotNull(sameSymbolReason)
+        assertTrue(sameSymbolReason!!.contains("BTC/USDT"))
+
+        // استراتژی دیگر روی نماد دیگر آزاد است.
+        val ethCalc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "ETH/USDT",
+            accountBalance = 1_000.0,
+            riskPercent = 0.5,
+            entry = 3_200.0,
+            stopLoss = 3_180.0,
+            takeProfit = 3_260.0,
+        )!!
+        val other = journal.openTrade(ethCalc, note = "استراتژی دیگر", strategyId = BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT.id)
         assertNotNull(other)
         assertEquals(2, journal.trades.value.count { it.isOpen })
 
@@ -91,6 +111,61 @@ class JournalSingleOpenTradeTest {
         assertNull(journal.openTradeBlockedByFa(BitcoinStrategyModel.BASE_ICHIMOKU.id))
         val reopened = journal.openTrade(calc, note = "بعد از بسته شدن", strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id)
         assertNotNull(reopened)
+    }
+
+    @Test
+    fun noPathCanBypassTheOneTradeRule() {
+        val (journal, _) = freshJournal("test_one_trade_no_bypass.json")
+        val btc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "BTC/USDT",
+            accountBalance = 1_000.0,
+            riskPercent = 0.5,
+            entry = 68_000.0,
+            stopLoss = 67_500.0,
+            takeProfit = 69_000.0,
+        )!!
+        val first = journal.openTrade(btc, note = "پوزیشن باز", strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id)
+        assertNotNull(first)
+        val openBefore = journal.trades.value.count { it.isOpen }
+
+        // مسیر «واردکردن معامله» (import/restore) هم نمی‌تواند پوزیشن باز دوم روی همان نماد بسازد.
+        val injected = first!!.copy(id = "injected-open", strategyId = BitcoinStrategyModel.PATEL_KIJUN_PULLBACK.id)
+        journal.addTrade(injected)
+        assertEquals(
+            "addTrade نباید پوزیشن باز دوم روی یک نماد بسازد",
+            openBefore,
+            journal.trades.value.count { it.isOpen },
+        )
+        assertNull("پوزیشن تزریقی نباید در ژورنال باشد", journal.trades.value.firstOrNull { it.id == "injected-open" })
+
+        // همان معامله با همان شناسه آزاد است (به‌روزرسانی، نه ورود تازه).
+        journal.addTrade(first.copy(note = "یادداشت تازه همان معامله"))
+        assertEquals(openBefore, journal.trades.value.count { it.isOpen })
+        assertEquals("یادداشت تازه همان معامله", journal.trades.value.first { it.id == first.id }.note)
+
+        // معاملهٔ بک‌تست (شبیه‌سازی) این قاعده را قفل نمی‌کند.
+        journal.addTrade(injected.copy(id = "bt-1", origin = com.aurum.edge.core.PaperTrade.ORIGIN_BACKTEST))
+        assertNotNull(journal.trades.value.firstOrNull { it.id == "bt-1" })
+    }
+
+    @Test
+    fun profitLockNeverStartsBeforeOneAndHalfR() {
+        val cases = listOf(
+            Triple(0.05, 0.05, 0.05),
+            Triple(2.0, 3.0, 3.0),
+            Triple(0.9, 0.4, 0.2),
+            Triple(1.9, 0.1, 1.4),
+        )
+        cases.forEach { (atrPct, spread, cloud) ->
+            val r = com.aurum.edge.core.IchimokuStrategyEngine.adaptiveStopMoveThresholdR(
+                atrPercentOfPrice = atrPct,
+                tenkanKijunSpreadAtr = spread,
+                cloudThicknessAtr = cloud,
+                interval = Interval.M5,
+            )
+            assertTrue("قفل سود نباید پیش از ۱٫۵R شروع شود ($r)", r >= 1.5 - 1e-9)
+            assertTrue("قفل سود نباید از ۲٫۲R دیرتر شود ($r)", r <= 2.2 + 1e-9)
+        }
     }
 
     @Test

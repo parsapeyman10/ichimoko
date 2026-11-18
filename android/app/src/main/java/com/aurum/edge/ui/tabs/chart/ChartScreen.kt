@@ -64,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.BaseStrategyConfig
@@ -128,6 +129,15 @@ fun ChartScreen(
     val activePositionTrade = remember(openTradesForSymbol, selectedTradeId) {
         openTradesForSymbol.firstOrNull { it.id == selectedTradeId } ?: openTradesForSymbol.firstOrNull()
     }
+    // نشانه‌های معامله روی چارت: اگر پوزیشن بازی روی نماد نبود، آخرین معاملهٔ بستهٔ همان نماد
+    // نشان داده می‌شود تا نقطهٔ ورود/خروج و بهترین کندل مسیر هم دیده شود.
+    val lastClosedForSymbol = remember(allTrades, appSymbol) {
+        allTrades
+            .asSequence()
+            .filter { !it.isOpen && !it.isBacktest && V1Universe.normalize(it.symbol) == appSymbol }
+            .maxByOrNull { it.closedAt }
+    }
+    val markerTrade = activePositionTrade ?: lastClosedForSymbol
 
     // وقتی کاربر روی نمادی کلیک می‌کند که پوزیشن باز دارد، تایم‌فریم چارت با پوزیشن هماهنگ شود
     LaunchedEffect(appSymbol, openTradesForSymbol.size) {
@@ -147,7 +157,7 @@ fun ChartScreen(
         val fetched = LiveQuoteFetcher.fetchTimeframeCandles(
             symbolInput = appSymbol,
             interval = tf,
-            limit = 110,
+            limit = 220,
             forceNetwork = reloadCount > 0,
         )
         if (fetched != null) {
@@ -342,6 +352,7 @@ fun ChartScreen(
                 targetE = waveProj?.targetE,
                 kijunStop = latestSnap?.kijun,
                 activeTrade = activePositionTrade,
+                markerTrade = markerTrade,
                 allOpenTradesForSymbol = openTradesForSymbol,
                 livePrice = livePriceForSymbol,
                 showBottomCard = showBottomPositionCard,
@@ -504,6 +515,7 @@ private fun NativeIchimokuCanvasChart(
     targetE: Double?,
     kijunStop: Double?,
     activeTrade: PaperTrade?,
+    markerTrade: PaperTrade?,
     allOpenTradesForSymbol: List<PaperTrade>,
     livePrice: Double?,
     showBottomCard: Boolean,
@@ -514,7 +526,7 @@ private fun NativeIchimokuCanvasChart(
     val futureKumo = series.futureKumo
 
     var focusFutureKumo by rememberSaveable { mutableStateOf(true) }
-    var visibleBarsCount by rememberSaveable { mutableIntStateOf(34) }
+    var visibleBarsCount by rememberSaveable { mutableIntStateOf(60) }
     var panOffsetBars by rememberSaveable(symbol, timeframe) { mutableFloatStateOf(0f) }
     var fitTradeTpSl by rememberSaveable(symbol) { mutableStateOf(true) }
     var inspectedIndex by remember(bars) { mutableStateOf<Int?>(bars.lastIndex.takeIf { it >= 0 }) }
@@ -685,7 +697,20 @@ private fun NativeIchimokuCanvasChart(
                         fontWeight = FontWeight.Bold,
                         color = if (inspectedFk.spanA >= inspectedFk.spanB) AurumColors.Green else AurumColors.Red,
                     )
-                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    // راهنمای نشانه‌ها: همان چهار رنگی که روی کندل‌ها کشیده می‌شود.
+        if (markerTrade != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("● ورود", color = Color(0xFFFF9800), fontSize = 11.sp)
+                Text("● خروج سودده", color = Color(0xFF00E676), fontSize = 11.sp)
+                Text("● خروج زیان‌ده", color = Color(0xFFFF5252), fontSize = 11.sp)
+                Text("● بهترین کندل مسیر", color = Color(0xFF40C4FF), fontSize = 11.sp)
+            }
+        }
+
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Text(
                             text = "SSA: ${formatPrice(inspectedFk.spanA)} | SSB: ${formatPrice(inspectedFk.spanB)}",
                             style = MaterialTheme.typography.labelSmall,
@@ -1131,6 +1156,44 @@ private fun NativeIchimokuCanvasChart(
                     drawLine(Color(0x66FFFFFF), Offset(sx, 0f), Offset(sx, h), strokeWidth = 1f, pathEffect = dashGrid)
                     drawLine(Color(0x66FFFFFF), Offset(0f, sy), Offset(w, sy), strokeWidth = 1f, pathEffect = dashGrid)
                     drawCircle(Color(0xFFFFD54F), radius = 4.5f, center = Offset(sx, sy), style = Stroke(width = 2f))
+                }
+
+                // ۹. نشانه‌های معامله: ورود (نارنجی) · خروج سودده (سبز) · خروج زیان‌ده (سرخ) ·
+                //    بهترین کندل در جهت معامله (آبی). فقط روی کندل‌هایی که در پنجرهٔ دید هستند.
+                if (markerTrade != null) {
+                    fun slotOfTime(ms: Long): Int? {
+                        if (ms <= 0L) return null
+                        var found: Int? = null
+                        for (i in visibleSlice.indices) {
+                            if (visibleSlice[i].candle.time <= ms) found = i
+                        }
+                        return found
+                    }
+                    fun ring(slot: Int, color: Color, radius: Float) {
+                        val bar = visibleSlice[slot].candle
+                        val cy = yOf((bar.high + bar.low) / 2.0)
+                        drawCircle(color = color.copy(alpha = 0.22f), radius = radius, center = Offset(xOfSlot(slot), cy))
+                        drawCircle(color = color, radius = radius, center = Offset(xOfSlot(slot), cy), style = Stroke(width = 2.6f))
+                    }
+                    val entrySlot = slotOfTime(markerTrade.openedAt)
+                    val exitSlot = if (!markerTrade.isOpen) slotOfTime(markerTrade.closedAt) else null
+                    // بهترین کندل مسیر: بیشترین سود شناور در جهت معامله (بالاترین سقف در خرید،
+                    // پایین‌ترین کف در فروش) بین کندل ورود تا خروج (یا آخرین کندل باز).
+                    val lastPathSlot = exitSlot ?: visibleSlice.lastIndex
+                    val bestSlot = if (entrySlot != null && lastPathSlot >= entrySlot) {
+                        (entrySlot..lastPathSlot).maxByOrNull { i ->
+                            if (markerTrade.action == SignalAction.BUY) visibleSlice[i].candle.high
+                            else -visibleSlice[i].candle.low
+                        }
+                    } else null
+                    if (entrySlot != null) ring(entrySlot, Color(0xFFFF9800), 10f)
+                    if (exitSlot != null && exitSlot != entrySlot) {
+                        val win = markerTrade.pnlUsd >= 0.0
+                        ring(exitSlot, if (win) Color(0xFF00E676) else Color(0xFFFF5252), 10f)
+                    }
+                    if (bestSlot != null && bestSlot != entrySlot && bestSlot != exitSlot) {
+                        ring(bestSlot, Color(0xFF40C4FF), 8f)
+                    }
                 }
             }
         }

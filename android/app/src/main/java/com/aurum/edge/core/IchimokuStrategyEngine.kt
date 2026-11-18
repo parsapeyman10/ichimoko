@@ -4717,7 +4717,9 @@ object IchimokuStrategyEngine {
         if (tenkanKijunSpreadAtr.isFinite() && tenkanKijunSpreadAtr < 0.15) r += 0.2
         if (cloudThicknessAtr.isFinite() && cloudThicknessAtr >= 0.8) r -= 0.1
         if (interval == Interval.M5 || interval == Interval.M15) r += 0.1
-        return r.coerceIn(1.2, 2.2)
+        // کف مطلق ۱٫۵R است (دستور صریح کاربر: «قفل سود از ۱٫۵R باید شروع شود»). تنظیم‌های
+        // «متناسب با شرایط» فقط می‌توانند قفل را دیرتر کنند، هرگز زودتر از ۱٫۵R.
+        return r.coerceIn(MIN_R_TO_MOVE_STOP, 2.2)
     }
 
     /**

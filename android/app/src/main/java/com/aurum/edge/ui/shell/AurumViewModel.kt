@@ -1097,8 +1097,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
         strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
     ) {
-        // قاعدهٔ «یک معاملهٔ باز برای هر استراتژی»: پیش از هر تماس شبکه‌ای/هوش مصنوعی هم سنجیده می‌شود.
-        container.journalStore.openTradeBlockedByFa(strategyId)?.let { reason ->
+        // قاعدهٔ «یک معامله در هر لحظه»: هم نماد و هم استراتژی، پیش از هر تماس شبکه‌ای/هوش
+        // مصنوعی سنجیده می‌شود تا هیچ لایه‌ای (نه رادار، نه گیت عصبی) نتواند بازش کند.
+        container.journalStore.openTradeBlockedByFa(calc.symbol, strategyId)?.let { reason ->
             _toast.value = reason
             return
         }
@@ -1194,7 +1195,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
-        container.journalStore.openTradeBlockedByFa(strategyId)?.let { reason ->
+        container.journalStore.openTradeBlockedByFa(calc.symbol, strategyId)?.let { reason ->
             _toast.value = reason
             return
         }
@@ -1243,8 +1244,8 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             ),
         )
         val opened = openedRaw ?: run {
-            _toast.value = container.journalStore.openTradeBlockedByFa(strategyId)
-                ?: "⛔ معامله باز نشد (ورود هم‌زمان برای همین استراتژی)"
+            _toast.value = container.journalStore.openTradeBlockedByFa(calc.symbol, strategyId)
+                ?: "⛔ معامله باز نشد (همین لحظه روی همین نماد یا همین استراتژی معاملهٔ باز هست)"
             return
         }
         val condRecords = matchedReport?.conditions?.map { c ->

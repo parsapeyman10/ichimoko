@@ -178,7 +178,80 @@ class JournalStore(
     fun openTradeForStrategy(strategyId: String): PaperTrade? {
         val normalized = com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(strategyId)
         return _trades.value.firstOrNull {
-            it.isOpen && com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == normalized
+            it.isOpen && !it.isBacktest &&
+                com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == normalized
+        }
+    }
+
+    /**
+     * آیا همین حالا معاملهٔ بازی روی این **نماد** وجود دارد؟ (از هر استراتژی که باشد)
+     *
+     * قاعدهٔ دوم کاربر: «از یک نماد وقتی معاملهٔ باز دارم، معاملهٔ تازه روی همان نماد باز نشود.»
+     * پیش از این فقط «یک معامله به ازای هر استراتژی» کنترل می‌شد، پس سه استراتژی می‌توانستند
+     * هم‌زمان سه پوزیشن روی یک نماد باز کنند. معامله‌های بک‌تست (شبیه‌سازی) شمرده نمی‌شوند.
+     */
+    fun openTradeForSymbol(symbolInput: String): PaperTrade? {
+        val normalized = com.aurum.edge.core.V1Universe.normalize(symbolInput)
+        return _trades.value.firstOrNull {
+            it.isOpen && !it.isBacktest && com.aurum.edge.core.V1Universe.normalize(it.symbol) == normalized
+        }
+    }
+
+    /**
+     * دلیل فارسیِ بسته‌بودن مسیر ورود؛ `null` یعنی مسیر باز است.
+     *
+     * این تنها مرجع قاعدهٔ «یک معامله در هر لحظه» است و سه لایه دارد:
+     * ۱) همان **نماد** معاملهٔ باز دارد ⇒ هیچ استراتژی روی آن نماد وارد نمی‌شود.
+     * ۲) همان **استراتژی** جای دیگری معاملهٔ باز دارد ⇒ روی هیچ نمادی وارد نمی‌شود.
+     * ۳) هر دو به `ignoreTradeId` حساس‌اند تا ویرایش/بستن همان معامله خودش را بلاک نکند.
+     *
+     * چون در خودِ ژورنال است، هیچ مسیری (رادار، ورود دستی، هوش عصبی، بازیابی از دیسک) نمی‌تواند
+     * دورش بزند؛ حتی اگر لایهٔ بالاتر اجازه بدهد.
+     */
+    fun entryBlockReasonFa(
+        symbolInput: String?,
+        strategyId: String,
+        ignoreTradeId: String? = null,
+    ): String? {
+        if (!symbolInput.isNullOrBlank()) {
+            openTradeForSymbol(symbolInput)?.takeIf { it.id != ignoreTradeId }?.let { blocking ->
+                return "⛔ روی ${blocking.symbol} معاملهٔ باز ${blocking.displayTradeNumberBadgeFa} دارید؛ " +
+                    "تا تکلیفش روشن شود روی همین نماد معاملهٔ تازه باز نمی‌شود"
+            }
+        }
+        openTradeForStrategy(strategyId)?.takeIf { it.id != ignoreTradeId }?.let { blocking ->
+            return "⛔ تا تکلیف ${blocking.displayTradeNumberBadgeFa} (${blocking.symbol}) روشن شود، " +
+                "استراتژی «${blocking.strategyTitleFa}» معاملهٔ تازه باز نمی‌کند"
+        }
+        return null
+    }
+
+    /**
+     * نگه‌داشتن فقط **یک** معاملهٔ باز به ازای هر نماد و هر استراتژی (قدیمی‌ترین برنده است).
+     *
+     * برای مسیرهایی که فهرست معامله‌ها را یک‌جا وارد می‌کنند (بازیابی پشتیبان، ورود CSV) و
+     * نمی‌توانند تک‌تک از گارد ورود رد شوند. معامله‌های بک‌تست و بسته‌ها دست نمی‌خورند.
+     */
+    private fun singleOpenPerSymbolAndStrategy(trades: List<PaperTrade>): List<PaperTrade> {
+        val openBySymbol = HashSet<String>()
+        val openByStrategy = HashSet<String>()
+        // قدیمی‌ترین بازها اول بررسی می‌شوند تا همان‌ها بمانند و تازه‌ترها رد شوند.
+        val openIds = trades
+            .filter { it.isOpen && !it.isBacktest }
+            .sortedBy { it.openedAt }
+            .map { it.id }
+            .toSet()
+        return trades.filter { trade ->
+            if (!trade.isOpen || trade.isBacktest) return@filter true
+            val symbolKey = com.aurum.edge.core.V1Universe.normalize(trade.symbol)
+            val strategyKey = com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(trade.strategyId)
+            if (symbolKey !in openBySymbol && strategyKey !in openByStrategy) {
+                openBySymbol += symbolKey
+                openByStrategy += strategyKey
+                true
+            } else {
+                trade.id !in openIds
+            }
         }
     }
 
@@ -242,11 +315,11 @@ class JournalStore(
     }
 
     /** پیام فارسی دلیل رد شدن معاملهٔ تازه؛ `null` یعنی مسیر باز است. */
-    fun openTradeBlockedByFa(strategyId: String): String? {
-        val blocking = openTradeForStrategy(strategyId) ?: return null
-        return "⛔ تا تکلیف ${blocking.displayTradeNumberBadgeFa} (${blocking.symbol}) روشن نشود، " +
-            "استراتژی «${blocking.strategyTitleFa}» معاملهٔ تازه باز نمی‌کند"
-    }
+    fun openTradeBlockedByFa(strategyId: String): String? = entryBlockReasonFa(null, strategyId)
+
+    /** همان دلیل، این‌بار با دانستن نماد (قاعدهٔ «یک معامله روی هر نماد»). */
+    fun openTradeBlockedByFa(symbolInput: String?, strategyId: String): String? =
+        entryBlockReasonFa(symbolInput, strategyId)
 
     @Synchronized
     fun openTrade(
@@ -268,7 +341,7 @@ class JournalStore(
         // ── قاعدهٔ «یک معاملهٔ باز برای هر استراتژی» ─────────────────────────────
         // تا تکلیف معاملهٔ باز روشن نشود، همین استراتژی معاملهٔ تازه نمی‌گیرد. این گارد در خودِ
         // ژورنال است تا هیچ مسیری (خودکار، دستی، رادار ۱۵ دقیقه یا کارت استراتژی) نتواند دورش بزند.
-        if (openTradeForStrategy(strategyId) != null) return null
+        if (entryBlockReasonFa(calc.symbol, strategyId) != null) return null
         // This synchronous API can be called from a UI action. Use memory-only candles here;
         // parsing the on-device CandleVault is disk I/O and used to freeze the main thread on entry.
         val effectiveCandles = preEntryCandles.ifEmpty {
@@ -332,6 +405,14 @@ class JournalStore(
 
     @Synchronized
     fun addTrade(trade: PaperTrade) {
+        // قاعدهٔ یک-معامله-در-هر-لحظه از مسیر واردکردن/بازیابی هم دور زدنی نیست: معاملهٔ بازِ
+        // تازه‌ای که نماد یا استراتژی‌اش همین حالا اشغال است، پذیرفته نمی‌شود. به‌روزرسانی خودِ
+        // همان معامله (با همان شناسه) آزاد است و معامله‌های بک‌تست از این قاعده مستثنا هستند.
+        if (trade.isOpen && !trade.isBacktest &&
+            entryBlockReasonFa(trade.symbol, trade.strategyId, ignoreTradeId = trade.id) != null
+        ) {
+            return
+        }
         val previous = _trades.value.firstOrNull { it.id == trade.id }
         persist(listOf(trade) + _trades.value.filterNot { it.id == trade.id })
         applyBalanceDelta(previous, trade)
@@ -646,7 +727,10 @@ class JournalStore(
                 importedById[existing.id] ?: existing
             }
             val existingIds = _trades.value.map { it.id }.toSet()
-            val brandNew = cleanImported.filterNot { it.id in existingIds }
+            // قاعدهٔ «یک معامله در هر لحظه» روی ورودی‌های تازه هم اعمال می‌شود: از فایل پشتیبان
+            // هم نمی‌شود دو پوزیشن باز روی یک نماد یا دو پوزیشن باز از یک استراتژی ساخت.
+            // قدیمی‌ترین معاملهٔ باز می‌مانَد و بقیه (که هنوز در ژورنال نبودند) رد می‌شوند.
+            val brandNew = singleOpenPerSymbolAndStrategy(cleanImported.filterNot { it.id in existingIds })
             brandNew + mergedExisting
         }
         persist(finalList)
