@@ -712,15 +712,15 @@ class RiskAndCalendarEngineTest {
         assertEquals(1, hosodaCat.lossesCount)
         assertEquals(-5.0, hosodaCat.netPnlUsd, 1e-4)
 
-        // Verify 1:1.5 minimum R:R enforcement & 1:3+ Institutional Trend-Runner
+        // Verify the 1:2.0 minimum R:R enforcement & 1:3+ Institutional Trend-Runner
         val adjustedTpBuy = RiskAndCalendarEngine.enforceMinimumRiskReward(
             symbolInput = "BTC/USDT",
             entryPrice = 65_000.0,
             stopLoss = 64_500.0,
-            takeProfit = 65_400.0, // only 0.8R -> must be lifted to 1.5R (65,750.0)
+            takeProfit = 65_400.0, // only 0.8R -> must be lifted to 2R (66,000.0)
             action = SignalAction.BUY,
         )
-        assertEquals(65_750.0, adjustedTpBuy, 1e-4)
+        assertEquals(66_000.0, adjustedTpBuy, 1e-4)
 
         val runnerFile = File(context.filesDir, "test_runner_1to3.json")
         runnerFile.delete()
