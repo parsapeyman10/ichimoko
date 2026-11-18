@@ -446,7 +446,9 @@ class JournalStore(
         // ── قاعدهٔ «یک معاملهٔ باز برای هر استراتژی» ─────────────────────────────
         // تا تکلیف معاملهٔ باز روشن نشود، همین استراتژی معاملهٔ تازه نمی‌گیرد. این گارد در خودِ
         // ژورنال است تا هیچ مسیری (خودکار، دستی، رادار ۱۵ دقیقه یا کارت استراتژی) نتواند دورش بزند.
-        if (entryBlockReasonFa(calc.symbol, strategyId) != null) return null
+        // `now` باید به گارد برسد؛ وگرنه یک ورود با زمان مشخص (تست/بازپخش) با ساعت دیوار سنجیده
+        // می‌شود و دورهٔ خنک‌شدن هرگز تمام‌شده دیده نمی‌شود.
+        if (entryBlockReasonFa(calc.symbol, strategyId, now = now) != null) return null
         // This synchronous API can be called from a UI action. Use memory-only candles here;
         // parsing the on-device CandleVault is disk I/O and used to freeze the main thread on entry.
         val effectiveCandles = preEntryCandles.ifEmpty {
@@ -514,7 +516,12 @@ class JournalStore(
         // تازه‌ای که نماد یا استراتژی‌اش همین حالا اشغال است، پذیرفته نمی‌شود. به‌روزرسانی خودِ
         // همان معامله (با همان شناسه) آزاد است و معامله‌های بک‌تست از این قاعده مستثنا هستند.
         if (trade.isOpen && !trade.isBacktest &&
-            entryBlockReasonFa(trade.symbol, trade.strategyId, ignoreTradeId = trade.id) != null
+            entryBlockReasonFa(
+                trade.symbol,
+                trade.strategyId,
+                ignoreTradeId = trade.id,
+                now = trade.openedAt,
+            ) != null
         ) {
             return
         }
