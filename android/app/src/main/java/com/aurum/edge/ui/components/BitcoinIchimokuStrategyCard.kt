@@ -238,7 +238,7 @@ fun BitcoinIchimokuStrategyCard(
                         stopLoss = sl,
                         takeProfit = tp,
                         preferredAction = evalReport.action,
-                        fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(settings.fixedRiskUsd),
+                        fixedRiskUsdOverride = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades, settings.accountBalance),
                     )
                     if (calc != null) {
                         viewModel.openAutoTrackedTrade(

@@ -106,7 +106,7 @@ object TradeOutcomeExplainer {
         val closedAt = trade.closedAt ?: 0L
         if (candles.isNotEmpty() && risk > 1e-9) {
             val window = candles.filter { it.time in openedAt..(if (closedAt > 0) closedAt else Long.MAX_VALUE) }
-            val usable = window.ifEmpty { candles.takeLast(1) }
+            val usable = window
             if (usable.isNotEmpty()) {
                 barsHeld = usable.size
                 var best = 0.0

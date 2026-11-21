@@ -118,6 +118,25 @@ fun NeuralBrainScreen(
             .padding(bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        val rateReview = remember(trades) { com.aurum.edge.core.WinRateReview.calculate(trades) }
+        val riskNow = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades, settings.accountBalance)
+        val rateText = rateReview.ratePct?.let { String.format(Locale.US, "%.1f٪", it) } ?: "نامعلوم"
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp)).background(AurumColors.SurfaceAlt).padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("🧠 خروجی مدیریت و پایش", color = AurumColors.Gold, fontWeight = FontWeight.SemiBold)
+            Text("معاملات آموخته‌شده: ${neuralState.totalLearnedTrades} · گیت عصبی: ${if (neuralState.isGateActive) "فعال" else "غیرفعال"}", color = AurumColors.TextPrimary, fontSize = 11.sp)
+            Text(neuralState.gatePolicySummaryFa, color = AurumColors.TextSecondary, fontSize = 11.sp)
+            Text("ریسک محاسبه‌شدهٔ معاملهٔ بعدی: ${String.format(Locale.US, "%.2f", riskNow)} دلار؛ فرمول مستقل از گیت عصبی است.", color = AurumColors.TextSecondary, fontSize = 11.sp)
+            Text("نرخ برد: $rateText · ${rateReview.wins} برد، ${rateReview.losses} باخت، ${rateReview.flat} سربه‌سر · خالص ${String.format(Locale.US, "%+.2f", rateReview.netUsd)} دلار", color = AurumColors.TextPrimary, fontSize = 11.sp)
+            Text(when {
+                rateReview.samples < 30 -> "برای بازنگری حداقل ۳۰ برد یا باخت بسته لازم است."
+                rateReview.needsReview -> "نرخ برد زیر هدف ۶۵٪ است؛ بازنگری پیشنهاد می‌شود، بدون تغییر خودکار."
+                else -> "نرخ نمونه به ۶۵٪ رسیده؛ عملکرد آینده تضمین نمی‌شود."
+            }, color = if (rateReview.needsReview) Color(0xFFFF8A80) else AurumColors.TextSecondary, fontSize = 11.sp)
+            Text("معاملات باز و بک‌تست و سربه‌سر در نرخ برد شمارش نمی‌شوند؛ این آمار ژورنال، اثبات اثر گیت عصبی نیست.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+        }
+
         // 🧠 عمق یادگیری: شبکهٔ ۱۸۰حالتی (فاز × سشن × نوسان × دالان R) از معامله‌های واقعی
         NeuralDepthCard(trades = trades, settings = settings)
 

@@ -545,7 +545,7 @@ fun JournalRiskScreen(
                     liveTick = liveTicks[activeSymbol],
                     accountBalance = settings.accountBalance,
                     riskPercent = settings.riskPercent,
-                    fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(settings.fixedRiskUsd),
+                    fixedRiskUsdOverride = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades, settings.accountBalance),
                     riskLimits = riskLimits,
                     avalAiEnabled = settings.avalAiEnabled,
                     aiChecking = aiChecking,
@@ -3278,7 +3278,7 @@ private fun ClosedJournalTradeRow(
                 }
             }
 
-            if (!trade.isOpen && trade.outcomeReasonFa.isNotBlank()) {
+            if (!trade.isOpen && trade.pnlUsd != null) {
                 // «دلیل برد/باخت» که موتور عصبی هنگام بسته شدن معامله نوشته است.
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -3291,7 +3291,10 @@ private fun ClosedJournalTradeRow(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = trade.outcomeReasonFa,
+                        text = trade.outcomeReasonFa.ifBlank {
+                            "اطلاعات ثبت‌شدهٔ همین معامله؛ مسیر کندل‌ها در دسترس نیست:\n" +
+                                com.aurum.edge.core.TradeOutcomeExplainer.explain(trade).textFa()
+                        },
                         color = AurumColors.TextSecondary,
                         fontSize = 10.sp,
                         lineHeight = 15.sp,

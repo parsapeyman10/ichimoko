@@ -525,10 +525,10 @@ private fun NativeIchimokuCanvasChart(
     val bars = series.bars
     val futureKumo = series.futureKumo
 
-    var focusFutureKumo by rememberSaveable { mutableStateOf(true) }
+    var focusFutureKumo by rememberSaveable { mutableStateOf(false) }
     var visibleBarsCount by rememberSaveable { mutableIntStateOf(60) }
     var panOffsetBars by rememberSaveable(symbol, timeframe) { mutableFloatStateOf(0f) }
-    var fitTradeTpSl by rememberSaveable(symbol) { mutableStateOf(true) }
+    var fitTradeTpSl by rememberSaveable(symbol) { mutableStateOf(false) }
     var inspectedIndex by remember(bars) { mutableStateOf<Int?>(bars.lastIndex.takeIf { it >= 0 }) }
     var inspectedFutureStep by remember(bars) { mutableStateOf<Int?>(null) }
 
@@ -544,7 +544,7 @@ private fun NativeIchimokuCanvasChart(
         val sel = bars[inspectIdx]
 
         // محاسبه ابر آینده ۲۶ کندلی (حتی اگر کاربر چارت را به عقب اسکرول کرده باشد)
-        val endIdx = (bars.lastIndex - panOffsetBars.roundToInt()).coerceIn(10, bars.lastIndex)
+        val endIdx = (bars.lastIndex - panOffsetBars.roundToInt()).coerceIn(0, bars.lastIndex)
         val startIdx = (endIdx - visibleBarsCount + 1).coerceAtLeast(0)
         val visibleSlice = bars.subList(startIdx, endIdx + 1)
 

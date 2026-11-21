@@ -362,11 +362,7 @@ fun SettingsScreen(
             1 -> {
                 // اعداد عنوان از خود تنظیمات خوانده می‌شوند؛ قبلاً «۱۰۰,۰۰۰$ و ۵$» دستی نوشته شده
                 // بود و اگر کاربر مقدار دیگری می‌گذاشت، عنوان دروغ می‌گفت.
-                val activeRiskUsd = if (settings.useFixedDollarRisk) {
-                    settings.fixedRiskUsd
-                } else {
-                    settings.accountBalance * settings.riskPercent / 100.0
-                }
+                val activeRiskUsd = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades, settings.accountBalance)
                 SectionCard(
                     title = "💰 سرمایه و ریسک هر معامله (" + String.format(Locale.US, "%.2f", activeRiskUsd) + "$)",
                     subtitle = descOrNull(

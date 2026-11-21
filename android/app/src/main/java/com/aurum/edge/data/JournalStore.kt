@@ -662,8 +662,9 @@ class JournalStore(
                         exitReason = effectiveReason,
                         pnlUsd = hit.netPnlUsd,
                     )
-                    closedTradesForAlarm += closedTrade to isProfitableClose
-                    closedTrade
+                    val explained = explainClosedTrade(closedTrade)
+                    closedTradesForAlarm += explained to isProfitableClose
+                    explained
                 } else {
                     trade
                 }
@@ -725,8 +726,9 @@ class JournalStore(
                         exitReason = "${hit.kind.reasonFa} · بازیابی ساعات قطعی",
                         pnlUsd = hit.netPnlUsd,
                     )
-                    closedTradesForAlarm += closedTrade to isProfit
-                    closedTrade
+                    val explained = explainClosedTrade(closedTrade, candles)
+                    closedTradesForAlarm += explained to isProfit
+                    explained
                 } else {
                     trade
                 }
@@ -759,6 +761,11 @@ class JournalStore(
         }
         return triggered
     }
+
+    private fun explainClosedTrade(trade: PaperTrade, candles: List<Candle> = LiveQuoteFetcher.peekCachedCandles(trade.symbol, trade.interval)): PaperTrade = runCatching {
+        val result = com.aurum.edge.core.TradeOutcomeExplainer.explain(trade, candles)
+        trade.copy(outcomeReasonFa = result.textFa(), outcomeTags = result.tags, mfeR = result.mfeR, maeR = result.maeR)
+    }.getOrDefault(trade)
 
     @Synchronized
     fun closeTradeAtPrice(

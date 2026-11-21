@@ -826,7 +826,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                             stopLoss = guarded.stopLoss,
                             takeProfit = guarded.takeProfit,
                             preferredAction = armedReport.action,
-                            fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(cfg.fixedRiskUsd),
+                            fixedRiskUsdOverride = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades.value, cfg.accountBalance),
                             triggerInterval = armedReport.triggerInterval,
                             referenceAtr14 = armedReport.triggerSnapshot?.atr14 ?: 0.0,
                         )
@@ -2356,7 +2356,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                 stopLoss = guarded.stopLoss,
                                 takeProfit = guarded.takeProfit,
                                 preferredAction = report.action,
-                                fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(cfg.fixedRiskUsd),
+                                fixedRiskUsdOverride = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades.value, cfg.accountBalance),
                                 triggerInterval = report.triggerInterval,
                                 referenceAtr14 = report.triggerSnapshot?.atr14 ?: 0.0,
                             )
