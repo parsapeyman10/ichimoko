@@ -42,7 +42,7 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.theme.AurumColors
 
 private val DEBUG_STOP_PERCENTS = listOf(0.25, 0.5, 1.0, 2.0)
-private val DEBUG_TARGET_RS = listOf(1.5, 2.0, 2.5, 3.0)
+private val DEBUG_TARGET_RS = listOf(2.0, 2.5, 3.0)
 
 /** رنگ هر شدت — یک‌جا تعریف می‌شود تا کارت و فهرست یافته‌ها هم‌رنگ بمانند. */
 private fun severityColor(severity: CapitalSeverity): Color = when (severity) {

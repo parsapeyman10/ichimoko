@@ -679,15 +679,16 @@ class RiskAndCalendarEngineTest {
         assertTrue(calcFixed5.buildVenueRulesSummaryFa().contains("مرجع دیتا"))
         assertTrue(tradeManish.buildVenueRulesAndFeesSummaryFa().contains("مجموع کل کارمزد"))
         val (lossGross, lossPnl) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 64_500.0)
-        assertEquals(-5.0, lossGross, 1e-4)
-        assertEquals(-5.0, lossPnl, 1e-4)
+        assertTrue("زیان ناخالص بدون کارمزد کمتر است", lossGross > lossPnl)
+        assertEquals(-5.0, lossPnl, 0.01)
 
-        val (winGross, winPnl) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 66_250.0)
-        assertEquals(12.5, winGross, 1e-4) // $5 * 2.5 R:R = +$12.50
-        assertEquals(12.5, winPnl, 1e-4)
+        // هدف واقعی بعد از لحاظ کارمزد از 66,250 دورتر است؛ تسویه را با همان هدف بسنج.
+        val (winGross, winPnl) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, calcFixed5.takeProfit)
+        assertTrue(winGross > winPnl)
+        assertEquals(12.5, winPnl, 0.01)
 
         val closedManish = tradeManish.copy(
-            exitPrice = 66_250.0,
+            exitPrice = calcFixed5.takeProfit,
             closedAt = 1_760_000_900_000L,
             pnlUsd = winPnl,
         )

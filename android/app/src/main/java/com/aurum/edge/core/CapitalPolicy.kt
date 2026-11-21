@@ -73,7 +73,7 @@ data class CapitalPolicy(
     val riskBudgetPctOfEquity: Double
         get() = if (accountBalance > 1e-9) riskBudgetUsd / accountBalance * 100.0 else 0.0
 
-    /** کف دلاری سود هر معامله: ۱٫۵R. */
+    /** کف دلاری سود هر معامله: ۲R. */
     val rewardFloorUsd: Double get() = riskBudgetUsd * MIN_RR
 
     /** سقف دلاری سود هر معامله: ۳R. */
@@ -330,7 +330,7 @@ data class CapitalPolicy(
 
     companion object {
         /** کف و سقف نسبت پاداش به ریسک — همان دالانی که موتور معامله اعمال می‌کند. */
-        const val MIN_RR = 1.5
+        const val MIN_RR = 2.0
         const val MAX_RR = 3.0
 
         const val MIN_BALANCE = 10.0

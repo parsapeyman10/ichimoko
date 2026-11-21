@@ -51,7 +51,7 @@ class CapitalDebugTraceTest {
 
     @Test
     fun `net reward stays inside the one point five to three R band for every preset`() {
-        listOf(1.5, 2.0, 2.5, 3.0).forEach { r ->
+        listOf(2.0, 2.5, 3.0).forEach { r ->
             val trace = CapitalDebugTrace.simulate(
                 policy = goldPolicy,
                 symbol = "XAU/USD",

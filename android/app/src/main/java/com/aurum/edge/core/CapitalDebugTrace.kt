@@ -311,7 +311,7 @@ object CapitalDebugTrace {
                 "خالص $" + money(result.netLossAtSlUsd) + " = بودجه $" + money(budget),
             ),
             CapitalTraceCheck(
-                "سود خالص در دالان ۱٫۵R تا ۳R می‌ماند",
+                "سود خالص در دالان ۲R تا ۳R می‌ماند",
                 result.netProfitAtTpUsd >= bandLow - 0.05 && result.netProfitAtTpUsd <= bandHigh + 0.05,
                 "$" + money(result.netProfitAtTpUsd) + " بین $" + money(bandLow) + " و $" + money(bandHigh),
             ),
