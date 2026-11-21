@@ -137,6 +137,8 @@ data class RiskCalculationResult(
         strategyId = strategyId,
         strategyTitleFa = strategyTitleFa,
         fixedRiskUsd = round2(riskBudgetUsd),
+        netSettlementEnabled = true,
+        settlementFeeUsd = VenueSpecs.of(symbol).totalRoundTripFeeUsd(entry, positionUnits),
         optimalRiskReward = if (optimalRiskReward >= 1.5) round2(optimalRiskReward.coerceIn(1.50, 3.00)) else round2(riskReward.coerceIn(1.50, 3.00)),
         rrBreakdownFa = rrBreakdownFa,
         // حالت بازار در لحظهٔ ورود نگه داشته می‌شود؛ شبکهٔ عصبی بعداً همین را می‌آموزد.
@@ -333,14 +335,29 @@ object RiskAndCalendarEngine {
         // سنگین سود را از قانون پایین‌تر می‌آورد.
         val adjustedTargetDistance = requiredTargetDistance
         val dirSign = if (inferredAction == SignalAction.BUY) 1.0 else -1.0
-        val adjustedTakeProfit = TradePlanGuard.roundToTick(symbol, entry + dirSign * adjustedTargetDistance)
-
-        val grossProfitAtTp = positionUnits * PaperOrderRules.quotePnlToUsd(symbol, adjustedTargetDistance, entry)
+        var adjustedTakeProfit = TradePlanGuard.roundToTick(symbol, entry + dirSign * adjustedTargetDistance)
+        // Tick rounding may push a boundary target just below 2R or above 3R. Move at most
+        // one tick inwards; if no valid price exists, the execution gate rejects the plan.
+        if (planR in MIN_REQUIRED_RISK_REWARD..MAX_ALLOWED_RISK_REWARD) {
+            val tick = spec.tickSize
+            fun roundedNet(price: Double): Double = round2(
+                positionUnits * PaperOrderRules.quotePnlToUsd(symbol, abs(price - entry), entry) - netFeeUsd,
+            )
+            val net = roundedNet(adjustedTakeProfit)
+            if (net < round2(riskBudgetUsd * MIN_REQUIRED_RISK_REWARD)) {
+                adjustedTakeProfit = TradePlanGuard.roundToTick(symbol, adjustedTakeProfit + dirSign * tick)
+            } else if (net > round2(riskBudgetUsd * MAX_ALLOWED_RISK_REWARD)) {
+                adjustedTakeProfit = TradePlanGuard.roundToTick(symbol, adjustedTakeProfit - dirSign * tick)
+            }
+        }
+        if (!adjustedTakeProfit.isFinite() || adjustedTakeProfit <= 0.0) return null
+        val actualTargetDistance = abs(adjustedTakeProfit - entry)
+        val grossProfitAtTp = positionUnits * PaperOrderRules.quotePnlToUsd(symbol, actualTargetDistance, entry)
         val grossLossAtSl = positionUnits * perUnitStopUsd
         val exactProfitAtTpUsd = (grossProfitAtTp - netFeeUsd).coerceAtLeast(0.0)
         val exactLossAtSlUsd = grossLossAtSl + netFeeUsd
         val netRiskReward = if (exactLossAtSlUsd > 1e-9) exactProfitAtTpUsd / exactLossAtSlUsd else planR
-        val grossRiskReward = if (stopDistance > 1e-12) adjustedTargetDistance / stopDistance else planR
+        val grossRiskReward = if (stopDistance > 1e-12) actualTargetDistance / stopDistance else planR
 
         return RiskCalculationResult(
             symbol = symbol,
@@ -549,7 +566,7 @@ object RiskAndCalendarEngine {
 
         val oneR = abs(trade.entry - fixedStopLoss)
         val decimals = priceDecimals(trade.symbol, trade.entry)
-        val effectiveTp = when (trade.action) {
+        val effectiveTp = if (trade.netSettlementEnabled) trade.takeProfit else when (trade.action) {
             SignalAction.BUY -> {
                 if (oneR > 1e-8) {
                     val min15R = roundToDecimals(trade.entry + 1.5 * oneR, decimals)
@@ -618,7 +635,7 @@ object RiskAndCalendarEngine {
         val fixedStopLoss = trade.initialStopLoss ?: trade.stopLoss
         val oneR = abs(trade.entry - fixedStopLoss)
         val decimals = priceDecimals(trade.symbol, trade.entry)
-        val effectiveTp = when (trade.action) {
+        val effectiveTp = if (trade.netSettlementEnabled) trade.takeProfit else when (trade.action) {
             SignalAction.BUY -> {
                 if (oneR > 1e-8) {
                     val min15R = roundToDecimals(trade.entry + 1.5 * oneR, decimals)
@@ -724,6 +741,10 @@ object RiskAndCalendarEngine {
             exitPrice - trade.entry
         } else {
             trade.entry - exitPrice
+        }
+        if (trade.netSettlementEnabled) {
+            val gross = PaperOrderRules.quotePnlToUsd(trade.symbol, diffPerUnit * trade.positionOz, trade.entry)
+            return round2(gross) to round2(gross - trade.settlementFeeUsd)
         }
         val initialStopDist = abs(trade.entry - (trade.initialStopLoss ?: trade.stopLoss))
         if (trade.fixedRiskUsd > 0.0 && initialStopDist > 1e-9) {

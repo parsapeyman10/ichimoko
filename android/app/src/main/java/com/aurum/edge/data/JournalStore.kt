@@ -442,6 +442,7 @@ class JournalStore(
         gaugeCandles4h: List<Candle> = emptyList(),
         /** حالت بازار در لحظهٔ ورود (از گزارش استراتژی). خالی = فقط سشن ثبت می‌شود. */
         stateInputs: com.aurum.edge.core.NeuralStateInputs? = null,
+        enforceProfitRisk: Boolean = false,
     ): PaperTrade? {
         // ── قاعدهٔ «یک معاملهٔ باز برای هر استراتژی» ─────────────────────────────
         // تا تکلیف معاملهٔ باز روشن نشود، همین استراتژی معاملهٔ تازه نمی‌گیرد. این گارد در خودِ
@@ -449,6 +450,9 @@ class JournalStore(
         // `now` باید به گارد برسد؛ وگرنه یک ورود با زمان مشخص (تست/بازپخش) با ساعت دیوار سنجیده
         // می‌شود و دورهٔ خنک‌شدن هرگز تمام‌شده دیده نمی‌شود.
         if (entryBlockReasonFa(calc.symbol, strategyId, now = now) != null) return null
+        if (enforceProfitRisk && com.aurum.edge.core.ProfitRiskPolicy.planErrorFa(
+                calc, _trades.value, settingsStore?.read()?.accountBalance ?: calc.accountBalance,
+            ) != null) return null
         // This synchronous API can be called from a UI action. Use memory-only candles here;
         // parsing the on-device CandleVault is disk I/O and used to freeze the main thread on entry.
         val effectiveCandles = preEntryCandles.ifEmpty {

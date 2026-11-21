@@ -215,6 +215,9 @@ data class PaperTrade(
     val strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
     val strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
     val fixedRiskUsd: Double = 0.0,
+    /** New trades settle from actual units and the entry-time fee estimate; older trades retain legacy settlement. */
+    val netSettlementEnabled: Boolean = false,
+    val settlementFeeUsd: Double = 0.0,
     val optimalRiskReward: Double = 0.0,
     val rrBreakdownFa: String = "",
     val preEntry3CandleCategoryCode: String = "",

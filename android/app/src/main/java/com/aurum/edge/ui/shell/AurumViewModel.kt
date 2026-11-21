@@ -1195,6 +1195,10 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
+        com.aurum.edge.core.ProfitRiskPolicy.planErrorFa(calc, trades.value, settings.value.accountBalance)?.let { reason ->
+            _toast.value = "⛔ $reason"
+            return
+        }
         container.journalStore.openTradeBlockedByFa(calc.symbol, strategyId)?.let { reason ->
             _toast.value = reason
             return
@@ -1235,6 +1239,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             optimalRiskReward = matchedBreakdown?.optimalRiskReward ?: calc.riskReward,
             rrBreakdownFa = matchedBreakdown?.optimalRrReasonFa ?: "",
             preEntryCandles = entryCandles,
+            enforceProfitRisk = true,
             gaugeCandles1h = gauge1h,
             gaugeCandles4h = gauge4h,
             stateInputs = com.aurum.edge.core.NeuralStateFeatures.fromReport(
@@ -1245,6 +1250,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         )
         val opened = openedRaw ?: run {
             _toast.value = container.journalStore.openTradeBlockedByFa(calc.symbol, strategyId)
+                ?: com.aurum.edge.core.ProfitRiskPolicy.planErrorFa(calc, trades.value, settings.value.accountBalance)
                 ?: "⛔ معامله باز نشد (همین لحظه روی همین نماد یا همین استراتژی معاملهٔ باز هست)"
             return
         }

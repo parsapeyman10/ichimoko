@@ -393,7 +393,7 @@ fun SettingsScreen(
 
                     // دامنهٔ دلاری هدف، از همان مبلغ ریسک: ۱٫۵R تا ۳R
                     Text(
-                        text = "۱٫۵R → " + String.format(Locale.US, "$%.2f", activeRiskUsd * 1.5) +
+                        text = "۲R → " + String.format(Locale.US, "$%.2f", activeRiskUsd * 2.0) +
                             "  ·  ۳R → " + String.format(Locale.US, "$%.2f", activeRiskUsd * 3.0),
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.Green,
@@ -519,6 +519,7 @@ fun SettingsScreen(
                     symbol = activeSymbol,
                     referencePrice = liveTicks[activeSymbol]?.price,
                     lastTrade = trades.maxByOrNull { it.openedAt },
+                    trades = trades,
                 )
 
                 CapitalAndRiskLimitsCard(

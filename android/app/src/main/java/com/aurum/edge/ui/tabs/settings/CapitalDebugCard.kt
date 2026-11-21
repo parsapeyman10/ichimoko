@@ -96,9 +96,13 @@ internal fun CapitalDebugCard(
     symbol: String,
     referencePrice: Double?,
     lastTrade: PaperTrade?,
+    trades: List<PaperTrade>,
 ) {
-    val policy = remember(settings) { CapitalPolicy.from(settings) }
-    val findings = remember(settings) { policy.findings() }
+    val policy = remember(settings, trades) { CapitalPolicy.from(settings).copy(
+        useFixedDollarRisk = true,
+        fixedRiskUsd = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades, settings.accountBalance),
+    ) }
+    val findings = remember(policy) { policy.findings() }
     val context = LocalContext.current
 
     var auditMode by rememberSaveable { mutableStateOf(false) }
@@ -149,10 +153,10 @@ internal fun CapitalDebugCard(
         // ── ۱) یافته‌های خودِ تنظیمات (مستقل از نماد) ─────────────────────────────
         Text(
             text = "مبنای ریسک: " + (if (policy.useFixedDollarRisk) {
-                "ثابت $" + money(policy.riskBudgetUsd)
+                "۵ دلار + ۰٫۵٪ سود واجد شرایط = $" + money(policy.riskBudgetUsd)
             } else {
                 num(policy.riskPercent) + "٪ × $" + money(policy.accountBalance) + " = $" + money(policy.riskBudgetUsd)
-            }) + " · هدف: $" + money(policy.rewardFloorUsd) + " تا $" + money(policy.rewardCeilingUsd),
+            }) + " · هدف: $" + money(policy.riskBudgetUsd * 2.0) + " تا $" + money(policy.rewardCeilingUsd),
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextSecondary,
             modifier = Modifier.padding(top = 2.dp),
