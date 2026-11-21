@@ -1,0 +1,310 @@
+//@lipi=2
+// BASE_ICHIMOKU Lite audit for a standard 15-minute GoCharting chart only.
+//
+// This native-only Lite version deliberately calculates no 30m, 1H or other
+// higher-timeframe candles. Every decision comes from a confirmed 15m candle.
+// Only the real SL and TP levels are drawn; no indicator or entry line is shown.
+// Orders are simulated by GoCharting only; nothing is routed to an exchange.
+strategy("BASE Ichimoku native 15m audit", overlay=true, initial_capital=1000, default_qty_type=strategy.fixed, default_qty_value=1, commission_type=strategy.commission_percent, commission_value=0.105, pyramiding=0, process_orders_on_close=false, max_lines_count=500)
+
+int TENKAN = input.int(9, "Tenkan", minval=2)
+int KIJUN = input.int(26, "Kijun", minval=2)
+int SPAN_B = input.int(52, "Senkou B", minval=2)
+int DISPLACEMENT = input.int(26, "Displacement", minval=2)
+float targetRr = input.float(2.25, "Target R:R (set before backtest quantity)", minval=1.50, maxval=3.00, step=0.05)
+float qty = input.float(1.0, "Backtest quantity (set after R:R)", minval=0.000001, step=0.01)
+bool enableSmartExit = input.bool(true, "Enable smart trend exit")
+int smartExitConfirmations = input.int(2, "Smart exit: required confirmations", minval=2, maxval=3)
+bool allowLong = input.bool(true, "Enable long")
+bool allowShort = input.bool(true, "Enable short")
+bool showRawTriggers = input.bool(false, "DEBUG: show raw triggers rejected by gate")
+bool debugVirtualTriggerTrades = input.bool(false, "DEBUG ONLY: simulate raw triggers")
+float maxKijunExtensionAtr = input.float(1.80, "Max Kijun extension (ATR)", minval=0.50, step=0.05)
+float slBufferAtr = input.float(0.25, "Structural SL buffer (ATR)", minval=0.15, step=0.01)
+float roundTripCostPct = input.float(0.0021, "Round-trip cost fraction", minval=0.0, step=0.0001)
+
+// This script intentionally has no HTF arrays, buckets or resampling. The
+// native 15m Ichimoku values below are evaluated only when the chart candle is
+// confirmed, so the strategy cannot use a partly formed candle as a signal.
+bool chartIs15m = interval.isminutes and interval.multiplier == 15
+bool closed15m = chartIs15m and barstate.isconfirmed
+
+float tenkan15 = (talib.highest(high, TENKAN) + talib.lowest(low, TENKAN)) / 2.0
+float kijun15 = (talib.highest(high, KIJUN) + talib.lowest(low, KIJUN)) / 2.0
+float spanA15 = (tenkan15 + kijun15) / 2.0
+float spanB15 = (talib.highest(high, SPAN_B) + talib.lowest(low, SPAN_B)) / 2.0
+float currentA15 = spanA15[DISPLACEMENT - 1]
+float currentB15 = spanB15[DISPLACEMENT - 1]
+float top15 = math.max(currentA15, currentB15)
+float bottom15 = math.min(currentA15, currentB15)
+float atr15 = math.max(talib.atr(14), close * 0.0005)
+// Native 15m line geometry. The TK gap identifies a fresh squeeze expansion;
+// the Kumo gap is measured where the cloud is currently visible to price.
+float tkGapAtr15 = math.abs(tenkan15 - kijun15) / math.max(atr15, 0.00000001)
+float visibleKumoGapAtr15 = math.abs(currentA15 - currentB15) / math.max(atr15, 0.00000001)
+bool tkGapExpanding15 = tkGapAtr15 > tkGapAtr15[1] and tkGapAtr15[1] <= tkGapAtr15[2]
+bool tkGapContracting15 = tkGapAtr15 < tkGapAtr15[1] and tkGapAtr15[1] >= tkGapAtr15[2]
+float priorHigh15 = talib.highest(high[1], 20)
+float priorLow15 = talib.lowest(low[1], 20)
+float chikouPeak15 = talib.highest(close[1], KIJUN)
+float chikouTrough15 = talib.lowest(close[1], KIJUN)
+float volumeAverage15 = talib.sma(volume, 20)
+float volumeRatio15 = volumeAverage15 > 0.0 ? volume / volumeAverage15 : 1.0
+float range15 = math.max(high - low, 0.00000001)
+float body15 = math.abs(close - open) / range15
+float clv15 = math.min(1.0, math.max(0.0, (close - low) / range15))
+float upperWick15 = math.max(0.0, (high - math.max(open, close)) / range15)
+float lowerWick15 = math.max(0.0, (math.min(open, close) - low) / range15)
+float flatTolerance15 = math.max(close * 0.0003, atr15 * 0.04)
+bool nativeKijunFlat = math.abs(kijun15 - kijun15[1]) <= flatTolerance15
+bool nativeSsbFlat = math.abs(currentB15 - currentB15[1]) <= flatTolerance15
+bool chikouBull15 = close > talib.highest(high[DISPLACEMENT - 1], 7)
+bool chikouBear15 = close < talib.lowest(low[DISPLACEMENT - 1], 7)
+float erPath15 = talib.sma(math.abs(close - close[1]), 14) * 14.0
+float er15 = erPath15 > 0.00000001 ? math.min(1.0, math.abs(close - close[14]) / erPath15) : 0.5
+bool dataReady = closed15m and not na(currentA15) and not na(currentB15) and not na(er15)
+
+// Native 15m-only BASE Lite gates. No higher-timeframe bias or confirmation
+// is calculated in this version.
+bool bullishBias = close > top15
+bool bearishBias = close < bottom15
+bool isLong = bullishBias and not bearishBias ? true : bearishBias and not bullishBias ? false : tenkan15 >= kijun15
+bool c1 = isLong ? bullishBias : bearishBias
+bool c2 = isLong ? tenkan15 >= kijun15 : tenkan15 <= kijun15
+bool c3 = isLong ? tenkan15 >= tenkan15[1] - atr15 * 0.05 : tenkan15 <= tenkan15[1] + atr15 * 0.05
+bool c4 = isLong ? (spanA15 > spanB15 and spanA15 >= spanA15[1]) : (spanA15 < spanB15 and spanA15 <= spanA15[1])
+// A new trend leg must show a fresh Tenkan/Kijun expansion while the
+// visible native-15m Kumo has real separation; a flat/squeezed structure is
+// not sufficient for an entry.
+bool c5 = tkGapExpanding15 and visibleKumoGapAtr15 >= 0.05
+bool c6 = isLong ? chikouBull15 : chikouBear15
+bool c7 = isLong ? close >= chikouPeak15 - atr15 * 0.15 : close <= chikouTrough15 + atr15 * 0.15
+bool c8 = math.abs(close - kijun15) / atr15 <= maxKijunExtensionAtr and not (nativeKijunFlat and nativeSsbFlat)
+bool c9 = isLong ? close >= top15 + (nativeSsbFlat ? atr15 * 0.15 : 0.0) : close <= bottom15 - (nativeSsbFlat ? atr15 * 0.15 : 0.0)
+bool c10 = not (nativeKijunFlat and nativeSsbFlat)
+bool directionalCandle = isLong ? (close > open and clv15 >= 0.45 and body15 >= 0.22) : (close < open and clv15 <= 0.55 and body15 >= 0.22)
+bool c11 = directionalCandle and volumeRatio15 >= 0.60
+bool c13 = er15 >= 0.20 and not nativeKijunFlat
+bool c14 = isLong ? (upperWick15 <= 0.45 and (body15 >= 0.22 or lowerWick15 >= 0.25)) : (lowerWick15 <= 0.45 and (body15 >= 0.22 or upperWick15 >= 0.25))
+bool c15 = c13 and c8 and (isLong ? tenkan15 >= kijun15 : tenkan15 <= kijun15)
+
+bool triggerKatana = isLong ? (talib.crossover(tenkan15, kijun15) and close > top15 and close > open) : (talib.crossunder(tenkan15, kijun15) and close < bottom15 and close < open)
+bool triggerPullback = isLong ? (low <= math.max(tenkan15, kijun15) + atr15 * 0.25 and close > tenkan15 and close > top15 and close > open) : (high >= math.min(tenkan15, kijun15) - atr15 * 0.25 and close < tenkan15 and close < bottom15 and close < open)
+bool triggerBreakout = isLong ? (close > priorHigh15 and close > top15 + atr15 * 0.10 and close >= chikouPeak15 and close > open) : (close < priorLow15 and close < bottom15 - atr15 * 0.10 and close <= chikouTrough15 and close < open)
+// This catches the fresh native-15m line expansion visible in the marked
+// chart examples without waiting for a separate higher-timeframe condition.
+bool triggerExpansion = isLong ? (c5 and close > top15 and close > tenkan15 and close > open) : (c5 and close < bottom15 and close < tenkan15 and close < open)
+bool triggerFired = triggerKatana or triggerPullback or triggerBreakout or triggerExpansion
+
+float entryAnchor = close
+float stopFloor = math.max(close * 0.0025, atr15 * 0.80)
+float stopCeiling = math.max(stopFloor, atr15 * 2.10)
+float rawStop = isLong ? kijun15 - atr15 * slBufferAtr : kijun15 + atr15 * slBufferAtr
+float rawStopDistance = math.abs(entryAnchor - rawStop)
+float stopDistance = math.min(math.max(rawStopDistance, stopFloor), stopCeiling)
+float targetDistance = stopDistance * targetRr
+float stopPrice = isLong ? entryAnchor - stopDistance : entryAnchor + stopDistance
+float targetPrice = isLong ? entryAnchor + targetDistance : entryAnchor - targetDistance
+float rr = targetDistance / math.max(stopDistance, 0.00000001)
+bool c12 = rr >= 1.5 and rr <= 3.0 and targetDistance >= entryAnchor * roundTripCostPct * 2.0
+bool c16 = math.abs(close - tenkan15) / atr15 <= 0.85
+float costToRisk = entryAnchor * roundTripCostPct / math.max(stopDistance, 0.00000001)
+bool c17 = costToRisk <= 0.45
+
+float regimeScore = (c1 ? 1.0 : 0.0) + (c3 ? 1.0 : 0.0) + (c4 ? 1.0 : 0.0) + (c6 ? 1.0 : 0.0) + (c17 ? 1.2 : 0.0)
+float qualityScore = (c5 ? 0.6 : 0.0) + (c8 ? 1.0 : 0.0) + (c9 ? 1.0 : 0.0) + (c13 ? 1.0 : 0.0) + (c14 ? 0.6 : 0.0) + (c15 ? 1.0 : 0.0)
+float triggerScore = (c2 ? 0.6 : 0.0) + (c7 ? 0.6 : 0.0) + (c10 ? 0.8 : 0.0) + (c11 ? 1.2 : 0.0) + (c12 ? 1.0 : 0.0) + (c16 ? 1.2 : 0.0) + (c17 ? 1.2 : 0.0)
+float bookPct = (regimeScore + qualityScore + triggerScore) / 17.0 * 100.0
+float qualityPct = qualityScore / 5.2 * 100.0
+float triggerPct = triggerScore / 6.6 * 100.0
+// For a fresh 15m expansion, current price/Kumo placement and TK direction
+// are non-negotiable. Future-cloud and Chikou remain scored confirmations,
+// not hard blocks that would delay the marked early trend entries.
+bool hardVetoPassed = c1 and c2 and c3 and c5 and c17
+bool bookFires = hardVetoPassed and qualityPct >= 60.0 and triggerPct >= 60.0 and bookPct >= 70.0
+int passedCount = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0) + (c6 ? 1 : 0) + (c7 ? 1 : 0) + (c8 ? 1 : 0) + (c9 ? 1 : 0) + (c10 ? 1 : 0) + (c11 ? 1 : 0) + (c12 ? 1 : 0) + (c13 ? 1 : 0) + (c14 ? 1 : 0) + (c15 ? 1 : 0) + (c16 ? 1 : 0) + (c17 ? 1 : 0)
+
+bool strictSignal = dataReady and triggerFired and bookFires
+bool rawTrigger = dataReady and triggerFired and not strictSignal
+bool debugSignal = debugVirtualTriggerTrades and rawTrigger
+bool entryDecision = strictSignal or debugSignal
+
+// Smart exit is confirmed only on a closed 15m candle. A long must turn
+// adverse in at least two of: Kijun, TK state, cloud state. Line contraction
+// is additionally required unless TK itself has crossed against the trade;
+// this avoids treating an ordinary pullback as a finished trend.
+bool smartLongKijun = close < kijun15
+bool smartLongTk = tenkan15 < kijun15
+bool smartLongCloud = close < top15
+bool smartLongLineFade = tkGapContracting15 or smartLongTk
+int smartLongCount = (smartLongKijun ? 1 : 0) + (smartLongTk ? 1 : 0) + (smartLongCloud ? 1 : 0)
+bool smartShortKijun = close > kijun15
+bool smartShortTk = tenkan15 > kijun15
+bool smartShortCloud = close > bottom15
+bool smartShortLineFade = tkGapContracting15 or smartShortTk
+int smartShortCount = (smartShortKijun ? 1 : 0) + (smartShortTk ? 1 : 0) + (smartShortCloud ? 1 : 0)
+bool smartExitLong = enableSmartExit and closed15m and strategy.position_size > 0 and smartLongLineFade and smartLongCount >= smartExitConfirmations
+bool smartExitShort = enableSmartExit and closed15m and strategy.position_size < 0 and smartShortLineFade and smartShortCount >= smartExitConfirmations
+
+// One lifecycle lock covers both the next-open pending order and the open
+// position. A same-direction re-entry lock remains after an exit, so one
+// Ichimoku trend leg cannot be traded twice just because its bracket closed.
+int MAX_RETAINED_BRACKETS = 200
+static int tradeLockState = 0 // 0=idle, 1=submitted/pending, 2=open
+static int lockedSignalBar = na
+static int pendingSide = 0
+static float pendingStopPrice = na
+static float pendingTargetPrice = na
+static int observedClosedTrades = 0
+static line activeStopLine = na
+static line activeTargetLine = na
+static float activeStopPrice = na
+static float activeTargetPrice = na
+static bool bracketIsLive = false
+static bool longTrendEntryArmed = true
+static bool shortTrendEntryArmed = true
+static array<line> bracketHistory = array.new<line>(0)
+
+// A direction becomes eligible again only after the native 15m Ichimoku
+// structure has reset: TK reverses or price reaches the opposite Kumo edge.
+// This uses the same closed 15m lines used by bias and Smart Trend Exit.
+bool longTrendReset = dataReady and closed15m and (tenkan15 < kijun15 or close <= bottom15)
+bool shortTrendReset = dataReady and closed15m and (tenkan15 > kijun15 or close >= top15)
+if longTrendReset {
+    longTrendEntryArmed := true
+}
+if shortTrendReset {
+    shortTrendEntryArmed := true
+}
+
+// A closed-trade count also catches a fill and exit within one historical bar.
+bool tradeClosedThisBar = strategy.closedtrades > observedClosedTrades
+bool justOpened = strategy.position_size != 0 and strategy.position_size[1] == 0
+bool filledAndClosedThisBar = tradeLockState == 1 and strategy.position_size == 0 and tradeClosedThisBar
+bool canOpenSingleTrade = tradeLockState == 0 and strategy.position_size == 0
+bool blockedByOpenTrade = entryDecision and not canOpenSingleTrade
+bool blockedBySameTrend = entryDecision and canOpenSingleTrade and (isLong ? not longTrendEntryArmed : not shortTrendEntryArmed)
+bool enterLong = entryDecision and canOpenSingleTrade and longTrendEntryArmed and isLong and allowLong
+bool enterShort = entryDecision and canOpenSingleTrade and shortTrendEntryArmed and not isLong and allowShort
+
+// Submit a next-open market entry and freeze the exact bracket prices. The
+// prices are sent to strategy.exit only after GoCharting reports an open fill.
+if enterLong {
+    // Consume this direction for the current native-15m Ichimoku trend leg.
+    // A later Long needs a real TK/Kumo reset before it can be submitted.
+    longTrendEntryArmed := false
+    tradeLockState := 1
+    lockedSignalBar := bar_index
+    pendingSide := 1
+    pendingStopPrice := stopPrice
+    pendingTargetPrice := targetPrice
+    strategy.entry("Lite Long", strategy.long, qty=qty, comment=debugSignal ? "DEBUG raw trigger long" : "BASE Lite long")
+}
+if enterShort {
+    // Consume this direction for the current native-15m Ichimoku trend leg.
+    // A later Short needs a real TK/Kumo reset before it can be submitted.
+    shortTrendEntryArmed := false
+    tradeLockState := 1
+    lockedSignalBar := bar_index
+    pendingSide := -1
+    pendingStopPrice := stopPrice
+    pendingTargetPrice := targetPrice
+    strategy.entry("Lite Short", strategy.short, qty=qty, comment=debugSignal ? "DEBUG raw trigger short" : "BASE Lite short")
+}
+
+// Place and keep the exact frozen bracket live after a fill; no price is
+// recomputed from subsequent candles.
+if strategy.position_size > 0 and tradeLockState != 0 {
+    strategy.exit("Lite Long exit", from_entry="Lite Long", stop=pendingStopPrice, limit=pendingTargetPrice)
+}
+if strategy.position_size < 0 and tradeLockState != 0 {
+    strategy.exit("Lite Short exit", from_entry="Lite Short", stop=pendingStopPrice, limit=pendingTargetPrice)
+}
+
+// This market close is submitted only after the configured number of native
+// 15m trend-end confirmations. The lifecycle lock remains active until fill.
+if smartExitLong {
+    strategy.close("Lite Long", comment="smart trend exit")
+}
+if smartExitShort {
+    strategy.close("Lite Short", comment="smart trend exit")
+}
+
+// The chart shows only the exact real SL (red) and TP (green). There is no
+// entry line, formula label or numeric annotation on the chart.
+if justOpened {
+    tradeLockState := 2
+    activeStopPrice := pendingStopPrice
+    activeTargetPrice := pendingTargetPrice
+    activeStopLine := line.new(lockedSignalBar + 1, activeStopPrice, bar_index, activeStopPrice, extend=extend.none, color=color.red, style=line.style_solid, width=2)
+    activeTargetLine := line.new(lockedSignalBar + 1, activeTargetPrice, bar_index, activeTargetPrice, extend=extend.none, color=color.lime, style=line.style_solid, width=2)
+    bracketIsLive := true
+}
+
+// Keep SL/TP visible even if a trade fills and exits within one historical bar.
+if filledAndClosedThisBar {
+    activeStopPrice := pendingStopPrice
+    activeTargetPrice := pendingTargetPrice
+    activeStopLine := line.new(lockedSignalBar + 1, activeStopPrice, bar_index, activeStopPrice, extend=extend.none, color=color.red, style=line.style_solid, width=2)
+    activeTargetLine := line.new(lockedSignalBar + 1, activeTargetPrice, bar_index, activeTargetPrice, extend=extend.none, color=color.lime, style=line.style_solid, width=2)
+    bracketIsLive := true
+}
+
+if strategy.position_size != 0 and bracketIsLive and not justOpened {
+    line.set_xy2(activeStopLine, bar_index, activeStopPrice)
+    line.set_xy2(activeTargetLine, bar_index, activeTargetPrice)
+}
+
+if tradeClosedThisBar {
+    if bracketIsLive {
+        line.set_xy2(activeStopLine, bar_index, activeStopPrice)
+        line.set_xy2(activeTargetLine, bar_index, activeTargetPrice)
+        array.push(bracketHistory, activeStopLine)
+        array.push(bracketHistory, activeTargetLine)
+        if array.length(bracketHistory) > MAX_RETAINED_BRACKETS * 2 {
+            line.delete(array.shift(bracketHistory))
+            line.delete(array.shift(bracketHistory))
+        }
+    }
+    bracketIsLive := false
+    activeStopPrice := na
+    activeTargetPrice := na
+    tradeLockState := 0
+    lockedSignalBar := na
+    pendingSide := 0
+    pendingStopPrice := na
+    pendingTargetPrice := na
+}
+
+// An unfilled market order can only remain pending at the last unavailable
+// next-open. Keep it locked until a fill/close is observable; never submit a
+// second direction while the lifecycle is unresolved.
+if strategy.closedtrades > observedClosedTrades {
+    observedClosedTrades := strategy.closedtrades
+}
+
+// The strategy engine supplies its own single order marker. The script draws
+// no duplicate entry marker, indicator plot or numeric annotation.
+plotshape(showRawTriggers and rawTrigger and isLong, title="Raw long trigger", location=location.belowbar, shape=shape.diamond, color=color.aqua, size=size.tiny, text="RAW")
+plotshape(showRawTriggers and rawTrigger and not isLong, title="Raw short trigger", location=location.abovebar, shape=shape.diamond, color=color.aqua, size=size.tiny, text="RAW")
+plotshape(showRawTriggers and blockedByOpenTrade, title="Signal ignored while trade locked", location=location.top, shape=shape.xcross, color=color.yellow, size=size.tiny, text="LOCK")
+
+static table dashboard = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 0.25), border_width=1)
+if barstate.islast {
+    table.cell(dashboard, 0, 0, "BASE LITE NATIVE 15m")
+    table.cell(dashboard, 1, 0, chartIs15m ? "15m OK" : "CHANGE TO 15m", textcolor=chartIs15m ? color.lime : color.red)
+    table.cell(dashboard, 0, 1, "Data")
+    table.cell(dashboard, 1, 1, dataReady ? "READY" : "WARM-UP: need 80 x 15m", textcolor=dataReady ? color.lime : color.orange)
+    table.cell(dashboard, 0, 2, "Bias")
+    table.cell(dashboard, 1, 2, dataReady ? (isLong ? "LONG" : "SHORT") : "-")
+    table.cell(dashboard, 0, 3, "Trigger")
+    table.cell(dashboard, 1, 3, triggerKatana ? "KATANA" : triggerPullback ? "PULLBACK" : triggerBreakout ? "BREAKOUT" : triggerExpansion ? "EXPANSION" : "-", textcolor=triggerFired ? color.aqua : color.gray)
+    table.cell(dashboard, 0, 4, "Conditions")
+    table.cell(dashboard, 1, 4, str.tostring(passedCount) + " / 17")
+    table.cell(dashboard, 0, 5, "Book gate")
+    table.cell(dashboard, 1, 5, str.tostring(bookPct, "#.0") + "%", textcolor=bookFires ? color.lime : color.orange)
+    table.cell(dashboard, 0, 6, "Model")
+    table.cell(dashboard, 1, 6, "NATIVE 15m ONLY", textcolor=color.aqua)
+    table.cell(dashboard, 0, 7, "Status")
+    table.cell(dashboard, 1, 7, smartExitLong ? "SMART EXIT LONG" : smartExitShort ? "SMART EXIT SHORT" : tradeLockState != 0 ? "LOCKED: ONE TRADE" : blockedBySameTrend ? (isLong ? "WAIT: LONG REARM" : "WAIT: SHORT REARM") : strictSignal ? "STRICT SIGNAL" : debugSignal ? "DEBUG ENTRY" : rawTrigger ? "RAW BLOCKED" : hardVetoPassed ? "WAITING" : "HARD VETO", textcolor=(smartExitLong or smartExitShort) ? color.orange : tradeLockState != 0 ? color.yellow : blockedBySameTrend ? color.yellow : strictSignal ? color.lime : debugSignal ? color.aqua : rawTrigger ? color.orange : hardVetoPassed ? color.yellow : color.red)
+}

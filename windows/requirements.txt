@@ -1,0 +1,2 @@
+# Runtime dependency for the cross-platform PyQt desktop source application.
+PyQt6>=6.7,<6.10

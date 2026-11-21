@@ -3,6 +3,12 @@ android/.gradle/
 android/build/
 android/app/build/
 android/local.properties
+
+# Windows Python local build output
+windows/.build-venv/
+windows/build*/
+windows/dist-local/
+windows/spec-local/
 android/.idea/
 *.apk
 *.keystore
@@ -28,3 +34,9 @@ google_drive/
 # Local measurement rig output (tools/strategy_lab) — jars/JDK/work dirs must never be committed.
 tools/strategy_lab/*.jar
 tools/strategy_lab/node_modules/
+
+# Local PyInstaller build environment and Windows executable output.
+tools/windows_backtest_app/.build-venv/
+tools/windows_backtest_app/build-local/
+tools/windows_backtest_app/dist-local/
+tools/windows_backtest_app/spec-local/
