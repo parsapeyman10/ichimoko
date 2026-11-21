@@ -953,7 +953,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             )
         }
         val base = if (safe.useFixedDollarRisk) {
-            "✅ موجودی حساب ($${String.format(Locale.US, "%,.0f", safe.accountBalance)}) با ریسک ثابت $${String.format(Locale.US, "%.2f", safe.fixedRiskUsd)} در هر معامله ذخیره شد"
+            "✅ تنظیمات ذخیره شد؛ ریسک معامله طبق فرمول ۵ دلار + ۰٫۵٪ سود واجد شرایط محاسبه می‌شود."
         } else {
             "تنظیمات مدیریت سرمایه و ریسک ذخیره شد"
         }

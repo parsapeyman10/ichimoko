@@ -140,12 +140,11 @@ object TradeOutcomeExplainer {
         if (mfeR >= 0.0) {
             reasons += "بیشترین سود شناور " + f(mfeR) + "R بود و بیشترین ضرر شناور " + f(maeR) + "R؛ " +
                 when {
-                    isWin && mfeR - finalR >= 0.8 -> "یعنی بعد از هدف هم حرکت ادامه داشت و " +
-                        f(mfeR - finalR) + "R از مسیر بی‌استفاده ماند."
-                    isWin -> "یعنی مسیر تا هدف تقریباً یک‌طرفه بود."
-                    mfeR >= 0.8 -> "یعنی معامله اول در جهت سود رفت و بعد برگشت؛" +
-                        " برگشت از سود می‌آید، نه از ورود اشتباه."
-                    else -> "یعنی معامله از همان ابتدا در جهت مخالف رفت."
+                    isWin && mfeR - finalR >= 0.8 -> "بیشینهٔ ثبت‌شده " +
+                        f(mfeR - finalR) + "R بالاتر از خروج بود؛ ترتیب حرکت در کندل مشخص نیست."
+                    isWin -> "این اعداد نوسان ثبت‌شده را نشان می‌دهند، نه علت قطعی برد."
+                    mfeR >= 0.8 -> "بیشینهٔ ثبت‌شده مثبت بود ولی نتیجه منفی شد؛ ترتیب دقیق در هر کندل مشخص نیست."
+                    else -> "سود شناور ثبت‌شده محدود بود؛ ترتیب دقیق حرکت مشخص نیست."
                 }
         }
         if (!isWin && mfeR >= 0.0 && mfeR < 0.2) tags += Tags.NEVER_IN_PROFIT
@@ -158,13 +157,12 @@ object TradeOutcomeExplainer {
             if (kumoThickness >= 0.8) {
                 tags += Tags.HEAVY_KUMO
                 if (!isWin) {
-                    reasons += "ابر لحظهٔ ورود ضخیم بود (" + f(kumoThickness) + " ATR)؛ ورود از داخل/لبهٔ " +
-                        "ابر ضخیم یعنی قیمت باید کل ابر را رد کند و برگشت سریع‌تر رخ می‌دهد."
+                    reasons += "ابر لحظهٔ ورود ضخیم بود (" + f(kumoThickness) + " ATR)؛ این ویژگی به‌تنهایی علت باخت را ثابت نمی‌کند."
                 }
             }
             if (kumoThickness in 0.0..0.25) {
                 tags += Tags.KUMO_ENTRY
-                if (isWin) reasons += "ابر نازک بود (" + f(kumoThickness) + " ATR)؛ عبور از آن کم‌هزینه بود."
+                if (isWin) reasons += "ابر هنگام ورود نازک بود (" + f(kumoThickness) + " ATR)."
             }
         }
 
@@ -174,8 +172,7 @@ object TradeOutcomeExplainer {
             if (distKijun >= 1.5) {
                 tags += Tags.FAR_FROM_KIJUN
                 tags += Tags.LATE_ENTRY
-                reasons += "فاصلهٔ ورود از کیه‌جین " + f(distKijun) + " ATR بود؛ ورود دیرهنگام یعنی حد ضرر " +
-                    "دورتر می‌افتد و برگشتِ کوچک هم آن را می‌زند."
+                reasons += "فاصلهٔ ورود از کیه‌جین " + f(distKijun) + " ATR بود؛ برچسب ورود دیرهنگام برای بررسی."
             } else if (distKijun <= 0.6) {
                 reasons += "ورود نزدیک کیه‌جین (" + f(distKijun) + " ATR) بود؛ نقطهٔ ورود متعارف."
             }
@@ -189,7 +186,7 @@ object TradeOutcomeExplainer {
                 reasons += "کارایی روند (ER14) در لحظهٔ ورود " + f(er) + " بود؛ بازار بی‌روند و بازگشتی بود."
             } else if (er >= 0.45) {
                 tags += Tags.CLEAN_TREND
-                if (isWin) reasons += "ER14 برابر " + f(er) + " بود؛ بازار رونددار و هم‌جهت با سیگنال."
+                if (isWin) reasons += "ER14 برابر " + f(er) + " بود؛ کارایی حرکت بالا ثبت شد."
             }
         }
         val atrPct = trade.stateAtrPctOfPrice
@@ -201,7 +198,7 @@ object TradeOutcomeExplainer {
         val vol = trade.stateVolumeRatio20
         if (vol >= 0.0 && vol < 0.8) {
             tags += Tags.THIN_VOLUME
-            reasons += "حجم " + f(vol) + " برابر میانگین ۲۰ کندل بود؛ حرکت پشتوانهٔ حجمی نداشت."
+            reasons += "حجم " + f(vol) + " برابر میانگین ۲۰ کندل بود."
         }
 
         // ۷) زمان
@@ -212,8 +209,7 @@ object TradeOutcomeExplainer {
             }
             if (!isWin && barsHeld >= 20) {
                 tags += Tags.SLOW_BLEED
-                reasons += "باخت " + barsHeld + " کندل طول کشید؛ این‌طور باخت‌ها معمولاً از بی‌روندی " +
-                    "می‌آیند نه از یک شکست ناگهانی."
+                reasons += "باخت " + barsHeld + " کندل طول کشید؛ علت آن از این داده به‌تنهایی مشخص نیست."
             }
         }
 
@@ -225,7 +221,7 @@ object TradeOutcomeExplainer {
             !isWin && Tags.CHOP in tags ->
                 "درس: ER14 زیر ۰٫۲۵ یعنی بازار روند ندارد؛ سیگنال‌های شکست در چنین بازاری برمی‌گردند."
             isWin && Tags.LEFT_RUNNER in tags ->
-                "درس: مسیر ادامه داشت و هدف زودتر بسته شد؛ ارزش بررسی تریلینگ/قفل سود را دارد."
+                "درس: اختلاف بیشینه و خروج ارزش بررسی دارد؛ ترتیب حرکت در کندل مشخص نیست."
             isWin -> "درس: همین ترکیب وضعیت، برد داده است."
             else -> "درس: مسیر معامله ثبت شد تا در آمار همان وضعیت شمرده شود."
         }
