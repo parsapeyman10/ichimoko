@@ -238,7 +238,7 @@ fun BitcoinIchimokuStrategyCard(
                         stopLoss = sl,
                         takeProfit = tp,
                         preferredAction = evalReport.action,
-                        fixedRiskUsdOverride = if (settings.useFixedDollarRisk) settings.fixedRiskUsd else null,
+                        fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(settings.fixedRiskUsd),
                     )
                     if (calc != null) {
                         viewModel.openAutoTrackedTrade(

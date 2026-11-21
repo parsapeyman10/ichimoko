@@ -118,6 +118,12 @@ fun NeuralBrainScreen(
             .padding(bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // 🧠 عمق یادگیری: شبکهٔ ۱۸۰حالتی (فاز × سشن × نوسان × دالان R) از معامله‌های واقعی
+        NeuralDepthCard(trades = trades, settings = settings)
+
+        // 🧾 «دلیل برد و دلیل باخت»: کدام حالت‌های بازار با برد و کدام‌ها با باخت همراه بوده‌اند.
+        TradeOutcomeReasonCard(trades = trades)
+
         // ── نوار خروجی فوری PDF تمام دیتاهای هوش مصنوعی و رگرسیون پارامترها ──
         Column(
             modifier = Modifier
@@ -1400,7 +1406,7 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🎛️ تیونینگ مدل‌های مشمول یادگیری عصبی (روش‌های BTC و پارسا مستثنا هستند)",
+                        text = "🎛️ تیونینگ ${com.aurum.edge.core.BitcoinStrategyModel.neuralLearningModels.size} مدلِ مشمول یادگیری عصبی",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -1414,7 +1420,7 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🧠 آموزش روی مدل‌های مشمول یادگیری و همهٔ نمادها · BTC/پارسا مستثنا هستند",
+                        text = "🧠 آموزش روی ${com.aurum.edge.core.BitcoinStrategyModel.neuralLearningModels.size} مدلِ مشمول یادگیری و ${com.aurum.edge.core.V1Universe.allSymbols.size} نماد",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -1423,7 +1429,8 @@ fun NeuralBrainScreen(
                     text = "هر روشِ مشمول یادگیری عصبی و هر نماد از معاملات خودش یاد می‌گیرد؛ اگر دادهٔ خودش کم باشد، تجربهٔ " +
                         "بقیهٔ استراتژی‌ها و نمادهای هم‌دسته هم به آموزشش اضافه می‌شود. شخصیت هر نماد " +
                         "(روندسواری، نویز شدوی، اعتبار شکست و حد ضرر مناسبش) جداگانه آموخته و در تصمیم‌گیری اعمال می‌شود. " +
-                        "با هر معاملهٔ بسته‌شده، این آموزش خودکار تکرار می‌شود. روش مستقل BTC و استراتژی پارسا عمداً از شمارش، یادگیری، پیش‌بینی و تیونینگ عصبی بیرون هستند.",
+                        "با هر معاملهٔ بسته‌شده، این آموزش خودکار تکرار می‌شود. هر مدلی که در فهرست استراتژی‌های فعال باشد مشمول یادگیری عصبی است؛ " +
+                        "اگر مدلی بعداً از دامنهٔ یادگیری بیرون گذاشته شود، شمارش‌ها خودشان با آن هم‌تراز می‌شوند (عدد دستی نیست).",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
@@ -1456,6 +1463,30 @@ fun NeuralBrainScreen(
                         color = AurumColors.Cyan,
                         fontWeight = FontWeight.Bold,
                     )
+                } else {
+                    // بعد از بستن و باز کردن اپ، متن اجرای آخر در حافظهٔ صفحه نیست؛ ولی عدد سنجش
+                    // در حافظهٔ شبکه پایدار شده است. نمایشش بهتر از «هیچ» است، به شرط برچسب صریح.
+                    val saved = neuralState.lastJournalCalibration
+                    if (saved.isMeasured) {
+                        val brierText = if (saved.brierOrNaN.isFinite()) {
+                            String.format(Locale.US, "%.3f", saved.brier)
+                        } else {
+                            "—"
+                        }
+                        val baseText = if (saved.brierOrNaN.isFinite()) {
+                            String.format(Locale.US, "%.3f", saved.brierBaseline)
+                        } else {
+                            "—"
+                        }
+                        Text(
+                            text = "🧾 آخرین سنجش ذخیره‌شدهٔ ژورنال: ${saved.samples} نمونه " +
+                                "(${saved.wins} برد) · Brier $brierText در برابر پایه $baseText · " +
+                                "گام‌به‌گام: ${saved.walkForwardVerdictFa.ifBlank { "—" }} · ${saved.verdictFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
                 if (allStrategyLearningFa.isNotBlank()) {
                     Text(
@@ -2550,3 +2581,59 @@ private fun PerStrategyParamTuneRow(
     }
 }
 
+
+/**
+ * کارت «دلیل برد/باخت» در صفحهٔ هوش عصبی.
+ *
+ * هر معاملهٔ بسته در لحظهٔ بسته شدن یک متن دلیل می‌گیرد (`PaperTrade.outcomeReasonFa`) و چند
+ * برچسب قابل شمارش (`outcomeTags`). این کارت همان برچسب‌ها را می‌شمارد و می‌گوید کدام حالت
+ * بازار بیشترین همراهی را با باخت (و با برد) داشته است — بدون حدس، فقط از آمار معامله‌های خودتان.
+ */
+@Composable
+private fun TradeOutcomeReasonCard(trades: List<com.aurum.edge.core.PaperTrade>) {
+    val closed = remember(trades) {
+        trades.filter { !it.isOpen && !it.isBacktest && it.pnlUsd != null }
+    }
+    if (closed.isEmpty()) return
+    val explained = remember(closed) { closed.count { it.outcomeReasonFa.isNotBlank() } }
+    val summary = remember(closed) { com.aurum.edge.core.TradeOutcomeExplainer.summaryFa(closed) }
+    val stats = remember(closed) { com.aurum.edge.core.TradeOutcomeExplainer.aggregate(closed) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(AurumColors.SurfaceAlt)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "🧾 دلیل برد و باخت",
+            color = AurumColors.Gold,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "از ${closed.size} معاملهٔ بسته، برای $explained معامله دلیل نوشته شده است.",
+            color = AurumColors.TextSecondary,
+            fontSize = 10.sp,
+        )
+        Text(
+            text = summary,
+            color = AurumColors.TextPrimary,
+            fontSize = 11.sp,
+            lineHeight = 16.sp,
+        )
+        stats.take(5).forEach { stat ->
+            Text(
+                text = "• ${stat.titleFa}: ${stat.wins} برد / ${stat.losses} باخت · " +
+                    "نرخ برد ${"%.0f".format(java.util.Locale.US, stat.winRatePct)}٪ · " +
+                    "خالص ${"%+.2f".format(java.util.Locale.US, stat.netPnlUsd)} دلار",
+                color = if (stat.losses > stat.wins) Color(0xFFFF8A80) else AurumColors.TextSecondary,
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+            )
+        }
+    }
+}

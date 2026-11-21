@@ -15,6 +15,10 @@ import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.round
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,8 +47,38 @@ class JournalStore(
         }
     }
 
-    private val _trades = MutableStateFlow(loadFromDisk())
+    /**
+     * خواندن دفترچه در دو مرحله انجام می‌شود و این عمدی است:
+     *
+     * ۱) فایل اصلی (`user_journal_v1.json`) همان لحظه و همگام خوانده می‌شود — چند کیلوبایت است و
+     *    رابط کاربری بلافاصله معامله‌ها را می‌بیند.
+     * ۲) ادغام شاردهای روزانه و بک‌آپ‌ها که صدها فایل و چند مگابایت است، روی رشتهٔ پس‌زمینه
+     *    انجام می‌شود و نتیجه‌اش بعداً در همان StateFlow می‌نشیند.
+     *
+     * دلیل: در نسخهٔ ۳٫۱۲٫۰ همین ادغام داخل سازنده و روی رشتهٔ اصلی اجرا می‌شد و روی گوشی کاربر
+     * ۲۶۵۳ میلی‌ثانیه رشتهٔ اصلی را قفل می‌کرد (گزارش STALL در `AppContainer.<init>`). حالا
+     * `onCreate` هیچ I/O سنگینی ندارد.
+     */
+    private val _trades = MutableStateFlow(loadLocalJournal())
     val trades: StateFlow<List<PaperTrade>> = _trades.asStateFlow()
+
+    /** وضعیت ادغام شاردهای پس‌زمینه؛ برای تست و برای شفافیت در گزارش خطا. */
+    private val _shardsMerged = MutableStateFlow(false)
+    val shardsMerged: StateFlow<Boolean> = _shardsMerged.asStateFlow()
+
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        if (isDefaultJournalFile) {
+            runCatching {
+                ioScope.launch {
+                    runCatching { mergePhoneShardsInBackground() }
+                }
+            }
+        } else {
+            _shardsMerged.value = true
+        }
+    }
 
     private fun ensureSequentialTradeNumbers(list: List<PaperTrade>): List<PaperTrade> {
         if (list.isEmpty()) return list
@@ -102,47 +136,81 @@ class JournalStore(
         }.sortedByDescending { it.openedAt }
     }
 
+    /** خواندن همگام و سبک فایل اصلی دفترچه (بدون شاردها). */
     @Synchronized
-    private fun loadFromDisk(): List<PaperTrade> {
-        val localList = run {
-            val candidates = listOf(file, File(file.path + ".bak"))
-            var found: List<PaperTrade>? = null
-            for (candidate in candidates) {
-                if (!candidate.exists()) continue
-                val parsed = runCatching {
-                    json.decodeFromString(listSerializer, candidate.readText())
-                }.getOrNull()
-                if (parsed != null) {
-                    found = parsed
-                    break
-                }
-            }
-            found.orEmpty()
-        }
+    private fun loadLocalJournal(): List<PaperTrade> = ensureSequentialTradeNumbers(readLocalFile())
 
-        if (!isDefaultJournalFile) {
-            return ensureSequentialTradeNumbers(localList)
-        }
-
-        // ادغام هوشمند با شاردهای روزانه و بک‌آپ‌های خودکار روزانه در حافظه گوشی
+    /**
+     * ادغام پس‌زمینه‌ای شاردهای روزانه با آنچه همین حالا در حافظه است.
+     *
+     * اگر در این فاصله کاربر معامله‌ای ثبت/بسته کرده باشد، لیست جاری دوباره با شاردها ادغام
+     * می‌شود؛ چیزی از دست نمی‌رود و لیست شاردها جای لیست زنده را نمی‌گیرد.
+     */
+    @Synchronized
+    private fun mergePhoneShardsInBackground() {
         val shardList = runCatching {
             PhoneStorageVaultManager.loadAllTradesFromPhoneShards(appContext)
         }.getOrDefault(emptyList())
-
+        val current = _trades.value
         if (shardList.isEmpty()) {
-            return ensureSequentialTradeNumbers(localList)
+            _shardsMerged.value = true
+            return
         }
         val merged = LinkedHashMap<String, PaperTrade>()
-        for (t in localList) {
-            merged[t.id] = t
-        }
+        for (t in current) merged[t.id] = t
+        var changed = false
         for (t in shardList) {
             val existing = merged[t.id]
-            if (existing == null || (!t.isOpen && existing.isOpen)) {
+            if (existing == null) {
                 merged[t.id] = t
+                changed = true
+            } else if (!t.isOpen && existing.isOpen && existing.isBacktest == t.isBacktest) {
+                // شارد بسته‌شدنِ معامله را می‌داند ولی حافظه نه: نسخهٔ شارد برنده است.
+                merged[t.id] = t
+                changed = true
             }
         }
-        return ensureSequentialTradeNumbers(merged.values.toList())
+        if (changed) {
+            _trades.value = ensureSequentialTradeNumbers(merged.values.toList())
+        }
+        _shardsMerged.value = true
+    }
+
+    @Synchronized
+    private fun readLocalFile(): List<PaperTrade> = run {
+        val candidates = listOf(file, File(file.path + ".bak"))
+        var found: List<PaperTrade>? = null
+        for (candidate in candidates) {
+            if (!candidate.exists()) continue
+            val parsed = runCatching {
+                json.decodeFromString(listSerializer, candidate.readText())
+            }.getOrNull()
+            if (parsed != null) {
+                found = parsed
+                break
+            }
+        }
+        found.orEmpty()
+    }
+
+    /**
+     * انتظار برای پایان ادغام پس‌زمینهٔ شاردها (حداکثر [timeoutMs]).
+     *
+     * @return true اگر ادغام تمام شده باشد.
+     */
+    fun awaitShardMerge(timeoutMs: Long = 5_000): Boolean {
+        if (_shardsMerged.value) return true
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (_shardsMerged.value) return true
+            try {
+                Thread.sleep(20)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return _shardsMerged.value
+            }
+        }
+        return _shardsMerged.value
     }
 
     @Synchronized
@@ -169,6 +237,195 @@ class JournalStore(
         }
     }
 
+    /**
+     * آیا همین حالا یک معاملهٔ **باز** برای این استراتژی وجود دارد؟
+     *
+     * قاعدهٔ سیستم: از هر استراتژی در هر لحظه فقط **یک** معاملهٔ باز مجاز است تا تکلیف آن روشن شود
+     * (حد سود، حد ضرر یا بستن دستی). این تابع همان وضعیت را برای UI و تست‌ها خوانا می‌کند.
+     */
+    fun openTradeForStrategy(strategyId: String): PaperTrade? {
+        val normalized = com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        return _trades.value.firstOrNull {
+            it.isOpen && !it.isBacktest &&
+                com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == normalized
+        }
+    }
+
+    /**
+     * آیا همین حالا معاملهٔ بازی روی این **نماد** وجود دارد؟ (از هر استراتژی که باشد)
+     *
+     * قاعدهٔ دوم کاربر: «از یک نماد وقتی معاملهٔ باز دارم، معاملهٔ تازه روی همان نماد باز نشود.»
+     * پیش از این فقط «یک معامله به ازای هر استراتژی» کنترل می‌شد، پس سه استراتژی می‌توانستند
+     * هم‌زمان سه پوزیشن روی یک نماد باز کنند. معامله‌های بک‌تست (شبیه‌سازی) شمرده نمی‌شوند.
+     */
+    fun openTradeForSymbol(symbolInput: String): PaperTrade? {
+        val normalized = com.aurum.edge.core.V1Universe.normalize(symbolInput)
+        return _trades.value.firstOrNull {
+            it.isOpen && !it.isBacktest && com.aurum.edge.core.V1Universe.normalize(it.symbol) == normalized
+        }
+    }
+
+    /**
+     * دلیل فارسیِ بسته‌بودن مسیر ورود؛ `null` یعنی مسیر باز است.
+     *
+     * این تنها مرجع قاعدهٔ «یک معامله در هر لحظه» است و سه لایه دارد:
+     * ۱) همان **نماد** معاملهٔ باز دارد ⇒ هیچ استراتژی روی آن نماد وارد نمی‌شود.
+     * ۲) همان **استراتژی** جای دیگری معاملهٔ باز دارد ⇒ روی هیچ نمادی وارد نمی‌شود.
+     * ۳) هر دو به `ignoreTradeId` حساس‌اند تا ویرایش/بستن همان معامله خودش را بلاک نکند.
+     *
+     * چون در خودِ ژورنال است، هیچ مسیری (رادار، ورود دستی، هوش عصبی، بازیابی از دیسک) نمی‌تواند
+     * دورش بزند؛ حتی اگر لایهٔ بالاتر اجازه بدهد.
+     */
+    fun entryBlockReasonFa(
+        symbolInput: String?,
+        strategyId: String,
+        ignoreTradeId: String? = null,
+        now: Long = System.currentTimeMillis(),
+    ): String? {
+        if (!symbolInput.isNullOrBlank()) {
+            openTradeForSymbol(symbolInput)?.takeIf { it.id != ignoreTradeId }?.let { blocking ->
+                return "⛔ روی ${blocking.symbol} معاملهٔ باز ${blocking.displayTradeNumberBadgeFa} دارید؛ " +
+                    "تا تکلیفش روشن شود روی همین نماد معاملهٔ تازه باز نمی‌شود"
+            }
+        }
+        openTradeForStrategy(strategyId)?.takeIf { it.id != ignoreTradeId }?.let { blocking ->
+            return "⛔ تا تکلیف ${blocking.displayTradeNumberBadgeFa} (${blocking.symbol}) روشن شود، " +
+                "استراتژی «${blocking.strategyTitleFa}» معاملهٔ تازه باز نمی‌کند"
+        }
+        // ── قاعدهٔ چهارم: دورهٔ خنک‌شدن پس از بسته شدن ─────────────────────────────
+        // کاربر: «معامله رو بستی و دقیقاً دوباره ادامهٔ همون روند رو باز کردی؛ این اشتباهه.»
+        // یک معاملهٔ بسته‌شده یعنی ساختار تست شد و جواب نداد؛ ورود فوری بعدی معمولاً همان
+        // روندِ شکست‌خورده را دوباره می‌خرد. جزئیات در `ReentryGuard`.
+        if (!symbolInput.isNullOrBlank()) {
+            reentryBlockReasonFa(symbolInput, strategyId, now)?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * دلیل فارسی مسدود بودن ورود تازه به‌خاطر دورهٔ خنک‌شدن بعد از بسته شدن معامله؛ `null` = آزاد.
+     *
+     * قاعده فقط به (نماد، استراتژی) حساس است؛ همین استراتژی روی نماد دیگر یا استراتژی دیگر روی
+     * همین نماد آزاد است.
+     */
+    fun reentryBlockReasonFa(
+        symbolInput: String,
+        strategyId: String,
+        now: Long = System.currentTimeMillis(),
+    ): String? {
+        val symbolKey = com.aurum.edge.core.V1Universe.normalize(symbolInput)
+        val strategyKey = com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        val list = _trades.value
+        val lastClosed = list.asSequence()
+            .filter { !it.isOpen && !it.isBacktest }
+            .filter { com.aurum.edge.core.V1Universe.normalize(it.symbol) == symbolKey }
+            .filter { com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == strategyKey }
+            .maxByOrNull { it.closedAt ?: 0L }
+            ?: return null
+        val losses = com.aurum.edge.core.ReentryGuard.consecutiveLosses(list, symbolKey, strategyKey)
+        val decision = com.aurum.edge.core.ReentryGuard.evaluate(lastClosed, losses, now)
+        return decision.reasonFa.takeIf { decision.blocked }
+    }
+
+    /** خلاصهٔ فارسی پنجرهٔ خنک‌شدن برای نمایش در کارت استراتژی؛ `null` یعنی آزاد. */
+    fun reentryStatusFa(symbolInput: String, strategyId: String): String? =
+        reentryBlockReasonFa(symbolInput, strategyId)
+
+    /**
+     * نگه‌داشتن فقط **یک** معاملهٔ باز به ازای هر نماد و هر استراتژی (قدیمی‌ترین برنده است).
+     *
+     * برای مسیرهایی که فهرست معامله‌ها را یک‌جا وارد می‌کنند (بازیابی پشتیبان، ورود CSV) و
+     * نمی‌توانند تک‌تک از گارد ورود رد شوند. معامله‌های بک‌تست و بسته‌ها دست نمی‌خورند.
+     */
+    private fun singleOpenPerSymbolAndStrategy(trades: List<PaperTrade>): List<PaperTrade> {
+        val openBySymbol = HashSet<String>()
+        val openByStrategy = HashSet<String>()
+        // قدیمی‌ترین بازها اول بررسی می‌شوند تا همان‌ها بمانند و تازه‌ترها رد شوند.
+        val openIds = trades
+            .filter { it.isOpen && !it.isBacktest }
+            .sortedBy { it.openedAt }
+            .map { it.id }
+            .toSet()
+        return trades.filter { trade ->
+            if (!trade.isOpen || trade.isBacktest) return@filter true
+            val symbolKey = com.aurum.edge.core.V1Universe.normalize(trade.symbol)
+            val strategyKey = com.aurum.edge.core.BitcoinStrategyModel.normalizeStrategyId(trade.strategyId)
+            if (symbolKey !in openBySymbol && strategyKey !in openByStrategy) {
+                openBySymbol += symbolKey
+                openByStrategy += strategyKey
+                true
+            } else {
+                trade.id !in openIds
+            }
+        }
+    }
+
+    /**
+     * بازسازی اسنپ‌شات سنجش تکنیکال برای معاملاتی که پیش از افزوده شدن این قابلیت ثبت شده‌اند.
+     *
+     * قاعدهٔ صحت داده: فقط از کندل‌های **بسته‌شدهٔ پیش از لحظهٔ ورود** استفاده می‌شود، پس عددِ
+     * بازسازی‌شده همان چیزی است که در لحظهٔ ورود دیده می‌شد (بدون نگاه به آینده). اگر کندلی در
+     * دسترس نباشد، همان «ثبت نشد» می‌ماند و هیچ عدد ساختگی ساخته نمی‌شود.
+     *
+     * @return تعداد معاملاتی که اسنپ‌شاتشان کامل شد.
+     */
+    @Synchronized
+    fun backfillGaugeSnapshots(
+        candlesProvider: (String, com.aurum.edge.domain.Interval) -> List<Candle> = { symbol, interval ->
+            LiveQuoteFetcher.peekCachedCandles(symbol, interval)
+        },
+    ): Int {
+        val current = _trades.value
+        if (current.isEmpty()) return 0
+        var changed = 0
+        val updated = current.map { trade ->
+            if (trade.tech1hBuy >= 0 && trade.tech4hBuy >= 0) return@map trade
+            val oneHour = entryInstantRating(trade, com.aurum.edge.domain.Interval.H1, candlesProvider)
+            val fourHour = entryInstantRating(trade, com.aurum.edge.domain.Interval.H4, candlesProvider)
+            if (oneHour == null && fourHour == null) return@map trade
+            val candidate = trade.copy(
+                tech1hBuy = oneHour?.buy ?: trade.tech1hBuy,
+                tech1hNeutral = oneHour?.neutral ?: trade.tech1hNeutral,
+                tech1hSell = oneHour?.sell ?: trade.tech1hSell,
+                tech4hBuy = fourHour?.buy ?: trade.tech4hBuy,
+                tech4hNeutral = fourHour?.neutral ?: trade.tech4hNeutral,
+                tech4hSell = fourHour?.sell ?: trade.tech4hSell,
+                techSnapshotRebuilt = true,
+            )
+            // اگر اجرای دوباره هیچ عددی را عوض نکند، نوشتن روی دیسک لازم نیست.
+            if (candidate == trade) return@map trade
+            changed++
+            candidate
+        }
+        if (changed > 0) persist(updated)
+        return changed
+    }
+
+    /** ارزیابی سنجش تکنیکال در «لحظهٔ ورود»؛ فقط کندل‌هایی که پیش از ورود بسته شده‌اند. */
+    private fun entryInstantRating(
+        trade: PaperTrade,
+        interval: com.aurum.edge.domain.Interval,
+        candlesProvider: (String, com.aurum.edge.domain.Interval) -> List<Candle>,
+    ): com.aurum.edge.core.TechnicalRating? {
+        val all = runCatching { candlesProvider(trade.symbol, interval) }.getOrNull().orEmpty()
+        if (all.isEmpty()) return null
+        val cutoff = trade.openedAt
+        val closedBeforeEntry = all
+            .asSequence()
+            .filter { it.closed && it.time + interval.millis <= cutoff }
+            .sortedBy { it.time }
+            .toList()
+        if (closedBeforeEntry.size < com.aurum.edge.core.TechnicalRatingEngine.MIN_BARS) return null
+        return com.aurum.edge.core.TechnicalRatingEngine.evaluate(closedBeforeEntry.takeLast(150))
+    }
+
+    /** پیام فارسی دلیل رد شدن معاملهٔ تازه؛ `null` یعنی مسیر باز است. */
+    fun openTradeBlockedByFa(strategyId: String): String? = entryBlockReasonFa(null, strategyId)
+
+    /** همان دلیل، این‌بار با دانستن نماد (قاعدهٔ «یک معامله روی هر نماد»). */
+    fun openTradeBlockedByFa(symbolInput: String?, strategyId: String): String? =
+        entryBlockReasonFa(symbolInput, strategyId)
+
     @Synchronized
     fun openTrade(
         calc: RiskCalculationResult,
@@ -180,9 +437,18 @@ class JournalStore(
         optimalRiskReward: Double = 0.0,
         rrBreakdownFa: String = "",
         preEntryCandles: List<Candle> = emptyList(),
+        /** کندل‌های ۱ ساعته و ۴ ساعتهٔ لحظهٔ ورود برای سنجش تکنیکال؛ خالی یعنی از کش خوانده شود. */
+        gaugeCandles1h: List<Candle> = emptyList(),
+        gaugeCandles4h: List<Candle> = emptyList(),
         /** حالت بازار در لحظهٔ ورود (از گزارش استراتژی). خالی = فقط سشن ثبت می‌شود. */
         stateInputs: com.aurum.edge.core.NeuralStateInputs? = null,
-    ): PaperTrade {
+    ): PaperTrade? {
+        // ── قاعدهٔ «یک معاملهٔ باز برای هر استراتژی» ─────────────────────────────
+        // تا تکلیف معاملهٔ باز روشن نشود، همین استراتژی معاملهٔ تازه نمی‌گیرد. این گارد در خودِ
+        // ژورنال است تا هیچ مسیری (خودکار، دستی، رادار ۱۵ دقیقه یا کارت استراتژی) نتواند دورش بزند.
+        // `now` باید به گارد برسد؛ وگرنه یک ورود با زمان مشخص (تست/بازپخش) با ساعت دیوار سنجیده
+        // می‌شود و دورهٔ خنک‌شدن هرگز تمام‌شده دیده نمی‌شود.
+        if (entryBlockReasonFa(calc.symbol, strategyId, now = now) != null) return null
         // This synchronous API can be called from a UI action. Use memory-only candles here;
         // parsing the on-device CandleVault is disk I/O and used to freeze the main thread on entry.
         val effectiveCandles = preEntryCandles.ifEmpty {
@@ -205,12 +471,31 @@ class JournalStore(
             rrBreakdownFa = rrBreakdownFa,
             stateInputs = stateInputs ?: com.aurum.edge.core.NeuralStateInputs(entryTimeMs = now),
         )
+        // ── سنجش تکنیکال در لحظهٔ ورود (فقط داده؛ هیچ اثری در تصمیم ندارد) ─────────
+        // از کش کندل‌های ۱ ساعته و ۴ ساعتهٔ همین نماد خوانده می‌شود. اگر کندلی در کش نبود،
+        // عدد `-1` ثبت می‌شود (نامعلوم) — هیچ عدد ساختگی ساخته نمی‌شود.
+        val rating1h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(
+            gaugeCandles1h.ifEmpty {
+                com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H1)
+            },
+        )
+        val rating4h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(
+            gaugeCandles4h.ifEmpty {
+                com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H4)
+            },
+        )
         val trade = rawTrade.copy(
             tradeNumber = nextTradeNum,
             preEntry3CandleCategoryCode = pre3Context.categoryCode,
             preEntry3CandleCategoryFa = pre3Context.categoryBadgeFa,
             preEntry3CandleSummaryFa = pre3Context.summaryFa,
             preEntry3Candles = pre3Context.candles,
+            tech1hBuy = rating1h?.buy ?: -1,
+            tech1hNeutral = rating1h?.neutral ?: -1,
+            tech1hSell = rating1h?.sell ?: -1,
+            tech4hBuy = rating4h?.buy ?: -1,
+            tech4hNeutral = rating4h?.neutral ?: -1,
+            tech4hSell = rating4h?.sell ?: -1,
         )
         persist( listOf(trade) + _trades.value )
         // OPEN snapshot generation is scheduled by the ViewModel after this synchronous journal
@@ -227,6 +512,19 @@ class JournalStore(
 
     @Synchronized
     fun addTrade(trade: PaperTrade) {
+        // قاعدهٔ یک-معامله-در-هر-لحظه از مسیر واردکردن/بازیابی هم دور زدنی نیست: معاملهٔ بازِ
+        // تازه‌ای که نماد یا استراتژی‌اش همین حالا اشغال است، پذیرفته نمی‌شود. به‌روزرسانی خودِ
+        // همان معامله (با همان شناسه) آزاد است و معامله‌های بک‌تست از این قاعده مستثنا هستند.
+        if (trade.isOpen && !trade.isBacktest &&
+            entryBlockReasonFa(
+                trade.symbol,
+                trade.strategyId,
+                ignoreTradeId = trade.id,
+                now = trade.openedAt,
+            ) != null
+        ) {
+            return
+        }
         val previous = _trades.value.firstOrNull { it.id == trade.id }
         persist(listOf(trade) + _trades.value.filterNot { it.id == trade.id })
         applyBalanceDelta(previous, trade)
@@ -473,12 +771,25 @@ class JournalStore(
         val target = _trades.value.firstOrNull { it.id == tradeId && it.isOpen } ?: return null
         val (_, netPnl) = RiskAndCalendarEngine.computeExitPnlUsd(target, exitPrice)
         val roundedNet = round(netPnl * 100.0) / 100.0
-        val closed = target.copy(
+        var closed = target.copy(
             closedAt = max(now, target.openedAt + 1L),
             exitPrice = exitPrice,
             exitReason = reason,
             pnlUsd = roundedNet,
         )
+        // دلیل برد/باخت همین حالا نوشته می‌شود تا در ژورنال و آمار هوش عصبی بمانَد.
+        // کندل‌ها فقط از حافظه خوانده می‌شوند (بدون شبکه و بدون دیسک) تا بستن معامله کند نشود.
+        closed = runCatching {
+            val candles = com.aurum.edge.data.LiveQuoteFetcher
+                .peekCachedCandles(closed.symbol, closed.interval)
+            val explanation = com.aurum.edge.core.TradeOutcomeExplainer.explain(closed, candles)
+            closed.copy(
+                outcomeReasonFa = explanation.textFa(),
+                outcomeTags = explanation.tags,
+                mfeR = explanation.mfeR,
+                maeR = explanation.maeR,
+            )
+        }.getOrDefault(closed)
         persist(_trades.value.map { if (it.id == tradeId) closed else it })
         settingsStore?.adjustBalance(roundedNet)
         val cfg = settingsStore?.read()
@@ -541,7 +852,10 @@ class JournalStore(
                 importedById[existing.id] ?: existing
             }
             val existingIds = _trades.value.map { it.id }.toSet()
-            val brandNew = cleanImported.filterNot { it.id in existingIds }
+            // قاعدهٔ «یک معامله در هر لحظه» روی ورودی‌های تازه هم اعمال می‌شود: از فایل پشتیبان
+            // هم نمی‌شود دو پوزیشن باز روی یک نماد یا دو پوزیشن باز از یک استراتژی ساخت.
+            // قدیمی‌ترین معاملهٔ باز می‌مانَد و بقیه (که هنوز در ژورنال نبودند) رد می‌شوند.
+            val brandNew = singleOpenPerSymbolAndStrategy(cleanImported.filterNot { it.id in existingIds })
             brandNew + mergedExisting
         }
         persist(finalList)

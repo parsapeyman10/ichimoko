@@ -206,38 +206,6 @@ class BackgroundTradingService : Service() {
             }
         }
 
-        fun postTradeEventNotification(
-            context: Context,
-            title: String,
-            body: String,
-        ) {
-            runCatching {
-                ensureChannels(context)
-                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-                val launchIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                }
-                val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                val contentIntent = PendingIntent.getActivity(context, 0, launchIntent, piFlags)
-                val notif = NotificationCompat.Builder(context, CHANNEL_ALERTS)
-                    .setSmallIcon(android.R.drawable.stat_notify_more)
-                    .setContentTitle(title)
-                    .setContentText(body)
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-                    .setPriority(NotificationCompat.PRIORITY_LOW)
-                    .setSilent(true)
-                    .setSound(null)
-                    .setVibrate(null)
-                    .setDefaults(0)
-                    .setOnlyAlertOnce(true)
-                    .setAutoCancel(true)
-                    .setContentIntent(contentIntent)
-                    .build()
-                val notifId = 7200 + (System.currentTimeMillis() % 1000).toInt()
-                nm.notify(notifId, notif)
-            }
-        }
-
         private fun buildOngoingNotification(
             context: Context,
             title: String,

@@ -55,6 +55,42 @@ data class NeuralCalibrationReport(
         get() = if (brier.isFinite() && brierBaseline.isFinite()) brierBaseline - brier else Double.NaN
 }
 
+/** یک فولد ارزیابی گام‌به‌گام: مدل روی گذشته آموزش دیده و روی بازهٔ بعدی سنجیده شده است. */
+data class NeuralCalibrationFold(
+    val fold: Int,
+    val trainSamples: Int,
+    val testSamples: Int,
+    val brier: Double,
+    val brierBaseline: Double,
+    val logLoss: Double,
+    val baseWinRatePct: Double,
+    val meanPredictedPct: Double,
+) {
+    /** مثبت = این فولد از «همیشه نرخ برد پایه» بهتر بود. */
+    val gain: Double
+        get() = if (brier.isFinite() && brierBaseline.isFinite()) brierBaseline - brier else Double.NaN
+}
+
+/**
+ * نتیجهٔ اعتبارسنجی گام‌به‌گام (Walk-Forward).
+ *
+ * یک تقسیم ۷۰/۳۰ تنها یک شاهد می‌دهد و می‌تواند خوش‌شانس باشد. این‌جا مدل چند بار و هر بار
+ * روی «گذشته تا آن لحظه» آموزش می‌بیند و روی بازهٔ بعدی سنجیده می‌شود — شبیه همان کاری که
+ * در معاملهٔ واقعی رخ می‌دهد.
+ */
+data class NeuralWalkForwardReport(
+    val folds: List<NeuralCalibrationFold> = emptyList(),
+    val usableFolds: Int = 0,
+    val winsAgainstBaseline: Int = 0,
+    val meanBrier: Double = Double.NaN,
+    val meanBrierBaseline: Double = Double.NaN,
+    val worstGain: Double = Double.NaN,
+    val verdictFa: String = "ارزیابی گام‌به‌گام انجام نشد",
+) {
+    val meanGain: Double
+        get() = if (meanBrier.isFinite() && meanBrierBaseline.isFinite()) meanBrierBaseline - meanBrier else Double.NaN
+}
+
 object NeuralCalibration {
 
     /** حداقل نمونه برای اینکه هر عددی اعلام شود. کمتر از این، «نامعلوم» صادقانه‌تر است. */
@@ -146,6 +182,94 @@ object NeuralCalibration {
             "(پایه ${String.format(Locale.US, "%.3f", report.brierBaseline)}) · OOS $oos · " +
             "پیش‌بینی ${String.format(Locale.US, "%.1f", report.meanPredictedPct)}٪ در برابر واقعی " +
             "${String.format(Locale.US, "%.1f", report.baseWinRatePct)}٪ — ${report.verdictFa}"
+    }
+
+    /** حداقل نمونهٔ هر فولد برای اینکه Brier آن فولد اعلام شود. */
+    const val MIN_FOLD_TEST_SAMPLES: Int = 10
+
+    /**
+     * ارزیابی گام‌به‌گام روی نقاط بیرون‌نمونهٔ هر فولد.
+     *
+     * ورودی، پیش‌بینی‌هایی است که مدلِ «آموزش‌دیده تا انتهای فولد قبل» روی بازهٔ بعدی داده است.
+     * هیچ فولدی با نمونهٔ کم در میانگین حساب نمی‌شود و اگر هیچ فولد معتبری نباشد، عددی اعلام نمی‌شود.
+     */
+    fun evaluateWalkForward(
+        foldPoints: List<List<NeuralCalibrationPoint>>,
+        minFoldTestSamples: Int = MIN_FOLD_TEST_SAMPLES,
+    ): NeuralWalkForwardReport {
+        val folds = ArrayList<NeuralCalibrationFold>()
+        var totalTest = 0
+        var sumBrier = 0.0
+        var sumBaseline = 0.0
+        foldPoints.forEachIndexed { idx, points ->
+            if (points.size < minFoldTestSamples) return@forEachIndexed
+            val wins = points.count { it.won }
+            val base = wins.toDouble() / points.size
+            val brier = points.sumOf { p -> (p.predictedWinProb - if (p.won) 1.0 else 0.0).let { it * it } } / points.size
+            val baseline = points.sumOf { p -> (base - if (p.won) 1.0 else 0.0).let { it * it } } / points.size
+            val logLoss = points.sumOf { p ->
+                val q = p.predictedWinProb.coerceIn(1e-6, 1 - 1e-6)
+                if (p.won) -ln(q) else -ln(1.0 - q)
+            } / points.size
+            folds += NeuralCalibrationFold(
+                fold = idx + 1,
+                trainSamples = 0,
+                testSamples = points.size,
+                brier = r3(brier),
+                brierBaseline = r3(baseline),
+                logLoss = r3(logLoss),
+                baseWinRatePct = r1(base * 100.0),
+                meanPredictedPct = r1(points.map { it.predictedWinProb }.average() * 100.0),
+            )
+            totalTest += points.size
+            sumBrier += brier * points.size
+            sumBaseline += baseline * points.size
+        }
+        if (folds.isEmpty()) {
+            return NeuralWalkForwardReport(
+                verdictFa = "هیچ فولدی نمونهٔ کافی برای سنجش نداشت (حداقل $minFoldTestSamples نمونه در هر فولد)",
+            )
+        }
+        val meanBrier = sumBrier / totalTest
+        val meanBaseline = sumBaseline / totalTest
+        val wins = folds.count { it.gain > 0.0 }
+        val worst = folds.minOf { it.gain }
+        val gain = meanBaseline - meanBrier
+        val verdict = when {
+            wins == folds.size && gain >= 0.01 ->
+                "در هر ${folds.size} فولد از پایه بهتر بود (میانگین سود Brier ${r3(gain)})"
+            wins == folds.size ->
+                "در هر ${folds.size} فولد بهتر از پایه بود، ولی سود کوچک است (${r3(gain)})"
+            wins == 0 ->
+                "در هیچ فولدی از پایه بهتر نبود — یادگیری قابل استناد نیست"
+            else ->
+                "فقط در $wins فولد از ${folds.size} فولد بهتر از پایه بود؛ نتیجه پایدار نیست " +
+                    "(بدترین فولد ${r3(worst)})"
+        }
+        return NeuralWalkForwardReport(
+            folds = folds,
+            usableFolds = folds.size,
+            winsAgainstBaseline = wins,
+            meanBrier = r3(meanBrier),
+            meanBrierBaseline = r3(meanBaseline),
+            worstGain = r3(worst),
+            verdictFa = verdict,
+        )
+    }
+
+    /** متن فارسی یک‌خطی برای نمایش در اپ. */
+    fun summaryFa(report: NeuralWalkForwardReport): String {
+        if (report.usableFolds == 0) return "🚶 گام‌به‌گام: ${report.verdictFa}"
+        return String.format(
+            Locale.US,
+            "🚶 گام‌به‌گام (%d فولد): Brier %.3f در برابر پایه %.3f · سود %.3f · بدترین فولد %.3f — %s",
+            report.usableFolds,
+            report.meanBrier,
+            report.meanBrierBaseline,
+            report.meanGain,
+            report.worstGain,
+            report.verdictFa,
+        )
     }
 
     private fun r1(v: Double): Double = if (v.isFinite()) Math.round(v * 10.0) / 10.0 else Double.NaN

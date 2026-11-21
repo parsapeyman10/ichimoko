@@ -63,12 +63,13 @@ import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.SelectableStrategyItem
 import com.aurum.edge.ui.components.StatTile
+import com.aurum.edge.ui.tabs.journal.TechnicalRatingCard
 import com.aurum.edge.ui.theme.AurumColors
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private val FIXED_RISK_USD_PRESETS = listOf(5.0, 10.0, 25.0, 50.0, 100.0)
+private val FIXED_RISK_USD_PRESETS = listOf(0.5, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0)
 
 @Composable
 fun SettingsScreen(
@@ -81,8 +82,12 @@ fun SettingsScreen(
     val aiChecking by viewModel.aiChecking.collectAsStateWithLifecycle()
     val lastAiVerdict by viewModel.lastAiVerdict.collectAsStateWithLifecycle()
     val activeSymbol by viewModel.activeRiskSymbol.collectAsStateWithLifecycle()
+    // قیمت زندهٔ همان نماد برای «آزمون فرضی» کارت دیباگ؛ اگر خوانده نشده باشد هیچ عددی جعل نمی‌شود.
+    val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
     val backfillSummaries by viewModel.backfillSummaries.collectAsStateWithLifecycle()
     val isBackfilling by viewModel.isBackfilling.collectAsStateWithLifecycle()
+    val offlineSync by viewModel.offlineSync.collectAsStateWithLifecycle()
+    val technicalRatings by viewModel.technicalRatings.collectAsStateWithLifecycle()
     val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
@@ -90,8 +95,9 @@ fun SettingsScreen(
     var showAddModelForm by rememberSaveable { mutableStateOf(false) }
     var pendingRingtoneTarget by remember { mutableStateOf<TradeAlarmKind?>(null) }
 
-    val showDesc = settings.showSettingsDescriptions
-    fun descOrNull(text: String): String? = if (showDesc) text else null
+    // درخواست کاربر: هیچ متن توضیحی در اپ نباشد. مسیر قدیمی («نمایش/مخفی توضیحات») بسته شد.
+    val showDesc = false
+    fun descOrNull(text: String): String? = null
 
     val ringtoneLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
@@ -222,24 +228,6 @@ fun SettingsScreen(
                         modifier = Modifier.clickable { subTab = idx },
                     )
                 }
-            }
-            Spacer(Modifier.width(6.dp))
-            // آپشن کمرنگ مخفی / غیرمخفی کردن نوشته‌های توضیحی تنظیمات (پیش‌فرض: غیرمخفی)
-            Box(
-                modifier = Modifier
-                    .alpha(if (showDesc) 0.72f else 0.48f)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(AurumColors.SurfaceAlt)
-                    .border(0.8.dp, AurumColors.Line, RoundedCornerShape(999.dp))
-                    .clickable { viewModel.setShowSettingsDescriptions(!showDesc) }
-                    .padding(horizontal = 9.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    text = if (showDesc) "👁 توضیحات: آشکار" else "🙈 توضیحات: مخفی",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (showDesc) AurumColors.TextSecondary else AurumColors.TextMuted,
-                    fontSize = 10.sp,
-                )
             }
         }
 
@@ -372,10 +360,19 @@ fun SettingsScreen(
             }
 
             1 -> {
-                // تنظیمات موجودی ۱۰۰,۰۰۰ دلار و ریسک ثابت ۵ دلار در هر معامله
+                // اعداد عنوان از خود تنظیمات خوانده می‌شوند؛ قبلاً «۱۰۰,۰۰۰$ و ۵$» دستی نوشته شده
+                // بود و اگر کاربر مقدار دیگری می‌گذاشت، عنوان دروغ می‌گفت.
+                val activeRiskUsd = if (settings.useFixedDollarRisk) {
+                    settings.fixedRiskUsd
+                } else {
+                    settings.accountBalance * settings.riskPercent / 100.0
+                }
                 SectionCard(
-                    title = "💰 تنظیمات موجودی (۱۰۰,۰۰۰$) و ریسک ثابت دلاری (۵$)",
-                    subtitle = descOrNull("هر باخت = -$${String.format(Locale.US, "%.2f", settings.fixedRiskUsd)} · هر برد = +$${String.format(Locale.US, "%.2f", settings.fixedRiskUsd)} × R:R"),
+                    title = "💰 سرمایه و ریسک هر معامله (" + String.format(Locale.US, "%.2f", activeRiskUsd) + "$)",
+                    subtitle = descOrNull(
+                        "هر باخت = -$" + String.format(Locale.US, "%.2f", activeRiskUsd) +
+                            " · هر برد = +$" + String.format(Locale.US, "%.2f", activeRiskUsd) + " × R:R",
+                    ),
                     initiallyExpanded = false,
                 ) {
                     Row(
@@ -389,13 +386,58 @@ fun SettingsScreen(
                             modifier = Modifier.weight(1f),
                         )
                         StatTile(
-                            label = "ریسک ثابت هر معامله",
-                            value = "-$${settings.fixedRiskUsd.toInt()} باخت / +$${settings.fixedRiskUsd.toInt()}×R:R برد",
+                            label = "ریسک هر معامله (حالت فعال)",
+                            // قبلاً toInt() بود و ریسک ۰٫۶۰ دلاری «۰$» نمایش داده می‌شد.
+                            value = "-$" + String.format(Locale.US, "%.2f", activeRiskUsd) +
+                                " باخت / +$" + String.format(Locale.US, "%.2f", activeRiskUsd) + "×R:R برد",
                             valueColor = AurumColors.Cyan,
                             modifier = Modifier.weight(1f),
                         )
                     }
 
+                    // دامنهٔ دلاری هدف، از همان مبلغ ریسک: ۱٫۵R تا ۳R
+                    Text(
+                        text = "۱٫۵R → " + String.format(Locale.US, "$%.2f", activeRiskUsd * 1.5) +
+                            "  ·  ۳R → " + String.format(Locale.US, "$%.2f", activeRiskUsd * 3.0),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Green,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    // هر اصلاح و هر هشدارِ همین تنظیمات، همان‌جا و بی‌پرده (نه در لاگ پنهان).
+                    CapitalFindingsBlock(
+                        findings = com.aurum.edge.core.CapitalPolicy.from(settings).findings(),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "مبنای ریسک: مبلغ ثابت دلاری",
+                                color = AurumColors.TextPrimary,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                "-$" + String.format(Locale.US, "%.2f", activeRiskUsd) + " باخت · +" +
+                                    String.format(Locale.US, "%.2f", activeRiskUsd) + "$×R:R برد",
+                                color = AurumColors.TextMuted,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                        Text(
+                            text = String.format(Locale.US, "$%.2f", activeRiskUsd),
+                            color = AurumColors.Cyan,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                     AnimatedVisibility(visible = showDesc) {
                         Text(
                             text = "انتخاب سریع مبلغ ریسک ثابت (ضرر در SL) برای هر معامله:",
@@ -433,7 +475,11 @@ fun SettingsScreen(
                                     .padding(horizontal = 12.dp, vertical = 6.dp),
                             ) {
                                 Text(
-                                    text = "$${usd.toInt()} در هر معامله",
+                                    text = "$" + if (usd % 1.0 == 0.0) {
+                                        String.format(Locale.US, "%.0f", usd)
+                                    } else {
+                                        String.format(Locale.US, "%.2f", usd)
+                                    } + " در هر معامله",
                                     color = if (selected) AurumColors.Gold else AurumColors.TextPrimary,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
@@ -470,6 +516,14 @@ fun SettingsScreen(
                         )
                     }
                 }
+
+                // 🧪 دیباگ مدیریت سرمایه: همان موتور واقعی، قدم‌به‌قدم، با ناورداهای سبز/قرمز
+                CapitalDebugCard(
+                    settings = settings,
+                    symbol = activeSymbol,
+                    referencePrice = liveTicks[activeSymbol]?.price,
+                    lastTrade = trades.maxByOrNull { it.openedAt },
+                )
 
                 CapitalAndRiskLimitsCard(
                     settings = settings,
@@ -612,6 +666,13 @@ fun SettingsScreen(
                     summary = backfillSummaries[activeSymbol],
                     isBackfilling = isBackfilling,
                     onSyncGap = { hours -> viewModel.syncAllOpenAndActiveSymbolsGap(hoursOverride = hours, notifyOnSuccess = true) },
+                    allProgress = offlineSync,
+                    onSyncAll = { viewModel.refreshOfflineDataForAllSymbols() },
+                )
+                TechnicalRatingCard(
+                    symbols = com.aurum.edge.core.V1Universe.allSymbols,
+                    ratings = technicalRatings,
+                    trades = trades,
                 )
                 SectionCard(
                     title = "🗄️ داده و نگهداری",

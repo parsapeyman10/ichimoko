@@ -447,6 +447,8 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
                         "تاتل" to BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT.id,
                         "هوسودا" to BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE.id,
                         "پلوییل" to BitcoinStrategyModel.PELOILLE_MTF_PLATEAU.id,
+                        "کین/خط میانه" to BitcoinStrategyModel.KANE_ML_FIB_SYNERGY.id,
+                        "چنگال" to BitcoinStrategyModel.PITCHFORK_DEROOS.id,
                     ).forEach { (label, id) ->
                         Pill(
                             text = label,

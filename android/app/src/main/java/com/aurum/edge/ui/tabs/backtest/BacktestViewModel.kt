@@ -973,11 +973,6 @@ class BacktestViewModel(
         }
     }
 
-    fun archiveNoteFa(): String = "آرشیو فقط خواندنی است و ژورنال/یادگیری واقعی را تغییر نمی‌دهد."
-
-    /** تعداد نمونه‌های ذخیره‌شده در حافظهٔ اتاق تمرین (برای نمایش). */
-    fun neuralMemorySize(): Int = runCatching { trainer.memorySize() }.getOrDefault(0)
-
     /**
      * پاک‌کردن حافظهٔ اتاق تمرین — با تصمیم صریح کاربر.
      *

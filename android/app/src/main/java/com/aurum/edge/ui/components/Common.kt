@@ -133,9 +133,11 @@ fun SectionCard(
                         lineHeight = 18.sp,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (!subtitle.isNullOrBlank()) {
+                    // زیرعنوانِ توضیحی دیگر رندر نمی‌شود (درخواست کاربر: رابط کاربری شلوغ نشود).
+                    // پارامتر برای سازگاری امضای همهٔ کارت‌ها باقی مانده است.
+                    if (false && !subtitle.isNullOrBlank()) {
                         Text(
-                            text = subtitle,
+                            text = subtitle ?: "",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextSecondary,
                             maxLines = 2,

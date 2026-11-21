@@ -488,6 +488,12 @@ fun JournalRiskScreen(
             trades = filteredTrades,
         )
 
+        // ── ۳.۶ آزمایشگاه استاپ (فاز ۰ کالیبراسیون): بازپخش معاملات واقعی با استاپ‌های جایگزین ──
+        StopAnchorLabCard(viewModel = viewModel)
+
+        // ── ۳.۷ آزمایشگاه کیفیت ورود (فاز ۲): بُرش معاملات بر اساس ویژگی‌های لحظهٔ ورود ──
+        EntryQualityLabCard(viewModel = viewModel)
+
             }
 
             3 -> {
@@ -539,7 +545,7 @@ fun JournalRiskScreen(
                     liveTick = liveTicks[activeSymbol],
                     accountBalance = settings.accountBalance,
                     riskPercent = settings.riskPercent,
-                    fixedRiskUsdOverride = if (settings.useFixedDollarRisk) settings.fixedRiskUsd else null,
+                    fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(settings.fixedRiskUsd),
                     riskLimits = riskLimits,
                     avalAiEnabled = settings.avalAiEnabled,
                     aiChecking = aiChecking,
@@ -557,6 +563,175 @@ fun JournalRiskScreen(
                     },
                     onOpenChart = { onChartSymbol(activeSymbol) },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EntryQualityLabCard(viewModel: AurumViewModel) {
+    val lab by viewModel.entryLab.collectAsStateWithLifecycle()
+    SectionCard(
+        title = "🔬 آزمایشگاه کیفیت ورود (فاز ۲ کالیبراسیون)",
+        subtitle = "معاملات بسته‌شده بر اساس ویژگی‌های لحظهٔ ورود بُرش می‌خورند: دستهٔ ۳ کندل، فاصله از کیجون، " +
+            "سنجش ۱ و ۴ ساعته و سشن. سپس بازپخش می‌شود که «اگر فقط فلان دسته را می‌گرفتیم، سود چه می‌شد». " +
+            "هیچ رفتاری تغییر نمی‌کند.",
+        collapsible = false,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(
+                onClick = { viewModel.runEntryQualityLab(30) },
+                enabled = !lab.running,
+            ) {
+                Text(
+                    text = if (lab.running) "⏳ در حال اجرا…" else "▶ اجرای آزمایشگاه کیفیت ورود (۳۰ روز)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Cyan,
+                )
+            }
+            if (lab.messageFa.isNotBlank()) {
+                Text(
+                    text = lab.messageFa,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+            }
+            val report = lab.report
+            if (report != null && report.hasData) {
+                report.dimensions.filter { it.key != "all" }.forEach { dimension ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            text = "📊 ${dimension.titleFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        dimension.buckets.take(6).forEach { bucket ->
+                            Text(
+                                text = "• ${bucket.labelFa} — ${bucket.samples} نمونه (${String.format(Locale.US, "%.0f", bucket.sharePct)}٪) · " +
+                                    "برد ${String.format(Locale.US, "%.1f", bucket.winRatePct)}٪ · " +
+                                    "انتظار ${formatUsdExact(bucket.expectancyUsd)} · جمع ${formatUsdExact(bucket.totalPnlUsd)}" +
+                                    if (bucket.reliable) "" else " · ⚠️ نمونه کم",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (bucket.expectancyUsd > 0.0) AurumColors.Green else AurumColors.TextPrimary,
+                            )
+                        }
+                    }
+                }
+                if (report.rules.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(AurumColors.Purple.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                            .border(1.dp, AurumColors.Purple.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            text = "🧪 بازپخش قاعده‌ها روی همان معاملات (درون‌نمونه‌ای — نیازمند تأیید روی نمونهٔ بعدی)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Purple,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        report.rules.forEach { rule ->
+                            Text(
+                                text = (if (rule.better) "✅ " else "▫️ ") + rule.labelFa +
+                                    " — ${rule.kept} معامله (${String.format(Locale.US, "%.0f", rule.keptSharePct)}٪) · " +
+                                    "انتظار ${formatUsdExact(rule.keptExpectancyUsd)} (مبنا ${formatUsdExact(rule.baselineExpectancyUsd)}) · " +
+                                    "تغییر جمع ${formatUsdExact(rule.deltaPnlUsd)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (rule.better) AurumColors.Green else AurumColors.TextSecondary,
+                            )
+                        }
+                        if (report.unknownGaugeSamples > 0) {
+                            Text(
+                                text = "ℹ️ ${report.unknownGaugeSamples} معامله دادهٔ سنجش ۱/۴ ساعته نداشتند و در قاعده‌های سنجش بدون داوری نگه داشته شدند.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextMuted,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StopAnchorLabCard(viewModel: AurumViewModel) {
+    val lab by viewModel.stopLab.collectAsStateWithLifecycle()
+    SectionCard(
+        title = "🧪 آزمایشگاه استاپ (فاز ۰ کالیبراسیون)",
+        subtitle = "همین معاملاتِ ژورنال با قاعده‌های دیگرِ حد ضرر بازپخش می‌شوند تا معلوم شود «۰٫۲۶ ATR» یا " +
+            "«۰٫۳۸ ATR» واقعاً چه اثری دارد. هیچ تنظیمی تغییر نمی‌کند و هیچ معامله‌ای ساخته نمی‌شود.",
+        collapsible = false,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(
+                onClick = { viewModel.runStopAnchorLab(30) },
+                enabled = !lab.running,
+            ) {
+                Text(
+                    text = if (lab.running) "⏳ در حال اجرا…" else "▶ اجرای آزمایشگاه روی ۳۰ روز اخیر",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Cyan,
+                )
+            }
+            if (lab.messageFa.isNotBlank()) {
+                Text(
+                    text = lab.messageFa,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+            }
+            val report = lab.report
+            if (report != null && report.hasData) {
+                Text(
+                    text = "قرارداد گزارش: ضرر کامل ۵٫۰۰$ · هدف = مضرب R × ۵$ · ابهام هم‌کندل به نفع حد ضرر · " +
+                        "فقط کندل‌های بسته‌شده تا لحظهٔ ورود",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                )
+                report.strategyIds.forEach { strategyId ->
+                    val rows = report.rowsFor(strategyId)
+                    val titleFa = rows.firstOrNull()?.strategyTitleFa ?: strategyId
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            text = "🎯 $titleFa",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        rows.forEach { row ->
+                            val tag = if (row.anchor.name == "ENGINE_CURRENT") {
+                                "مبنا · استاپ فعلی موتور"
+                            } else {
+                                "${row.anchor.labelFa} · ${String.format(Locale.US, "%.2f", row.bufferAtr)} ATR"
+                            }
+                            val sampleNote = if (row.sampleEnough) "" else " · ⚠️ شاهد ضعیف (کمتر از ۲۰ نمونه)"
+                            Text(
+                                text = "$tag — ${row.samples} نمونه · برد ${String.format(Locale.US, "%.1f", row.winRatePct)}٪ · " +
+                                    "انتظار ${formatUsdExact(row.expectancyUsd)} · PF ${String.format(Locale.US, "%.2f", row.profitFactor)} · " +
+                                    "استاپ≤۱۵د ${String.format(Locale.US, "%.0f", row.fastStopPct)}٪ · نجات ${row.rescuedFromStop} · " +
+                                    "هدف از دست‌رفته ${row.lostTargets}" + sampleNote,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (row.anchor.name == "ENGINE_CURRENT") AurumColors.TextSecondary else AurumColors.TextPrimary,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1988,6 +2163,10 @@ internal fun OfflineGapBackfillCard(
     summary: CandleBackfillSummary?,
     isBackfilling: Boolean,
     onSyncGap: (Int?) -> Unit,
+    /** پیشرفت به‌روزرسانی دیتای آفلاین همهٔ نمادها (۰ تا ۱۵). */
+    allProgress: com.aurum.edge.ui.OfflineSyncProgress = com.aurum.edge.ui.OfflineSyncProgress(),
+    /** شروع به‌روزرسانی دیتای آفلاین برای همهٔ نمادها؛ `null` = دکمه ساخته نشود. */
+    onSyncAll: (() -> Unit)? = null,
 ) {
     SectionCard(
         title = "🔄 بازیابی دیتای ساعات قطعی (Backfill)",
@@ -1999,6 +2178,38 @@ internal fun OfflineGapBackfillCard(
             )
         },
     ) {
+        if (onSyncAll != null) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Button(
+                    onClick = { onSyncAll() },
+                    enabled = !allProgress.running && !isBackfilling,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Gold,
+                        contentColor = Color.Black,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = if (allProgress.running) {
+                            "در حال به‌روزرسانی ${allProgress.done}/${allProgress.total} · ${allProgress.currentSymbol}"
+                        } else {
+                            "🔄 به‌روزرسانی دیتای آفلاین همهٔ ${if (allProgress.total > 0) allProgress.total else 15} نماد"
+                        },
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                if (allProgress.running || allProgress.finishedAt > 0L) {
+                    Text(
+                        text = "${allProgress.percent}% · موفق ${allProgress.done - allProgress.failed} · ناموفق ${allProgress.failed}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+            }
+        }
         if (summary != null) {
             Column(
                 modifier = Modifier
@@ -2140,6 +2351,23 @@ private fun AutoMonitoredOpenTradesCard(
                             currentPrice = currentPrice,
                             onOpenChart = { onOpenChart(trade.symbol) },
                         )
+
+                        // ── سنجش تکنیکال ۱ ساعته و ۴ ساعتهٔ لحظهٔ ورود (کادر جدا و همیشه دیده‌شدنی) ──
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(AurumColors.Purple.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .border(1.dp, AurumColors.Purple.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 9.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = trade.techSnapshotLineFa,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Purple,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
 
                         Column(
                             modifier = Modifier
@@ -2981,6 +3209,26 @@ private fun ClosedJournalTradeRow(
             }
         }
 
+        // ── ردیف ۴: سنجش تکنیکال ۱ ساعته و ۴ ساعتهٔ لحظهٔ ورود ──
+        // این ردیف همیشه (بدون نیاز به باز کردن جزئیات) دیده می‌شود؛ خواستهٔ صریح کاربر بود که
+        // دادهٔ سنجش در ژورنال هر معامله حاضر باشد.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(AurumColors.Purple.copy(alpha = 0.12f))
+                .border(1.dp, AurumColors.Purple.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 9.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = trade.techSnapshotLineFa,
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Purple,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+
         if (detailsExpanded) {
             Text(
                 text = "ورود: ${formatPrice(trade.entry)} · خروج: ${trade.exitPrice?.let { formatPrice(it) } ?: "—"} · SL: ${formatPrice(trade.stopLoss)} · TP: ${formatPrice(trade.takeProfit)}",
@@ -3030,6 +3278,36 @@ private fun ClosedJournalTradeRow(
                 }
             }
 
+            if (!trade.isOpen && trade.outcomeReasonFa.isNotBlank()) {
+                // «دلیل برد/باخت» که موتور عصبی هنگام بسته شدن معامله نوشته است.
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = if ((trade.pnlUsd ?: 0.0) >= 0.0) "🧠 دلیل این برد:" else "🧠 دلیل این باخت:",
+                        color = if ((trade.pnlUsd ?: 0.0) >= 0.0) Color(0xFF00E676) else Color(0xFFFF5252),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = trade.outcomeReasonFa,
+                        color = AurumColors.TextSecondary,
+                        fontSize = 10.sp,
+                        lineHeight = 15.sp,
+                    )
+                    if (trade.outcomeTags.isNotEmpty()) {
+                        Text(
+                            text = "برچسب‌ها: " + trade.outcomeTags.joinToString("، ") {
+                                com.aurum.edge.core.TradeOutcomeExplainer.Tags.titleFa(it)
+                            },
+                            color = AurumColors.Gold,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp,
+                        )
+                    }
+                }
+            }
             if (trade.isBacktest && trade.lessonFa.isNotBlank()) {
                 Text(
                     text = "🎓 درس این معامله: ${trade.lessonFa}",
@@ -4166,6 +4444,11 @@ private fun InteractiveTearSheetModalDialog(
                                         text = "مرجع: ${t.venueNameFa} · کارمزد: $${String.format(Locale.US, "%.2f", t.estimatedRoundTripFeeUsd)} · وضعیت: ${t.exitReason ?: "در جریان"}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = AurumColors.TextSecondary,
+                                    )
+                                    Text(
+                                        text = t.techSnapshotLineFa,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AurumColors.Purple,
                                     )
                                 }
                             }
