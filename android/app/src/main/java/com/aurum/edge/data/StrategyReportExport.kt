@@ -40,7 +40,7 @@ object StrategyReportExport {
         val jobs = BacktestJobStore(context).list()
         val snapshot = Snapshot(
             createdAt = System.currentTimeMillis(),
-            caveatFa = "مقادیر پیش از تغییر به صورت تاریخی ذخیره نشده‌اند؛ مقادیر پیش‌فرض فقط مرجع نسخهٔ فعلی هستند. پروفایل عصبی ممکن است اعمال نشده باشد؛ مقدار ذخیره‌شده و مقدار حل‌شده جداست. تاریخچهٔ حذف‌شده قابل بازیابی نیست.",
+            caveatFa = "مقادیر پیش از تغییر به صورت تاریخی ذخیره نشده‌اند؛ مقادیر پیش‌فرض فقط مرجع نسخهٔ فعلی هستند. پروفایل عصبی ممکن است اعمال نشده باشد؛ حل عمومی بدون نماد است و موتور ممکن است بر اساس مدل یا نماد مقدار دیگری استفاده کند. تاریخچهٔ حذف‌شده قابل بازیابی نیست.",
             gateActive = summary.isGateActive,
             gateSummaryFa = summary.gatePolicySummaryFa,
             strategies = StrategyAuditReport.build(settings, summary),

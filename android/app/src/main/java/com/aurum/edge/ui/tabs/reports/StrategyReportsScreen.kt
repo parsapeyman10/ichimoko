@@ -92,7 +92,7 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Text("📋 گزارش استراتژی‌ها و آزمایش‌ها", color = AurumColors.Gold, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.padding(top = 12.dp))
-            Text("مرجع = پیش‌فرض نسخهٔ فعلی؛ تاریخچهٔ قبل از تغییر ذخیره نشده است. مقدار ثبت‌شده، مقدار حل‌شده و پروفایل عصبی جدا نشان داده می‌شوند؛ پروفایل لزوماً اعمال نشده است. نتایج حذف‌شده قابل بازیابی نیستند.", color = AurumColors.TextSecondary, fontSize = 11.sp)
+            Text("مرجع = پیش‌فرض نسخهٔ فعلی؛ تاریخچهٔ قبل از تغییر ذخیره نشده است. مقدار ثبت‌شده، حل عمومی بدون نماد و پروفایل عصبی جدا نشان داده می‌شوند؛ موتور ممکن است بر اساس نماد و خود مدل مقدار دیگری استفاده کند. پروفایل لزوماً اعمال نشده است. نتایج حذف‌شده قابل بازیابی نیستند.", color = AurumColors.TextSecondary, fontSize = 11.sp)
             Text("گیت عصبی: ${if (neural.isGateActive) "فعال" else "غیرفعال"} · ${neural.gatePolicySummaryFa}", color = AurumColors.TextSecondary, fontSize = 11.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { exportFile({ StrategyReportExport.create(context, settings, neural) }, "application/zip") }) { Text("خروجی همه ZIP") }
@@ -123,7 +123,7 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
                     OutlinedButton(onClick = { exportFile({ jsonFile("strategy_${strategy.id.replace(Regex("[^A-Za-z0-9_-]"), "_")}.json", reportJson.encodeToString(StrategyAuditReport.Strategy.serializer(), strategy)) }, "application/json") }) { Text("خروجی JSON") }
                 }
                 if (expanded) {
-                    Text("پارامتر | مرجع نسخه | ذخیره‌شده | حل‌شده | پروفایل عصبی", color = AurumColors.Gold, fontSize = 10.sp)
+                    Text("پارامتر | مرجع نسخه | ذخیره‌شده | حل عمومی بدون نماد | پروفایل عصبی", color = AurumColors.Gold, fontSize = 10.sp)
                     strategy.parameters.forEach { row ->
                         Text("${row.key}: ${row.reference ?: "نامعلوم"} | ${row.saved ?: "—"} | ${row.resolved ?: "—"} | ${row.neuralProfile ?: "—"}", color = AurumColors.TextSecondary, fontSize = 10.sp)
                     }
