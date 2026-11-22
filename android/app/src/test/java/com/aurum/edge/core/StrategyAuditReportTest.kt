@@ -20,7 +20,7 @@ class StrategyAuditReportTest {
     }
     @Test fun includesBuiltInAndCustomAndNeverInventsCustomDefaults() {
         val custom = CustomStrategySlot(id = "CUSTOM", titleFa = "سفارشی", summaryFa = "test")
-        val all = StrategyAuditReport.build(AppSettings(customStrategies = listOf(custom), selectedBitcoinStrategyId = custom.id), NeuralLearningStateSummary())
+        val all = StrategyAuditReport.build(AppSettings(customStrategies = listOf(custom), selectedBitcoinStrategyId = custom.id, runAllStrategiesSimultaneously = false), NeuralLearningStateSummary())
         assertEquals(BitcoinStrategyModel.entries.size + 1, all.size)
         val row = all.first { it.id == custom.id }
         assertTrue(row.enabled)
