@@ -133,6 +133,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                         AurumTab.Neural -> NeuralBrainScreen(
                             viewModel = viewModel,
                         )
+                        AurumTab.Reports -> StrategyReportsScreen(viewModel)
                         AurumTab.Settings -> SettingsScreen(
                             viewModel = viewModel,
                             onOpenNeuralBrain = { open(AurumTab.Neural) },

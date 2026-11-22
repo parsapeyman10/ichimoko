@@ -3,6 +3,8 @@ package com.aurum.edge.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -45,6 +48,7 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     Backtest("بک‌تست", Icons.Filled.Science),
     Journal("ژورنال", Icons.Filled.ReceiptLong),
     Neural("هوش عصبی", Icons.Filled.Psychology),
+    Reports("گزارش‌ها", Icons.Filled.ReceiptLong),
     Settings("تنظیمات", Icons.Filled.Settings),
     Update("آپدیت", Icons.Filled.Refresh),
 }
@@ -56,6 +60,7 @@ internal val primaryTabs = listOf(
     AurumTab.Backtest,
     AurumTab.Journal,
     AurumTab.Neural,
+    AurumTab.Reports,
     AurumTab.Settings,
     AurumTab.Update,
 )
@@ -72,6 +77,7 @@ internal fun AurumBottomBar(
             .background(AurumColors.Surface)
             .border(0.5.dp, AurumColors.Line)
             .navigationBarsPadding()
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 6.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -81,7 +87,7 @@ internal fun AurumBottomBar(
             val showBadge = openTradeCount > 0 && (entry == AurumTab.Chart || entry == AurumTab.Home)
             Column(
                 modifier = Modifier
-                    .weight(1f)
+                    .width(64.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(
                         if (isSelected) AurumColors.Gold.copy(alpha = 0.16f) else Color.Transparent,
