@@ -93,6 +93,7 @@ object TradeFilter {
         val to = c.toDate.takeIf { it.isNotBlank() }?.let { date(it)!!.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
         val query = c.query.trim()
         return trades.filter { t ->
+            ((from == null && to == null) || t.openedAt > 0) &&
             (from == null || t.openedAt >= from) && (to == null || t.openedAt < to) &&
             (query.isEmpty() || listOf(t.id, t.displayTradeNumber.toString(), t.symbol, t.strategyId, t.strategyTitleFa, t.note, t.exitReason.orEmpty(), t.outcomeReasonFa, t.lessonFa, t.outcomeTags.joinToString(" "), t.entryConditions.joinToString(" ") { it.name + " " + it.detail }).any { it.contains(query, ignoreCase = true) }) &&
             dimensions.all { d -> c.choices[d.key]?.let { it == d.value(t) } ?: true } &&

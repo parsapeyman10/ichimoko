@@ -24,6 +24,7 @@ class TradeFilterTest {
         assertEquals(listOf(unknown), TradeFilter.apply(all, TradeFilter.Criteria(choices = mapOf("outcome" to "بسته؛ نتیجه نامعلوم"))))
         assertEquals(4, TradeFilter.apply(all, TradeFilter.Criteria(query = "یادداشت")).size)
         assertTrue(TradeFilter.apply(all, TradeFilter.Criteria(fromDate = "2026-01-02")).isEmpty())
+        assertTrue(TradeFilter.apply(listOf(win.copy(openedAt = 0)), TradeFilter.Criteria(toDate = "2026-01-01")).isEmpty())
         assertEquals(4, TradeFilter.apply(all, TradeFilter.Criteria(fromDate = "۲۰۲۶-۰۱-۰۱", toDate = "۲۰۲۶-۰۱-۰۱")).size)
         assertEquals(4, TradeFilter.apply(all, TradeFilter.Criteria(choices = mapOf("tag" to TradeFilter.UNKNOWN))).size)
         assertEquals(listOf(win.copy(outcomeTags = listOf("TEST"))), TradeFilter.apply(listOf(win.copy(outcomeTags = listOf("TEST")), loss), TradeFilter.Criteria(choices = mapOf("tag" to "TEST"))))
