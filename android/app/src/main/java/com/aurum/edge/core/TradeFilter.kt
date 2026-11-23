@@ -35,7 +35,7 @@ object TradeFilter {
         Dimension("tech1h", "سنجش ۱H هنگام ورود") { rating(it.tech1hBuy, it.tech1hNeutral, it.tech1hSell) },
         Dimension("tech4h", "سنجش ۴H هنگام ورود") { rating(it.tech4hBuy, it.tech4hNeutral, it.tech4hSell) },
         Dimension("techsource", "منشأ سنجش") { if (rating(it.tech1hBuy, it.tech1hNeutral, it.tech1hSell) == UNKNOWN && rating(it.tech4hBuy, it.tech4hNeutral, it.tech4hSell) == UNKNOWN) UNKNOWN else if (it.techSnapshotRebuilt) "بازسازی‌شده" else "ثبت هنگام ورود" },
-        Dimension("exit", "علت خروج ثبت‌شده") { if (it.isOpen) "باز" else known(it.exitReason) },
+        Dimension("exit", "علت خروج ثبت‌شده") { if (it.isOpen) "باز" else known(it.exitReason.orEmpty()) },
     )
     private fun finite(v: Double?): Double? = v?.takeIf { it.isFinite() }
     private fun state(v: Double): Double? = finite(v)?.takeIf { it >= 0.0 }
