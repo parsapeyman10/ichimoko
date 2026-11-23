@@ -697,20 +697,7 @@ private fun NativeIchimokuCanvasChart(
                         fontWeight = FontWeight.Bold,
                         color = if (inspectedFk.spanA >= inspectedFk.spanB) AurumColors.Green else AurumColors.Red,
                     )
-                    // راهنمای نشانه‌ها: همان چهار رنگی که روی کندل‌ها کشیده می‌شود.
-        if (markerTrade != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text("● ورود", color = Color(0xFFFF9800), fontSize = 11.sp)
-                Text("● خروج سودده", color = Color(0xFF00E676), fontSize = 11.sp)
-                Text("● خروج زیان‌ده", color = Color(0xFFFF5252), fontSize = 11.sp)
-                Text("● بهترین کندل مسیر", color = Color(0xFF40C4FF), fontSize = 11.sp)
-            }
-        }
-
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Text(
                             text = "SSA: ${formatPrice(inspectedFk.spanA)} | SSB: ${formatPrice(inspectedFk.spanB)}",
                             style = MaterialTheme.typography.labelSmall,
@@ -719,6 +706,15 @@ private fun NativeIchimokuCanvasChart(
                         )
                     }
                 }
+            }
+        }
+
+        if (markerTrade != null) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("● ورود", color = Color(0xFFFF9800), fontSize = 10.sp)
+                Text("● خروج سودده", color = Color(0xFF00E676), fontSize = 10.sp)
+                Text("● خروج زیان‌ده", color = Color(0xFFFF5252), fontSize = 10.sp)
+                Text("● بهترین کندل مسیر", color = Color(0xFF40C4FF), fontSize = 10.sp)
             }
         }
 
@@ -757,14 +753,11 @@ private fun NativeIchimokuCanvasChart(
         val padMax = windowPadded.max
         val padRange = windowPadded.span
 
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+          CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Canvas(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    // اگر ارتفاع والدی نامحدود باشد، weight به صفر می‌رسد و بوم بی‌صدا خالی
-                    // می‌ماند؛ این کف ارتفاع تضمین می‌کند چارت همیشه قابل دیدن باشد.
-                    .heightIn(min = 240.dp)
+                    .fillMaxSize()
                     .pointerInput(bars.size, visibleBarsCount, focusFutureKumo) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
@@ -1180,12 +1173,9 @@ private fun NativeIchimokuCanvasChart(
                 //    بهترین کندل در جهت معامله (آبی). فقط روی کندل‌هایی که در پنجرهٔ دید هستند.
                 if (markerTrade != null) {
                     fun slotOfTime(ms: Long): Int? {
-                        if (ms <= 0L) return null
-                        var found: Int? = null
-                        for (i in visibleSlice.indices) {
-                            if (visibleSlice[i].candle.time <= ms) found = i
-                        }
-                        return found
+                        return com.aurum.edge.core.ChartViewport.candleSlot(
+                            visibleSlice.map { it.candle.time }, ms, Interval.fromLabel(timeframe).millis,
+                        )
                     }
                     fun ring(slot: Int, color: Color, radius: Float) {
                         val bar = visibleSlice[slot].candle
@@ -1205,15 +1195,16 @@ private fun NativeIchimokuCanvasChart(
                         }
                     } else null
                     if (entrySlot != null) ring(entrySlot, Color(0xFFFF9800), 10f)
-                    if (exitSlot != null && exitSlot != entrySlot) {
+                    if (exitSlot != null) {
                         val win = (markerTrade.pnlUsd ?: 0.0) >= 0.0
-                        ring(exitSlot, if (win) Color(0xFF00E676) else Color(0xFFFF5252), 10f)
+                        ring(exitSlot, if (win) Color(0xFF00E676) else Color(0xFFFF5252), if (exitSlot == entrySlot) 6f else 10f)
                     }
                     if (bestSlot != null && bestSlot != entrySlot && bestSlot != exitSlot) {
                         ring(bestSlot, Color(0xFF40C4FF), 8f)
                     }
                 }
             }
+          }
         }
     }
 }

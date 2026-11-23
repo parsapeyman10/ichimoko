@@ -481,12 +481,14 @@ class JournalStore(
         val rating1h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(
             gaugeCandles1h.ifEmpty {
                 com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H1)
-            }.filter { it.closed && it.time + 3_600_000L <= now },
+            }.filter { it.closed && it.time + 3_600_000L <= now }
+                .takeIf { bars -> bars.maxOfOrNull { it.time }?.let { now - (it + 3_600_000L) <= 7_200_000L } == true }.orEmpty(),
         )
         val rating4h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(
             gaugeCandles4h.ifEmpty {
                 com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H4)
-            }.filter { it.closed && it.time + 14_400_000L <= now },
+            }.filter { it.closed && it.time + 14_400_000L <= now }
+                .takeIf { bars -> bars.maxOfOrNull { it.time }?.let { now - (it + 14_400_000L) <= 28_800_000L } == true }.orEmpty(),
         )
         val trade = rawTrade.copy(
             tradeNumber = nextTradeNum,

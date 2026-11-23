@@ -110,7 +110,7 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
             Text("📈 کارنامهٔ دسته‌بندی‌شده", color = AurumColors.Gold, fontWeight = FontWeight.Bold)
             val best = performance.bestSession
             Text(if (best == null) "سشن برتر قابل اتکا در داده‌های موجود نیست: هر سشن به حداقل ۳۰ معاملهٔ دارای ریسک معتبر و میانگین R مثبت نیاز دارد." else "سشن برتر تاریخی: ${best.labelFa} · ${best.rSamples} نمونه · میانگین ${String.format(java.util.Locale.US, "%+.2f", best.meanR)}R؛ تضمین آینده نیست.", color = AurumColors.TextSecondary, fontSize = 11.sp)
-            Text("تقسیم‌بندی بر اساس ساعت ورود UTC و نتایج معامله‌های بستهٔ غیر بک‌تست است؛ به زمان محلی و تعطیلی بازار تبدیل نشده است.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+            Text("این رتبه‌بندی کلی است؛ ورود خودکار برای هر نماد و استراتژی جداگانه، پس از حداقل ۳۰ نمونه در هر یک از دو سشن، بهترین سشن با میانگین R مثبت را انتخاب می‌کند؛ در کمبود داده محدودیتی اعمال نمی‌شود. UTC ثابت است، نه ساعت محلی بازار.", color = AurumColors.TextSecondary, fontSize = 10.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("استراتژی", "نماد", "سشن").forEach { mode ->
                     OutlinedButton(onClick = { grouping = mode }) { Text(if (mode == grouping) "✓ $mode" else mode, fontSize = 10.sp) }

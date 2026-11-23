@@ -874,6 +874,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                 entryInterval = armedReport.triggerInterval,
                                 strategyId = armedReport.strategyId,
                                 strategyTitleFa = armedReport.strategyTitleFa,
+                                automatic = true,
                             )
                         }
                     }
@@ -1096,6 +1097,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         entryInterval: Interval = Interval.M15,
         strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
         strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
+        automatic: Boolean = false,
     ) {
         // قاعدهٔ «یک معامله در هر لحظه»: هم نماد و هم استراتژی، پیش از هر تماس شبکه‌ای/هوش
         // مصنوعی سنجیده می‌شود تا هیچ لایه‌ای (نه رادار، نه گیت عصبی) نتواند بازش کند.
@@ -1105,7 +1107,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         }
         val cfg = settings.value
         if (!cfg.avalAiEnabled) {
-            executeOpenTradeNow(calc, note, entryInterval, strategyId, strategyTitleFa)
+            executeOpenTradeNow(calc, note, entryInterval, strategyId, strategyTitleFa, automatic)
             return
         }
 
@@ -1140,7 +1142,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                             if (note.isNotBlank()) append(note.trim()).append(" · ")
                             append("🤖 AI: بله (${verdict.confidence}%)")
                         }
-                        executeOpenTradeNow(calc, combinedNote, entryInterval, strategyId, strategyTitleFa)
+                        executeOpenTradeNow(calc, combinedNote, entryInterval, strategyId, strategyTitleFa, automatic)
                     } else {
                         _toast.value = "🛑 پاسخ هوش مصنوعی «نه» بود — معامله باز نشد: ${verdict.reasonFa}"
                     }
@@ -1186,15 +1188,32 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             "${String.format(Locale.US, "%.2f$", calc.riskBudgetUsd)}"
     }
 
+    /** سنجش فقط از کندل بستهٔ تازه؛ دادهٔ کهنه یا ناقص مجوز تصمیم فنی نمی‌دهد. */
+    private fun freshTechnicalRating(symbol: String, interval: Interval, now: Long): com.aurum.edge.core.TechnicalRating? {
+        val bars = LiveQuoteFetcher.peekCachedCandles(symbol, interval)
+            .filter { it.closed && it.time + interval.millis <= now }.sortedBy { it.time }
+        val last = bars.lastOrNull() ?: return null
+        if (now - (last.time + interval.millis) > interval.millis * 2) return null
+        return com.aurum.edge.core.TechnicalRatingEngine.evaluate(bars)
+    }
+
     private fun executeOpenTradeNow(
         calc: RiskCalculationResult,
         note: String,
         entryInterval: Interval = Interval.M15,
         strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
         strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
+        automatic: Boolean = false,
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
+        if (automatic) {
+            val preferred = com.aurum.edge.core.SessionEntryPolicy.preferred(trades.value, normSym, strategyId, now)
+            if (preferred != null && preferred.key != com.aurum.edge.core.NeuralStateFeatures.sessionCodeOf(now)) {
+                _toast.value = "🕒 ورود خودکار $normSym فقط در سشن تاریخی ${preferred.labelFa} (${preferred.rSamples} نمونه)؛ عملکرد آینده تضمین نیست."
+                return
+            }
+        }
         com.aurum.edge.core.ProfitRiskPolicy.planErrorFa(calc, trades.value, settings.value.accountBalance)?.let { reason ->
             _toast.value = "⛔ $reason"
             return
@@ -1229,10 +1248,16 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         // سنجش تکنیکال ۱ ساعته و ۴ ساعته در همان لحظهٔ ورود ثبت می‌شود و بعداً تغییر نمی‌کند.
         val gauge1h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H1).filter { it.closed && it.time + 3_600_000L <= now }
         val gauge4h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H4).filter { it.closed && it.time + 14_400_000L <= now }
+        val rating1 = freshTechnicalRating(normSym, Interval.H1, now)
+        val rating4 = freshTechnicalRating(normSym, Interval.H4, now)
+        val weightedRating = com.aurum.edge.core.WeightedTechnicalRating.score(calc.action, rating1, rating4)
+        if (weightedRating != null && weightedRating <= com.aurum.edge.core.WeightedTechnicalRating.STRONG_OPPOSITION) {
+            _toast.value = "⛔ ورود: سنجش وزنی ۱H/۴H مخالف جهت است (وزن ۴۰٪/۶۰٪، امتیاز ${String.format(Locale.US, "%.2f", weightedRating)})."
+            return
+        }
         val ratingDecision = com.aurum.edge.core.RatingEvidenceGate.evaluate(
             trades = trades.value, symbol = normSym, strategy = strategyId, action = calc.action,
-            h1 = com.aurum.edge.core.TechnicalRatingEngine.evaluate(gauge1h),
-            h4 = com.aurum.edge.core.TechnicalRatingEngine.evaluate(gauge4h), riskReward = calc.riskReward,
+            h1 = rating1, h4 = rating4, riskReward = calc.riskReward,
         )
         if (ratingDecision.blocked) {
             _toast.value = "⛔ " + ratingDecision.reasonFa
@@ -1240,7 +1265,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         }
         val openedRaw = container.journalStore.openTrade(
             calc = calc,
-            note = "$effectiveNote · ${ratingDecision.reasonFa}".trim(' ', '·'),
+            note = "$effectiveNote · سنجش وزنی ۱H/۴H (۴۰٪/۶۰٪): ${weightedRating?.let { String.format(Locale.US, "%.2f", it) } ?: "نامعلوم"} · ${ratingDecision.reasonFa}".trim(' ', '·'),
             now = now,
             entryInterval = entryInterval,
             strategyId = strategyId,
@@ -2267,6 +2292,19 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                     // ۱) برخورد حد ضرر ثابت، ۲) رسیدن به هدف، ۳) برگشت قطعی روند **در سود**
                     // (Preserve Mode / trend-health در ادامهٔ همین حلقه).
                     val matchingReport = dual.reportFor(openTrade.interval, openTrade.strategyId)
+                    // خروج تکنیکال فقط با قیمت تازه و سود خالص دست‌کم ۱٫۵R؛ SL/TP و خروج‌های حفاظتی مستقل‌اند.
+                    val quote = latestTicks[V1Universe.normalize(symbol)] ?: _liveTicks.value[V1Universe.normalize(symbol)]
+                    val px = quote?.takeIf { it.at <= now && now - it.at <= 60_000L && it.price.isFinite() && it.price > 0.0 }?.price
+                    val score = com.aurum.edge.core.WeightedTechnicalRating.score(openTrade.action,
+                        freshTechnicalRating(symbol, Interval.H1, now), freshTechnicalRating(symbol, Interval.H4, now))
+                    val net = px?.let { RiskAndCalendarEngine.computeExitPnlUsd(openTrade, it).second }
+                    if (px != null && com.aurum.edge.core.WeightedTechnicalRating.shouldExit(
+                        score, net, openTrade.fixedRiskUsd, freshQuote = true,
+                        marketOpen = !com.aurum.edge.core.MarketHours.closedFor(symbol, now))) {
+                        val reason = "خروج تکنیکال: سنجش وزنی ۱H/۴H (۴۰٪/۶۰٪) ${String.format(Locale.US, "%.2f", score)} مخالف جهت؛ سود خالص برآوردی حداقل ۱٫۵R."
+                        val closed = container.journalStore.closeTradeAtPrice(openTrade.id, px, reason, now)
+                        if (closed != null) { _toast.value = reason; continue }
+                    }
                     val preserveUpdate = IchimokuStrategyEngine.evaluateOpenTradeManagement(
                         trade = openTrade,
                         report = matchingReport,
@@ -2421,6 +2459,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                     entryInterval = report.triggerInterval,
                                     strategyId = report.strategyId,
                                     strategyTitleFa = report.strategyTitleFa,
+                                    automatic = true,
                                 )
                             }
                         }
