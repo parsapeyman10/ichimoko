@@ -443,6 +443,7 @@ class JournalStore(
         /** حالت بازار در لحظهٔ ورود (از گزارش استراتژی). خالی = فقط سشن ثبت می‌شود. */
         stateInputs: com.aurum.edge.core.NeuralStateInputs? = null,
         enforceProfitRisk: Boolean = false,
+        signalBarTime: Long? = null,
     ): PaperTrade? {
         // ── قاعدهٔ «یک معاملهٔ باز برای هر استراتژی» ─────────────────────────────
         // تا تکلیف معاملهٔ باز روشن نشود، همین استراتژی معاملهٔ تازه نمی‌گیرد. این گارد در خودِ
@@ -491,6 +492,7 @@ class JournalStore(
                 .takeIf { bars -> bars.maxOfOrNull { it.time }?.let { now - (it + 14_400_000L) <= 28_800_000L } == true }.orEmpty(),
         )
         val trade = rawTrade.copy(
+            signalBarTime = signalBarTime?.takeIf { it > 0L && it <= now },
             tradeNumber = nextTradeNum,
             preEntry3CandleCategoryCode = pre3Context.categoryCode,
             preEntry3CandleCategoryFa = pre3Context.categoryBadgeFa,

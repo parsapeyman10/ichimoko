@@ -1512,7 +1512,7 @@ function filterRows() {
             drawTextFitted(
                 c1,
                 "n = ${reg.samplesCount} · p = ۱۶ · R² = ${f3(reg.rSquared)} · Adj R² = ${f3(reg.adjustedRSquared)} · " +
-                    "RMSE = ${f2(reg.walkForwardRmse)}R · پارامترهای اعمال‌شده: ${reg.parametersApplied} از ${reg.parameterRows.size}",
+                    "RMSE درون‌نمونه‌ای = ${f2(reg.walkForwardRmse)}R · پارامترهای اعمال‌شده: ${reg.parametersApplied} از ${reg.parameterRows.size}",
                 34f, 96f, 9f, white, maxWidth = 780f,
             )
             drawTextFitted(
@@ -1525,7 +1525,7 @@ function filterRows() {
             drawTextFitted(
                 c1,
                 "روش: ${reg.regressionMethodFa} · λ = ${f2(reg.ridgeLambda)} · δ = ${f2(reg.huberDelta)} · " +
-                    "لیفت ادعایی: ${f2(reg.expectedWinRateLiftPct)}٪ نرخ برد / ${f2(reg.expectedRLiftPerTrade)}R",
+                    "بهبود خارج نمونه: سنجیده نشده",
                 34f, 124f, 8.5f, muted, maxWidth = 780f,
             )
 

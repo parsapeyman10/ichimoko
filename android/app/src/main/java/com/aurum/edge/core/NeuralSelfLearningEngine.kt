@@ -701,7 +701,7 @@ class NeuralSelfLearningEngine(
             learnedTotal = total,
             target = target,
             userActivationEnabled = cur.gateUserActivationEnabled,
-        )
+        ).copy(isGateActive = false, summaryFa = "شبکه صرفاً امتیاز و هشدار می‌دهد؛ منع پیش‌بینی فعال نیست. قفل‌های ایمنی مستقل پابرجا هستند.")
         val progressPct = ((total.toDouble() / target) * 100.0).coerceIn(0.0, 100.0)
         val allClusters = cur.conditionClusters.values.toList()
         val noTradeClusters = allClusters
@@ -989,7 +989,7 @@ class NeuralSelfLearningEngine(
 
         val ensuredAutoTuned = ensurePerSymbolProfiles(
             ensurePerStrategyProfiles(cur.autoTunedParameters, cur),
-        )
+        ).let { it.copy(latestRegressionReport = regressionObservation(it.latestRegressionReport)) }
 
         return NeuralLearningStateSummary(
             architectureNameFa = cur.architectureName,
@@ -2494,12 +2494,12 @@ class NeuralSelfLearningEngine(
         val isNoTrade = policy.blocksTrade ||
             effectiveWinProb * 100.0 < policy.winProbFloorPct ||
             blendedExpectedR < policy.expectedRFloor
-        val isBlocking = policy.blocksTrade
+        val isBlocking = false // تصمیم کاربر: امتیاز پیش‌بینی هشدار است، نه منع ورود.
 
         val summaryFa = "احتمال برد شبکه عصبی: ${(effectiveWinProb * 100).toInt()}% · امید ریاضی: ${String.format(Locale.US, "%+.2fR", blendedExpectedR)} · ${policy.stage.labelFa}"
         val warningFa = when {
             isBlocking -> "⛔ گیت ورود را مسدود کرد: ${policy.reasonFa}"
-            isNoTrade -> "شرایط پرخطر/ممنوعه تشخیص داده شد ($summaryFa) — گیت غیرفعال است، فقط هشدار"
+            isNoTrade -> "شرایط پرخطر احتمالی ($summaryFa) — صرفاً هشدار، بدون منع ورود"
             else -> null
         }
         return NeuralSignalEvaluation(
@@ -3384,95 +3384,30 @@ class NeuralSelfLearningEngine(
         baseConfig: BaseStrategyConfig = BaseStrategyConfig(),
         nowMs: Long = System.currentTimeMillis(),
     ): NeuralParameterRegressionReport {
-        val safeLambda = ridgeLambda.coerceIn(0.05, 1.50)
-        val safeDelta = huberDelta.coerceIn(0.50, 2.50)
-        val report = computeParameterRegressionInternal(
-            cur = persistedState,
-            strategyId = strategyId,
-            ridgeLambda = safeLambda,
-            huberDelta = safeDelta,
-            nowMs = nowMs,
-        )
-        if (!strategyId.equals("ALL", ignoreCase = true) &&
-            !BitcoinStrategyModel.fromId(strategyId).neuralLearningEnabled
-        ) return report
-        val rowMap = report.parameterRows.associateBy { it.paramKey }
-        val regMinRr = (rowMap["minRiskReward"]?.regressedValue ?: 1.65).coerceIn(1.50, 2.60)
-        val regSlBuf = (rowMap["slBufferAtr"]?.regressedValue ?: 0.26).coerceIn(0.18, 0.45)
-        val regKijunExt = (rowMap["maxKijunExtensionAtr"]?.regressedValue ?: 1.62).coerceIn(1.30, 2.20)
-        val regMinEr = (rowMap["minEfficiencyRatio"]?.regressedValue ?: 0.23).coerceIn(0.18, 0.38)
-        val regMinVol = (rowMap["minVolumeRatio20"]?.regressedValue ?: 0.65).coerceIn(0.50, 1.00)
-        val regMaxWick = (rowMap["maxAdverseWickRatio"]?.regressedValue ?: 0.40).coerceIn(0.28, 0.55)
-        val regMinThick = (rowMap["minFutureKumoThicknessAtr"]?.regressedValue ?: 0.05).coerceIn(0.02, 0.14)
-        val regMinSniper = (rowMap["minSniperDistanceAtr"]?.regressedValue ?: 0.60).coerceIn(0.40, 0.90)
-        val regGatePct = (rowMap["neuralWinProbGatePct"]?.regressedValue ?: 58.0).coerceIn(48.0, 75.0)
-
-        val ensured = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
-        val updatedProfiles = LinkedHashMap(ensured.perStrategyProfiles)
-        val targetModels = if (strategyId.equals("ALL", ignoreCase = true)) {
-            BitcoinStrategyModel.neuralLearningModels
-        } else {
-            listOf(BitcoinStrategyModel.fromId(BitcoinStrategyModel.normalizeStrategyId(strategyId)))
-        }
-        val slopeByIdx = report.featureSlopes.associateBy { it.featureIndex }
-        for (model in targetModels) {
-            val prevProf = updatedProfiles[model.id]
-                ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
-            val newFeats = prevProf.featureTunings.map { ft ->
-                val slope = slopeByIdx[ft.featureIndex]
-                if (slope != null) {
-                    val regWeight = round((0.55 * ft.learnedWeight + 0.45 * slope.huberBetaR).coerceIn(-3.5, 3.5) * 100.0) / 100.0
-                    val regMult = round((0.70 * ft.tuningMultiplier + 0.30 * (1.0 + abs(slope.ridgeBetaWin) * 0.65)).coerceIn(0.35, 2.35) * 100.0) / 100.0
-                    ft.copy(
-                        learnedWeight = regWeight,
-                        tuningMultiplier = regMult,
-                        attentionSharePct = slope.importancePct,
-                    )
-                } else ft
-            }
-            updatedProfiles[model.id] = prevProf.copy(
-                tuningGeneration = prevProf.tuningGeneration + 1,
-                samplesAnalyzed = report.samplesCount,
-                minRiskReward = round(regMinRr.coerceIn(1.50, 2.60) * 100.0) / 100.0,
-                maxKijunExtensionAtr = round(regKijunExt * 100.0) / 100.0,
-                slBufferAtr = round(regSlBuf * 100.0) / 100.0,
-                minEfficiencyRatio = round(regMinEr * 100.0) / 100.0,
-                minVolumeRatio20 = round(regMinVol * 100.0) / 100.0,
-                maxAdverseWickRatio = round(regMaxWick * 100.0) / 100.0,
-                minFutureKumoThicknessAtr = round(regMinThick * 100.0) / 100.0,
-                minSniperDistanceAtr = round(regMinSniper * 100.0) / 100.0,
-                neuralWinProbGatePct = round(regGatePct * 10.0) / 10.0,
-                featureTunings = newFeats,
-                tuningSummaryFa = if (report.parametersApplied == 0) {
-                    "رگرسیون اجرا شد ولی هیچ پارامتری معنادار نبود (${report.fitQualityVerdictFa}) — تنظیمات دست‌نخورده ماند."
-                } else {
-                    "رگرسیون Ridge L2 + Huber IRLS (R²=${String.format(Locale.US, "%.3f", report.rSquared)} · λ=$safeLambda · ${report.parametersApplied} پارامتر معنادار): R:R∈[1:${regMinRr}..1:3.00] · استاپ=${regSlBuf}ATR · کیجون≤${regKijunExt}ATR."
-                },
-            )
-        }
-
-        val nextAuto = ensured.copy(
-            tuningGeneration = ensured.tuningGeneration + 1,
-            methodBadgeFa = "Ridge L2 (λ=$safeLambda) + Huber IRLS (δ=$safeDelta) + Walk-Forward CV",
-            tunedAtMs = nowMs,
-            samplesAnalyzed = report.samplesCount,
-            minRiskReward = round(regMinRr * 100.0) / 100.0,
-            maxKijunExtensionAtr = round(regKijunExt * 100.0) / 100.0,
-            slBufferAtr = round(regSlBuf * 100.0) / 100.0,
-            minEfficiencyRatio = round(regMinEr * 100.0) / 100.0,
-            minVolumeRatio20 = round(regMinVol * 100.0) / 100.0,
-            neuralWinProbGatePct = round(regGatePct * 10.0) / 10.0,
-            perStrategyProfiles = updatedProfiles,
-            latestRegressionReport = report,
-            tuningSummaryFa = if (report.parametersApplied == 0) {
-                "رگرسیون ماتریسی اجرا شد و هیچ پارامتری معنادار نبود (${report.fitQualityVerdictFa})."
-            } else {
-                "رگرسیون ماتریسی Ridge L2 + Huber IRLS (R²=${String.format(Locale.US, "%.3f", report.rSquared)} · RMSE=${String.format(Locale.US, "%.2f", report.walkForwardRmse)} · ${report.parametersApplied} از ۱۰ پارامتر معنادار): پارامترهای حد ضرر و R:R کالیبره شدند."
-            },
-        )
-        persistState(persistedState.copy(autoTunedParameters = nextAuto))
+        // محاسبهٔ اکتشافی است، نه آزمون خارج نمونه و نه مجوز تغییر وزن یا تنظیمات.
+        val raw = computeParameterRegressionInternal(persistedState, strategyId,
+            ridgeLambda.coerceIn(0.05, 1.50), huberDelta.coerceIn(0.50, 2.50), nowMs)
+        val report = regressionObservation(raw)
+        persistState(persistedState.copy(autoTunedParameters = persistedState.autoTunedParameters.copy(latestRegressionReport = report)))
         return report
     }
+
+    private fun regressionObservation(raw: NeuralParameterRegressionReport): NeuralParameterRegressionReport = raw.copy(
+        regressionMethodFa = "محاسبهٔ اکتشافی درون‌نمونه‌ای؛ Walk-Forward مستقل انجام نشده",
+        rSquared = if (raw.samplesCount >= 2) raw.rSquared else Double.NaN,
+        adjustedRSquared = if (raw.samplesCount >= 2) raw.adjustedRSquared else Double.NaN,
+        walkForwardRmse = if (raw.samplesCount >= 2) raw.walkForwardRmse else Double.NaN,
+        walkForwardMae = if (raw.samplesCount >= 2) raw.walkForwardMae else Double.NaN,
+        parameterRows = raw.parameterRows.map { it.copy(regressedValue = it.priorValue, applied = false,
+            significanceNoteFa = "صرفاً اکتشافی؛ مقدار واقعی تنظیمات ممکن است متفاوت باشد و هیچ تغییری اعمال نشده است") },
+        parametersApplied = 0,
+        expectedWinRateLiftPct = 0.0,
+        expectedRLiftPerTrade = 0.0,
+        optimalStopLossCorridorFa = "تخمین اکتشافی؛ مقادیر واقعی تنظیمات را در گزارش استراتژی بررسی کنید",
+        optimalRrCorridorFa = "پیش‌بینی بهبود یا تغییر R:R انجام نشده؛ کف خالص ۲R و سقف ۳R سیاست معامله حفظ می‌شود",
+        fitQualityVerdictFa = if (raw.samplesCount < 30) "نمونه کافی نیست؛ اعتبارسنجی مستقل و لیفت اندازه‌گیری نشده است" else "R² و خطا درون نمونه‌اند؛ اعتبارسنجی مستقل و لیفت اندازه‌گیری نشده است",
+        regressionDiagnosticNotesFa = listOf("ضرایب و t اکتشافی‌اند، رابطهٔ علّی یا بهبود آینده را ثابت نمی‌کنند؛ هیچ پارامتری توسط این گزارش اعمال نمی‌شود."),
+    )
 
     /** خروجی آمارهٔ برازش Ridge وزن‌دار: خطای معیار هر ضریب + شاخص‌های نکویی برازش. */
     private class WeightedFitStats(

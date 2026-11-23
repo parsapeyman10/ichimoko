@@ -183,6 +183,21 @@ class JournalSingleOpenTradeTest {
     }
 
     @Test
+    fun signalTimeIsPreservedAndFutureTimeIsNotInvented() {
+        val (journal, _) = freshJournal("test_signal_time.json")
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "ETH/USDT", accountBalance = 1_000.0, riskPercent = 0.5,
+            entry = 3_000.0, stopLoss = 2_960.0, takeProfit = 3_080.0,
+        )!!
+        val now = 2_000_000L
+        val trade = journal.openTrade(calc, now = now, signalBarTime = now - 60_000L)!!
+        assertEquals(now - 60_000L, trade.signalBarTime)
+        val (other, _) = freshJournal("test_signal_future.json")
+        val future = other.openTrade(calc, now = now, signalBarTime = now + 1L)!!
+        assertNull(future.signalBarTime)
+    }
+
+    @Test
     fun gaugeSnapshotIsRecordedAtOpenForBothTimeframes() {
         val (journal, _) = freshJournal("test_gauge_snapshot.json")
         val calc = RiskAndCalendarEngine.calculatePosition(

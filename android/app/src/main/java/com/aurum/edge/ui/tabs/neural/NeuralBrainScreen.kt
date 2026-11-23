@@ -254,9 +254,9 @@ fun NeuralBrainScreen(
 
         // ── پنل رگرسیون ماتریسی پارامترها با بهترین متود روز دنیا (Ridge L2 + Huber Robust IRLS + Walk-Forward CV) ──
         SectionCard(
-            title = "📐 پنل رگرسیون ماتریسی پارامترها (بهترین متود روز دنیا: Ridge L2 + Huber IRLS)",
+            title = "📐 پنل تحلیل اکتشافی پارامترها",
             onCopy = { viewModel.copyNeuralBrainSection("regression") },
-            subtitle = "رگرسیون هم‌زمان ۱۰ پارامتر ساختاری، دالان طلایی حد ضرر [0.80..2.10 ATR]، شیب ۲۴ ویژگی و قفل R:R در [1.5..3.0]",
+            subtitle = "محاسبهٔ اکتشافی روی نمونه‌های حافظه؛ آزمون مستقل نیست و تنظیمات را تغییر نمی‌دهد.",
             initiallyExpanded = false,
         ) {
             val regReport = neuralState.autoTunedParameters.latestRegressionReport
@@ -394,14 +394,15 @@ fun NeuralBrainScreen(
                             modifier = Modifier.weight(1f),
                         )
                         StatTile(
-                            label = "خطای Walk-Forward RMSE",
+                            label = "خطای برازش RMSE",
                             value = String.format(Locale.US, "%.2fR", regReport.walkForwardRmse),
                             valueColor = AurumColors.Cyan,
                             modifier = Modifier.weight(1f),
                         )
                         StatTile(
-                            label = "ارتقای نرخ برد و R",
-                            value = "+${regReport.expectedWinRateLiftPct}% | +${regReport.expectedRLiftPerTrade}R",
+                            label = "بهبود خارج نمونه",
+                            value = "سنجیده نشده",
+
                             valueColor = AurumColors.Gold,
                             modifier = Modifier.weight(1f),
                         )
@@ -433,7 +434,7 @@ fun NeuralBrainScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
-                            text = "🚀 اجرای رگرسیون ماتریسی پارامترها (Ridge L2 + Huber IRLS) و اعمال فوری",
+                            text = "📐 اجرای تحلیل اکتشافی (بدون اعمال تنظیمات)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                         )
@@ -941,14 +942,7 @@ fun NeuralBrainScreen(
                     ) {
                         Text(
                             modifier = Modifier.weight(1f).padding(end = 6.dp),
-                            text = when {
-                                neuralState.isGateActive ->
-                                    "✅ گیت اجرایی فعال است — هر دو شرط کامل (۱۰,۰۰۰ معامله + اجازهٔ شما)"
-                                neuralState.volumeConditionMet ->
-                                    "🟡 شرط ۱ کامل شد (۱۰,۰۰۰ معامله) — منتظر فعال‌سازی شما (شرط ۲)"
-                                else ->
-                                    "⏳ فاز یادگیری عمیق تا ۱۰,۰۰۰ معامله (${String.format(Locale.US, "%.2f%%", neuralState.warmupProgressPercent)})"
-                            },
+                            text = "شبکه در حالت مشاهده‌ای است؛ پیش‌بینی به تنهایی مانع ورود نمی‌شود.",
                             style = MaterialTheme.typography.labelMedium,
                             color = if (neuralState.isGateActive) AurumColors.Green else AurumColors.Gold,
                             fontWeight = FontWeight.Bold,
@@ -973,14 +967,15 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "شرط ۲ — فعال‌سازی گیت مسدودسازی تله‌های ضررده توسط من (هر زمان قابل خاموش‌کردن)",
+                            text = "منع پیش‌بینی غیرفعال است؛ خروجی شبکه فقط هشدار و اطلاعات است.",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextSecondary,
                             modifier = Modifier.weight(1f),
                         )
                         Switch(
-                            checked = neuralState.gateUserActivationEnabled,
-                            onCheckedChange = { viewModel.setNeuralGateUserActivation(it) },
+                            checked = false,
+                            enabled = false,
+                            onCheckedChange = {},
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = AurumColors.Green,
                                 checkedTrackColor = AurumColors.Green.copy(alpha = 0.35f),

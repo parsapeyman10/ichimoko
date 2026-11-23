@@ -85,6 +85,24 @@ class NeuralRegressionHonestyTest {
     }
 
     @Test
+    fun `regression is observational and preserves model and tuning`() {
+        val (eng, dir) = engine("report_only")
+        try {
+            feed(eng, 40)
+            val before = eng.stateFlow.value
+            val result = eng.runParameterRegression(nowMs = 1_800_000_000_000L)
+            val after = eng.stateFlow.value
+            assertEquals(0, result.parametersApplied)
+            assertTrue(result.parameterRows.none { it.applied })
+            assertEquals(before.gateWeights, after.gateWeights)
+            assertEquals(before.upWeights, after.upWeights)
+            assertEquals(before.attentionWeights, after.attentionWeights)
+            assertEquals(before.autoTunedParameters.copy(latestRegressionReport = after.autoTunedParameters.latestRegressionReport), after.autoTunedParameters)
+            assertTrue(result.regressionMethodFa.contains("درون‌نمونه"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
     fun `empty memory never claims a significant parameter`() {
         val (eng, dir) = engine("empty")
         try {

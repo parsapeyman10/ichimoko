@@ -875,6 +875,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                 strategyId = armedReport.strategyId,
                                 strategyTitleFa = armedReport.strategyTitleFa,
                                 automatic = true,
+                                signalBarTime = armedReport.triggerBarTime,
                             )
                         }
                     }
@@ -1098,6 +1099,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
         strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
         automatic: Boolean = false,
+        signalBarTime: Long? = null,
     ) {
         // قاعدهٔ «یک معامله در هر لحظه»: هم نماد و هم استراتژی، پیش از هر تماس شبکه‌ای/هوش
         // مصنوعی سنجیده می‌شود تا هیچ لایه‌ای (نه رادار، نه گیت عصبی) نتواند بازش کند.
@@ -1107,7 +1109,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         }
         val cfg = settings.value
         if (!cfg.avalAiEnabled) {
-            executeOpenTradeNow(calc, note, entryInterval, strategyId, strategyTitleFa, automatic)
+            executeOpenTradeNow(calc, note, entryInterval, strategyId, strategyTitleFa, automatic, signalBarTime)
             return
         }
 
@@ -1137,17 +1139,10 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 )
                 res.onSuccess { verdict ->
                     _lastAiVerdict.value = verdict
-                    if (verdict.approved) {
-                        val combinedNote = buildString {
-                            if (note.isNotBlank()) append(note.trim()).append(" · ")
-                            append("🤖 AI: بله (${verdict.confidence}%)")
-                        }
-                        executeOpenTradeNow(calc, combinedNote, entryInterval, strategyId, strategyTitleFa, automatic)
-                    } else {
-                        _toast.value = "🛑 پاسخ هوش مصنوعی «نه» بود — معامله باز نشد: ${verdict.reasonFa}"
-                    }
-                }.onFailure { err ->
-                    _toast.value = "⚠️ خطا در استعلام هوش مصنوعی AvalAI: ${err.message}"
+                    val combinedNote = "$note · هوش بیرونی: ${if (verdict.approved) "موافق" else "مخالف"} (${verdict.confidence}٪)، صرفاً مشاهده‌ای: ${verdict.reasonFa}"
+                    executeOpenTradeNow(calc, combinedNote, entryInterval, strategyId, strategyTitleFa, automatic, signalBarTime)
+                }.onFailure {
+                    executeOpenTradeNow(calc, "$note · هوش بیرونی ناموجود؛ ارزیابی پیش‌بینی انجام نشد", entryInterval, strategyId, strategyTitleFa, automatic, signalBarTime)
                 }
             } finally {
                 _aiChecking.value = false
@@ -1204,15 +1199,15 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
         strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
         automatic: Boolean = false,
+        signalBarTime: Long? = null,
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
-        if (automatic) {
-            val preferred = com.aurum.edge.core.SessionEntryPolicy.preferred(trades.value, normSym, strategyId, now)
-            if (preferred != null && preferred.key != com.aurum.edge.core.NeuralStateFeatures.sessionCodeOf(now)) {
-                _toast.value = "🕒 ورود خودکار $normSym فقط در سشن تاریخی ${preferred.labelFa} (${preferred.rSamples} نمونه)؛ عملکرد آینده تضمین نیست."
-                return
-            }
+        val preferred = com.aurum.edge.core.SessionEntryPolicy.preferred(trades.value, normSym, strategyId, now)
+        val sessionNote = preferred?.let { "سشن تاریخی برتر ${it.labelFa} (${it.rSamples} نمونه؛ مشاهده‌ای)" } ?: "سشن تاریخی اختصاصی نامعلوم"
+        if (signalBarTime != null && EntrySafetyGate.isSignalStale(signalBarTime, entryInterval, now)) {
+            _toast.value = "⛔ سیگنال پیش از ثبت معامله کهنه شده است؛ لطفاً دوباره ارزیابی کنید"
+            return
         }
         com.aurum.edge.core.ProfitRiskPolicy.planErrorFa(calc, trades.value, settings.value.accountBalance)?.let { reason ->
             _toast.value = "⛔ $reason"
@@ -1251,21 +1246,15 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         val rating1 = freshTechnicalRating(normSym, Interval.H1, now)
         val rating4 = freshTechnicalRating(normSym, Interval.H4, now)
         val weightedRating = com.aurum.edge.core.WeightedTechnicalRating.score(calc.action, rating1, rating4)
-        if (weightedRating != null && weightedRating <= com.aurum.edge.core.WeightedTechnicalRating.STRONG_OPPOSITION) {
-            _toast.value = "⛔ ورود: سنجش وزنی ۱H/۴H مخالف جهت است (وزن ۴۰٪/۶۰٪، امتیاز ${String.format(Locale.US, "%.2f", weightedRating)})."
-            return
-        }
         val ratingDecision = com.aurum.edge.core.RatingEvidenceGate.evaluate(
             trades = trades.value, symbol = normSym, strategy = strategyId, action = calc.action,
             h1 = rating1, h4 = rating4, riskReward = calc.riskReward,
         )
-        if (ratingDecision.blocked) {
-            _toast.value = "⛔ " + ratingDecision.reasonFa
-            return
-        }
+        val quality = com.aurum.edge.core.EntryQualityEvidence.evaluate(trades.value, normSym, strategyId, calc.action, now, rating1, rating4)
+        val ratingNote = ratingDecision.reasonFa.replace("ورود مسدود شد.", "هشدار؛ منع پیش‌بینی اعمال نشد.")
         val openedRaw = container.journalStore.openTrade(
             calc = calc,
-            note = "$effectiveNote · سنجش وزنی ۱H/۴H (۴۰٪/۶۰٪): ${weightedRating?.let { String.format(Locale.US, "%.2f", it) } ?: "نامعلوم"} · ${ratingDecision.reasonFa}".trim(' ', '·'),
+            note = "$effectiveNote · سنجش وزنی ۱H/۴H (۴۰٪/۶۰٪): ${weightedRating?.let { String.format(Locale.US, "%.2f", it) } ?: "نامعلوم"} · $ratingNote · ${quality.textFa()} · $sessionNote".trim(' ', '·'),
             now = now,
             entryInterval = entryInterval,
             strategyId = strategyId,
@@ -1274,6 +1263,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             rrBreakdownFa = matchedBreakdown?.optimalRrReasonFa ?: "",
             preEntryCandles = entryCandles,
             enforceProfitRisk = true,
+            signalBarTime = signalBarTime,
             gaugeCandles1h = gauge1h,
             gaugeCandles4h = gauge4h,
             stateInputs = com.aurum.edge.core.NeuralStateFeatures.fromReport(
@@ -1649,6 +1639,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         // ۰ = بدون سقف. سقف پوزیشن یک «دلیل اضافهٔ رد معامله» بود و برداشته شد.
         maxConcurrentPositions = cfg.maxOpenTrades.coerceIn(0, 12),
         maxPositionsPerSymbol = cfg.maxOpenTradesPerSymbol.coerceIn(0, 4),
+        restrictedSymbolsLowTimeframe = false,
     )
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -2342,12 +2333,19 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
 
             // ۲. رصد هم‌زمان 15m و 5m برای ورود خودکار همه استراتژی‌ها (با شرط قطعی R:R >= 1:1.5)
             if (cfg.autoPaperTrading) {
+                val ratingCache = mutableMapOf<String, Pair<com.aurum.edge.core.TechnicalRating?, com.aurum.edge.core.TechnicalRating?>>()
                 val rankedCandidates = newlyEvaluatedDuals
                     .flatMap { it.actionableReports }
-                    .filter { rep ->
-                        !com.aurum.edge.core.MarketHours.closedFor(rep.symbol, now)
-                    }
-                    .sortedByDescending { it.coreTrendScore }
+                    .filter { !com.aurum.edge.core.MarketHours.closedFor(it.symbol, now) }
+                    .map { report ->
+                        val ratings = ratingCache.getOrPut(report.symbol) {
+                            freshTechnicalRating(report.symbol, Interval.H1, now) to freshTechnicalRating(report.symbol, Interval.H4, now)
+                        }
+                        val evidence = com.aurum.edge.core.EntryQualityEvidence.evaluate(
+                            trades.value, report.symbol, report.strategyId, report.action, now, ratings.first, ratings.second,
+                        )
+                        report to (report.coreTrendScore + evidence.priorityAdjustment)
+                    }.sortedByDescending { it.second }.map { it.first }
 
                 for (report in rankedCandidates) {
                     val symbol = report.symbol
@@ -2363,11 +2361,6 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                         report.triggerBarTime > 0L && report.triggerBarTime != lastFiredBar
                     ) {
                         val neuralEval = container.neuralEngine.evaluateReport(report)
-                        if (!neuralEval.shouldAllowTrade) {
-                            lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
-                            _toast.value = "🧠 شبکه عصبی خودآموز ورود ${report.symbol} (${report.triggerInterval.label}) را مسدود کرد: ${neuralEval.noTradeWarningFa ?: neuralEval.summaryFa}"
-                            continue
-                        }
 
                         val rawEntry = report.suggestedEntry
                         val rawSl = report.suggestedStopLoss
@@ -2460,6 +2453,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                     strategyId = report.strategyId,
                                     strategyTitleFa = report.strategyTitleFa,
                                     automatic = true,
+                                    signalBarTime = report.triggerBarTime,
                                 )
                             }
                         }
@@ -2840,15 +2834,11 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                     huberDelta = huberDelta,
                     baseConfig = baseCfg,
                 )
-                val updatedCfg = container.neuralEngine.applyAutoTunedParametersToConfig(baseCfg)
-                container.settingsStore.update { cur ->
-                    cur.copy(baseStrategyConfig = updatedCfg)
-                }
                 report
             }.onSuccess { report ->
                 val r2Label = if (report.rSquared.isFinite()) String.format(Locale.US, "%.3f", report.rSquared) else "—"
                 _toast.value = if (report.parametersApplied == 0) {
-                    "📐 رگرسیون اجرا شد (${report.strategyTitleFa} · R²=$r2Label) ولی هیچ پارامتری معنادار نبود — تنظیمات دست‌نخورده ماند"
+                    "📐 گزارش اکتشافی (${report.strategyTitleFa} · R² درون‌نمونه‌ای=$r2Label)؛ تنظیمات تغییر نکرد و لیفت سنجیده نشده است"
                 } else {
                     "📐 رگرسیون ماتریسی (${report.strategyTitleFa} · R²=$r2Label) ${report.parametersApplied} پارامتر معنادار را اعمال کرد"
                 }
@@ -3345,23 +3335,13 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                         // R² با نمونهٔ کمتر از ۳۰ قابل تفسیر نیست؛ در گزارش «اندازه‌گیری‌نشده» می‌آید.
                         "R²" to R.number(reg.rSquared, 3, samples = if (reg.samplesCount >= MIN_REGRESSION_SAMPLES) reg.samplesCount else 0),
                         "R² تعدیل‌شده" to R.number(reg.adjustedRSquared, 3, samples = if (reg.samplesCount > 17) reg.samplesCount else 0),
-                        "RMSE" to R.number(reg.walkForwardRmse, 3, samples = if (reg.samplesCount >= MIN_REGRESSION_SAMPLES) reg.samplesCount else 0),
-                        "MAE" to R.number(reg.walkForwardMae, 3, samples = if (reg.samplesCount >= MIN_REGRESSION_SAMPLES) reg.samplesCount else 0),
+                        "RMSE درون‌نمونه‌ای" to R.number(reg.walkForwardRmse, 3, samples = if (reg.samplesCount >= MIN_REGRESSION_SAMPLES) reg.samplesCount else 0),
+                        "MAE درون‌نمونه‌ای" to R.number(reg.walkForwardMae, 3, samples = if (reg.samplesCount >= MIN_REGRESSION_SAMPLES) reg.samplesCount else 0),
                     ),
                 )
-                // لیفت با نمونهٔ کم یا هدف صفر معنایی ندارد؛ خط در آن حالت اصلاً چاپ نمی‌شود.
-                val liftWin = R.pct(reg.expectedWinRateLiftPct)
-                val liftR = R.rMultiple(reg.expectedRLiftPerTrade)
-                if (!R.isUnmeasured(liftWin) || !R.isUnmeasured(liftR)) {
-                    add(R.inline("لیفت نرخ برد" to liftWin, "لیفت R هر معامله" to liftR))
-                }
+                add("بهبود خارج نمونه: سنجیده نشده است؛ تنظیمات فعلی را جداگانه بررسی کنید.")
                 add(R.label("دالان حد ضرر", reg.optimalStopLossCorridorFa))
                 add(R.label("قفل R:R", reg.optimalRrCorridorFa))
-                add(
-                    "ℹ️ سه عدد R:R در این گزارش با هم فرق دارند و هر سه درست‌اند: کف مطلق قانون ۱.۵۰ (هرگز پایین‌تر نمی‌رود)، " +
-                        "کف پیشنهادی رگرسیون (ردیف ۲ پایین) و کف تیونینگ خودکار (بخش «تیونینگ خودکار پارامترها»). " +
-                        "عددی که موتور ورود واقعاً اعمال می‌کند همان کف تیونینگ است و همیشه داخل بازهٔ قفل‌شدهٔ ۱.۵ تا ۳.۰ می‌ماند.",
-                )
                 if (reg.parameterRows.isNotEmpty()) {
                     add("")
                     add("پارامترهای رگرسیون‌شده:")

@@ -913,14 +913,14 @@ class RiskAndCalendarEngineTest {
         // و خوشه‌ای که با ۶ نمونه «ممنوعه» علامت خورده را مسدود می‌کند.
         neuralEngine.setGateUserActivation(true)
         assertTrue(neuralEngine.state.value.gateUserActivationEnabled)
-        assertTrue("گیت باید با هر عددی که ≥۱ نمونه است فعال شود", neuralEngine.state.value.isGateActive)
+        assertFalse("گیت پیش‌بینی فقط مشاهده‌ای است", neuralEngine.state.value.isGateActive)
         val evalConsent = neuralEngine.evaluateFeatures(
             symbol = "BTC/USDT",
             features = badCryptoFeatures,
             conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
         )
-        assertTrue(evalConsent.isBlockingTradeNow)
-        assertFalse(evalConsent.shouldAllowTrade)
+        assertFalse(evalConsent.isBlockingTradeNow)
+        assertTrue(evalConsent.shouldAllowTrade)
 
         // خاموش‌کردن شرط دوم (تصمیم کاربر) گیت را فوراً غیرفعال می‌کند.
         neuralEngine.setGateUserActivation(false)
