@@ -194,11 +194,13 @@ class JournalSingleOpenTradeTest {
             takeProfit = 3_080.0,
         )!!
         val hourlyUp = trendingSeries(90, step = 1.6, stepMs = 3_600_000L, start = 100.0)
+            .map { it.copy(time = it.time + 270 * 3_600_000L) }
         val fourHourDown = trendingSeries(90, step = -4.0, stepMs = 4 * 3_600_000L, start = 4_000.0)
 
         val trade = journal.openTrade(
             calc = calc,
             note = "سنجش لحظهٔ ورود",
+            now = 360 * 3_600_000L,
             strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
             gaugeCandles1h = hourlyUp,
             gaugeCandles4h = fourHourDown,
