@@ -6,6 +6,8 @@ import com.aurum.edge.core.NeuralLearningLedger
 import com.aurum.edge.core.NeuralLearningStateSummary
 import com.aurum.edge.core.NeuralJournalCalibrationSnapshot
 import com.aurum.edge.core.StrategyAuditReport
+import com.aurum.edge.core.SessionPerformanceReport
+import com.aurum.edge.core.PaperTrade
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -22,6 +24,7 @@ object StrategyReportExport {
         val gateActive: Boolean,
         val gateSummaryFa: String,
         val strategies: List<StrategyAuditReport.Strategy>,
+        val performance: SessionPerformanceReport.Report,
         val knowledgeChangeLog: List<NeuralLearningLedger.KnowledgeChangeEntry>,
         val calibration: NeuralJournalCalibrationSnapshot,
         val jobs: List<BacktestJob>,
@@ -35,7 +38,7 @@ object StrategyReportExport {
         .listFiles()?.filter { it.isFile && (it.extension.equals("csv", true) || it.extension.equals("json", true)) && it.name != "ledger.json" }
         ?.sortedBy { it.name }.orEmpty()
 
-    fun create(context: Context, settings: AppSettings, summary: NeuralLearningStateSummary): File {
+    fun create(context: Context, settings: AppSettings, summary: NeuralLearningStateSummary, trades: List<PaperTrade> = emptyList()): File {
         val archives = archives(context)
         val jobs = BacktestJobStore(context).list()
         val snapshot = Snapshot(
@@ -44,6 +47,7 @@ object StrategyReportExport {
             gateActive = summary.isGateActive,
             gateSummaryFa = summary.gatePolicySummaryFa,
             strategies = StrategyAuditReport.build(settings, summary),
+            performance = SessionPerformanceReport.build(trades),
             knowledgeChangeLog = summary.knowledgeChangeLog,
             calibration = summary.lastJournalCalibration,
             jobs = jobs,

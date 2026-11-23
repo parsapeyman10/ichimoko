@@ -1227,11 +1227,20 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         val matchedBreakdown = matchedReport?.rrBreakdown
         val entryCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
         // سنجش تکنیکال ۱ ساعته و ۴ ساعته در همان لحظهٔ ورود ثبت می‌شود و بعداً تغییر نمی‌کند.
-        val gauge1h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H1)
-        val gauge4h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H4)
+        val gauge1h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H1).filter { it.closed && it.time + 3_600_000L <= now }
+        val gauge4h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H4).filter { it.closed && it.time + 14_400_000L <= now }
+        val ratingDecision = com.aurum.edge.core.RatingEvidenceGate.evaluate(
+            trades = trades.value, symbol = normSym, strategy = strategyId, action = calc.action,
+            h1 = com.aurum.edge.core.TechnicalRatingEngine.evaluate(gauge1h),
+            h4 = com.aurum.edge.core.TechnicalRatingEngine.evaluate(gauge4h), riskReward = calc.riskReward,
+        )
+        if (ratingDecision.blocked) {
+            _toast.value = "⛔ " + ratingDecision.reasonFa
+            return
+        }
         val openedRaw = container.journalStore.openTrade(
             calc = calc,
-            note = effectiveNote,
+            note = "$effectiveNote · ${ratingDecision.reasonFa}".trim(' ', '·'),
             now = now,
             entryInterval = entryInterval,
             strategyId = strategyId,

@@ -475,18 +475,18 @@ class JournalStore(
             rrBreakdownFa = rrBreakdownFa,
             stateInputs = stateInputs ?: com.aurum.edge.core.NeuralStateInputs(entryTimeMs = now),
         )
-        // ── سنجش تکنیکال در لحظهٔ ورود (فقط داده؛ هیچ اثری در تصمیم ندارد) ─────────
+        // ── سنجش تکنیکال در لحظهٔ ورود؛ گیت شواهد نیز می‌تواند از آن استفاده کند ─────────
         // از کش کندل‌های ۱ ساعته و ۴ ساعتهٔ همین نماد خوانده می‌شود. اگر کندلی در کش نبود،
         // عدد `-1` ثبت می‌شود (نامعلوم) — هیچ عدد ساختگی ساخته نمی‌شود.
         val rating1h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(
             gaugeCandles1h.ifEmpty {
                 com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H1)
-            },
+            }.filter { it.closed && it.time + 3_600_000L <= now },
         )
         val rating4h = com.aurum.edge.core.TechnicalRatingEngine.evaluate(
             gaugeCandles4h.ifEmpty {
                 com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(calc.symbol, com.aurum.edge.domain.Interval.H4)
-            },
+            }.filter { it.closed && it.time + 14_400_000L <= now },
         )
         val trade = rawTrade.copy(
             tradeNumber = nextTradeNum,

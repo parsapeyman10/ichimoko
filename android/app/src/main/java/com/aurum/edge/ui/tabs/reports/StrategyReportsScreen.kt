@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.StrategyAuditReport
+import com.aurum.edge.core.SessionPerformanceReport
 import com.aurum.edge.data.BacktestJob
 import com.aurum.edge.data.BacktestJobStore
 import com.aurum.edge.data.BacktestSession
@@ -63,6 +64,7 @@ private fun shareReport(context: Context, file: File, mime: String) {
 fun StrategyReportsScreen(viewModel: AurumViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val neural by viewModel.neuralState.collectAsStateWithLifecycle()
+    val trades by viewModel.trades.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var revision by remember { mutableIntStateOf(0) }
@@ -73,6 +75,9 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
         }
     }
     val strategies = remember(settings, neural) { StrategyAuditReport.build(settings, neural) }
+    val performance = remember(trades) { SessionPerformanceReport.build(trades) }
+    var grouping by remember { mutableStateOf("استراتژی") }
+    val groups = when (grouping) { "نماد" -> performance.bySymbol; "سشن" -> performance.bySession; else -> performance.byStrategy }
     fun exportFile(make: () -> File, mime: String) {
         scope.launch {
             try {
@@ -95,11 +100,33 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
             Text("مرجع = پیش‌فرض نسخهٔ فعلی؛ تاریخچهٔ قبل از تغییر ذخیره نشده است. مقدار ثبت‌شده، حل عمومی بدون نماد و پروفایل عصبی جدا نشان داده می‌شوند؛ موتور ممکن است بر اساس نماد و خود مدل مقدار دیگری استفاده کند. پروفایل لزوماً اعمال نشده است. نتایج حذف‌شده قابل بازیابی نیستند.", color = AurumColors.TextSecondary, fontSize = 11.sp)
             Text("گیت عصبی: ${if (neural.isGateActive) "فعال" else "غیرفعال"} · ${neural.gatePolicySummaryFa}", color = AurumColors.TextSecondary, fontSize = 11.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { exportFile({ StrategyReportExport.create(context, settings, neural) }, "application/zip") }) { Text("خروجی همه ZIP") }
+                Button(onClick = { exportFile({ StrategyReportExport.create(context, settings, neural, trades) }, "application/zip") }) { Text("خروجی همه ZIP") }
                 OutlinedButton(onClick = { revision++ }) { Text("بازخوانی") }
             }
             if (message.isNotBlank()) Text(message, color = AurumColors.Gold, fontSize = 11.sp)
             Text("ZIP حاوی تنظیمات و پروفایل‌ها، گزارش کارها، آخرین نشست و آرشیوهای CSV/JSON موجود است؛ کلیدهای API صادر نمی‌شوند. داده‌ها می‌توانند شامل اطلاعات معاملات شخصی باشند.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+        }
+        item {
+            Text("📈 کارنامهٔ دسته‌بندی‌شده", color = AurumColors.Gold, fontWeight = FontWeight.Bold)
+            val best = performance.bestSession
+            Text(if (best == null) "سشن برتر قابل اتکا در داده‌های موجود نیست: هر سشن به حداقل ۳۰ معاملهٔ دارای ریسک معتبر و میانگین R مثبت نیاز دارد." else "سشن برتر تاریخی: ${best.labelFa} · ${best.rSamples} نمونه · میانگین ${String.format(java.util.Locale.US, "%+.2f", best.meanR)}R؛ تضمین آینده نیست.", color = AurumColors.TextSecondary, fontSize = 11.sp)
+            Text("تقسیم‌بندی بر اساس ساعت ورود UTC و نتایج معامله‌های بستهٔ غیر بک‌تست است؛ به زمان محلی و تعطیلی بازار تبدیل نشده است.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("استراتژی", "نماد", "سشن").forEach { mode ->
+                    OutlinedButton(onClick = { grouping = mode }) { Text(if (mode == grouping) "✓ $mode" else mode, fontSize = 10.sp) }
+                }
+            }
+            if (groups.isEmpty()) Text("معاملهٔ بستهٔ واجد شرایط وجود ندارد.", color = AurumColors.TextSecondary, fontSize = 11.sp)
+        }
+        items(groups, key = { "performance:$grouping:" + it.key }) { g ->
+            Column(Modifier.fillMaxWidth().background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp)).padding(8.dp)) {
+                Text(g.labelFa, color = AurumColors.TextPrimary, fontWeight = FontWeight.SemiBold)
+                val win = g.winRatePct?.let { String.format(java.util.Locale.US, "%.1f٪", it) } ?: "نامعلوم"
+                val mean = g.meanR?.let { String.format(java.util.Locale.US, "%+.2fR", it) } ?: "نامعلوم"
+                val pf = g.profitFactor?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "نامعلوم"
+                Text("${g.count} معامله · ${g.wins} برد / ${g.losses} باخت / ${g.breakeven} سربه‌سر · برد $win · خالص ${String.format(java.util.Locale.US, "%+.2f", g.netUsd)} دلار · میانگین $mean (${g.rSamples} نمونه) · PF $pf", color = AurumColors.TextSecondary, fontSize = 10.sp)
+                OutlinedButton(onClick = { exportFile({ jsonFile("performance_${g.key.replace(Regex("[^A-Za-z0-9_-]"), "_")}.json", reportJson.encodeToString(SessionPerformanceReport.Group.serializer(), g)) }, "application/json") }) { Text("خروجی این گروه") }
+            }
         }
         item {
             Text("تاریخچهٔ تغییرات ثبت‌شدهٔ هوش عصبی (${neural.knowledgeChangeLog.size})", color = AurumColors.Gold, fontWeight = FontWeight.Bold)

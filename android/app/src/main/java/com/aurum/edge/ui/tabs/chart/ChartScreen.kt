@@ -791,6 +791,7 @@ private fun NativeIchimokuCanvasChart(
             ) {
                 val w = size.width
                 val h = size.height
+                if (!w.isFinite() || !h.isFinite() || w <= 0f || h <= 0f) return@Canvas
                 val slotW = w / totalSlots.toFloat()
 
                 fun yOf(price: Double): Float {
@@ -932,7 +933,7 @@ private fun NativeIchimokuCanvasChart(
                     val tipBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
                     fun drawFutureTipTag(label: String, priceVal: Double, bgInt: Int) {
-                        val y = yOf(priceVal).coerceIn(18f, h - 18f)
+                        val y = com.aurum.edge.core.ChartViewport.clampY(yOf(priceVal), h, 18f)
                         val txt = "$label: ${formatPriceFor(symbol, priceVal)}"
                         val tw = tipPaint.measureText(txt)
                         val left = (w - tw - 18f).coerceAtLeast(dividerX + 4f)
@@ -1077,7 +1078,7 @@ private fun NativeIchimokuCanvasChart(
                         } else {
                             (boxStartX + 8f).coerceAtMost(w - textW - padH * 2f - 8f)
                         }
-                        val top = (anchorY - boxH / 2f).coerceIn(4f, h - boxH - 4f)
+                        val top = com.aurum.edge.core.ChartViewport.clampY(anchorY - boxH / 2f, (h - boxH).coerceAtLeast(0f), 4f)
                         val rect = RectF(left, top, left + textW + padH * 2f, top + boxH)
                         bgPaint.color = bgColorInt
                         drawContext.canvas.nativeCanvas.drawRoundRect(rect, 8f, 8f, bgPaint)
