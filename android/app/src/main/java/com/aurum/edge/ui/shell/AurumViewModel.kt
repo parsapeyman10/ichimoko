@@ -1203,6 +1203,10 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
+        if (automatic && com.aurum.edge.core.MarketHours.closedFor(normSym, now)) {
+            _toast.value = "⛔ بازار $normSym بسته است؛ ورود خودکار انجام نشد"
+            return
+        }
         val preferred = com.aurum.edge.core.SessionEntryPolicy.preferred(trades.value, normSym, strategyId, now)
         val sessionNote = preferred?.let { "سشن تاریخی برتر ${it.labelFa} (${it.rSamples} نمونه؛ مشاهده‌ای)" } ?: "سشن تاریخی اختصاصی نامعلوم"
         if (signalBarTime != null && EntrySafetyGate.isSignalStale(signalBarTime, entryInterval, now)) {
