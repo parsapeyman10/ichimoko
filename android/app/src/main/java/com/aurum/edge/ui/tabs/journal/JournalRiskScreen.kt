@@ -4,6 +4,7 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -150,6 +151,11 @@ fun JournalRiskScreen(
 
     var subPage by rememberSaveable { mutableIntStateOf(0) }
     var selectedStrategyFilter by rememberSaveable { mutableStateOf("ALL") }
+    if (subPage == 4) {
+        BackHandler { subPage = 0 }
+        TradeFilterScreen(trades = trades, onBack = { subPage = 0 }, onChart = onChartSymbol)
+        return
+    }
 
     val strategyCategories = remember(trades.size, trades.firstOrNull()?.id, trades.firstOrNull()?.closedAt, settings.customStrategies) {
         RiskAndCalendarEngine.categorizeTradesByStrategy(trades, settings.customStrategies)
@@ -292,6 +298,7 @@ fun JournalRiskScreen(
             // ترتیب تب‌ها = ترتیب منطقی کار: تقویم ← معاملات باز ← ماشین‌حساب ← خروجی
             // ژورنال: معاملات، تقویم و گزارش‌ها. هیچ تب تصویری در این صفحه نیست.
             listOf(
+                4 to "🔎 فیلتر همهٔ معاملات",
                 0 to "📅 تقویم ژورنال (${filteredClosedTrades.size})",
                 1 to "📜 معاملات باز (${filteredOpenTrades.size})",
                 2 to "🧮 ماشین‌حساب حجم",
