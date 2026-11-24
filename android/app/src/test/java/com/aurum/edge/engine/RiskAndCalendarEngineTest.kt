@@ -740,7 +740,7 @@ class RiskAndCalendarEngineTest {
         )!!
         val opened3R = runnerJournal.openTrade(calc3R, note = "تست بستن کامل در هدف ۱:۳")!!
         // Live tick reaches the stored TP (پول: دقیقاً ۳R = ۱۵ دلار خالص؛ فاصلهٔ قیمتی کمی دورتر)
-        val runnerTickHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = calc3R.takeProfit, at = 1_760_002_000_000L))
+        val runnerTickHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = calc3R.takeProfit, at = opened3R.openedAt + 1_000L), nowMillis = opened3R.openedAt + 1_000L)
         assertEquals(1, runnerTickHits.size)
         assertEquals(com.aurum.edge.core.AutoExitKind.TAKE_PROFIT, runnerTickHits.first().kind)
         assertTrue(runnerTickHits.first().netPnlUsd >= 14.5)

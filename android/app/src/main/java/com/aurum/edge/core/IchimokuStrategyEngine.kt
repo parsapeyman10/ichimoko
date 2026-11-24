@@ -4819,13 +4819,7 @@ object IchimokuStrategyEngine {
         )
     }
 
-    /**
-     * موتور مدیریت معاملات باز با معماری «حد ضرر ساختاری کاملاً ثابت (غیرپله‌ای) + حفظ R:R اولیه + خروج هوشمند در اتمام روند»:
-     * - حد ضرر (`stopLoss`) تحت هیچ شرایطی به‌صورت پله‌ای (`Break-Even` یا تریل پلکانی) جابجا نمی‌شود و تا پایان معامله
-     *   دقیقاً روی همان حد ضرر ساختاری اولیه (`initialStopLoss ?: stopLoss`) ثابت می‌ماند.
-     * - نسبت `R:R` و حد سود (`takeProfit`) دقیقاً همان مقدار اولیه زمان باز شدن معامله باقی می‌ماند و حتی اگر `R:R > 3.0` باشد،
-     *   حد ضرر ثابت مانده و معامله تا هدف اولیه خود (`takeProfit`) یا تشخیص قطعی برگشت روند ادامه می‌یابد.
-     */
+    /** خروج مبتنی بر روند و تریل ساختاری؛ ریسک اولیه مرجع R است و حد فعال جداگانه حفظ می‌شود. */
     fun evaluateOpenTradeManagement(
         trade: PaperTrade,
         report: StrategyEvaluationReport,
@@ -4848,7 +4842,7 @@ object IchimokuStrategyEngine {
             return PreserveModeEvaluation(
                 tradeId = trade.id,
                 newStopLoss = fixedStopLoss,
-                stageTitleFa = "⚡ خروج هوشمند در سود (اتمام روند در +${round2(currentRMultiple)}R با حد ضرر ثابت)",
+                stageTitleFa = "⚡ خروج هوشمند در سود (اتمام روند در +${round2(currentRMultiple)}R با حد ضرر فعال)",
                 reasonFa = trendHealth.exitTriggerReasonFa,
                 lockedRMultiple = round2(currentRMultiple),
                 shouldCloseImmediatelyInProfit = true,
@@ -4864,7 +4858,7 @@ object IchimokuStrategyEngine {
             trade.note.contains(BE_TAG_MARK) ||
                 trade.note.contains(TRAIL_TAG_MARK) ||
                 trade.note.contains(STRUCT_TAG_MARK) ||
-                fixedStopLoss != (trade.initialStopLoss ?: fixedStopLoss)
+                trade.stopLoss != (trade.initialStopLoss ?: trade.stopLoss)
         val reached3RCeilingForStandardTrade =
             trade.riskReward <= 3.0001 && currentRMultiple >= 3.0 && !hasLockedInProfit
         if (reachedTp || reached3RCeilingForStandardTrade) {
@@ -4872,10 +4866,10 @@ object IchimokuStrategyEngine {
             return PreserveModeEvaluation(
                 tradeId = trade.id,
                 newStopLoss = fixedStopLoss,
-                stageTitleFa = "🎯 اتمام و بستن کامل معامله در هدف R:R اولیه (+${round2(currentRMultiple)}R · حد ضرر ثابت)",
+                stageTitleFa = "🎯 اتمام و بستن کامل معامله در هدف R:R اولیه (+${round2(currentRMultiple)}R · حد ضرر فعال)",
                 reasonFa = String.format(
                     Locale.US,
-                    "رسیدن به هدف تعیین‌شده (%.2fR · R:R اولیه 1:%.2f) با حد ضرر کاملاً ثابت و غیرپله‌ای",
+                    "رسیدن به هدف تعیین‌شده (%.2fR · R:R اولیه 1:%.2f) با حفظ حد ضرر فعال",
                     currentRMultiple,
                     trade.riskReward,
                 ),
