@@ -602,6 +602,7 @@ fun SettingsScreen(
             }
 
             3 -> {
+                DailyBackupCard()
                 NeuralDirectNavigationCard(
                     neuralState = neuralState,
                     showDescriptions = showDesc,

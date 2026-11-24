@@ -1651,6 +1651,10 @@ class NeuralSelfLearningEngine(
         }.getOrDefault(false)
     }
 
+    /** Snapshot of the complete current neural state, taken under the same lock as updates. */
+    @Synchronized
+    fun exportFullStateJson(): String = json.encodeToString(NeuralNetworkPersistedState.serializer(), persistedState)
+
     // ─────────────────────── بستهٔ دانش: انتقال اصلاحات بین نسخه‌ها ───────────────────────
 
     /**
