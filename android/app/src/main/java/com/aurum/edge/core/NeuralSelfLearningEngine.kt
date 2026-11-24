@@ -2071,34 +2071,15 @@ class NeuralSelfLearningEngine(
      * ۱. ۴ ستون اصیل هوسودا (تعادل کومو/کیجون/چیکو، امواج I/V/N/P/S، چرخه زمان 9/17/26/33، اهداف V/N/E/NT)
      * ۲. هر ۲۴ استراتژی (۱۵ ترکیب ۴ مکتب + ۹ لایهٔ تحلیلی)
      * ۳. دسته‌بندی ۳ کندل قبل از ورود (`PRE3_*` و کیفیت بدنه/شدوی ۳ کندل قبل)
-     * ۴. بازسازی دقیق اسنپ‌شات ایچیموکو در لحظه ورود از خزانه کندل ۱ ماهه (`PhoneStorageVaultManager`)
+     * ۴. استفاده صرفاً از داده‌های ثبت‌شده در ژورنال؛ گزارش جاری و بازسازی بعدی منبع آموزش نیستند.
      */
     fun extractConditionFeaturesForClosedTrade(
         trade: PaperTrade,
         report: StrategyEvaluationReport? = null,
     ): Triple<List<Double>, String, String> {
-        val vaultCandles = if (report?.triggerSnapshot == null) {
-            runCatching {
-                com.aurum.edge.data.PhoneStorageVaultManager.loadPersistedCandles(
-                    trade.symbol,
-                    trade.interval,
-                    trade.openedAt,
-                ).filter { it.time <= trade.openedAt }
-            }.getOrDefault(emptyList())
-        } else emptyList()
-
-        val reconstructedSnap = report?.triggerSnapshot
-            ?: if (vaultCandles.size >= 26) IchimokuStrategyEngine.computeSnapshot(vaultCandles) else null
-
-        val pre3Code = trade.preEntry3CandleCategoryCode.ifBlank {
-            if (vaultCandles.size >= 4) {
-                IchimokuStrategyEngine.buildPreEntry3CandleContext(
-                    candles = vaultCandles,
-                    action = trade.action,
-                    activeModel = BitcoinStrategyModel.fromId(trade.strategyId),
-                ).categoryCode
-            } else ""
-        }
+        // گزارش جاری یا کندل بازسازی‌شده الزاماً وضعیت قابل مشاهده هنگام ورود نیست.
+        // فقط اسنپ‌شات ثبت‌شده در خود معامله به آموزش تاریخی وارد می‌شود.
+        val pre3Code = trade.preEntry3CandleCategoryCode
 
         val pre3Bonus = when {
             pre3Code.contains("MOMENTUM_LADDER", true) || pre3Code.contains("KIJUN_SPRING", true) -> 0.25
@@ -2107,22 +2088,7 @@ class NeuralSelfLearningEngine(
             else -> 0.0
         }
 
-        // وضعیت بازار: اول از فیلدهای ذخیره‌شدهٔ خود معامله (برای معاملات قدیمی ژورنال) و
-        // اگر خالی بود از اسنپ‌شات بازسازی‌شده.
         val storedState = NeuralStateFeatures.fromTrade(trade)
-        val mergedState = storedState.copy(
-            trendPhaseCode = storedState.trendPhaseCode.ifBlank { report?.trendPhase?.name ?: "" },
-            er14 = storedState.er14 ?: reconstructedSnap?.efficiencyRatio14,
-            atrPctOfPrice = storedState.atrPctOfPrice ?: reconstructedSnap?.let { snap ->
-                if (snap.close > 0.0) snap.atr14 / snap.close * 100.0 else null
-            },
-            distKijunAtr = storedState.distKijunAtr ?: reconstructedSnap?.distanceToKijunAtr,
-            kumoThicknessAtr = storedState.kumoThicknessAtr ?: reconstructedSnap?.let { snap ->
-                if (snap.atr14 > 0.0) snap.kumoThickness / snap.atr14 else null
-            },
-            volumeRatio20 = storedState.volumeRatio20 ?: reconstructedSnap?.volumeRatio20,
-            planRr = storedState.planRr ?: trade.effectiveOptimalRr.takeIf { it > 0.0 },
-        )
         val (baseFeatures, baseKey, baseDescFa) = extractConditionFeatures(
             symbolInput = trade.symbol,
             action = trade.action,
@@ -2130,12 +2096,12 @@ class NeuralSelfLearningEngine(
             strategyId = trade.strategyId,
             optimalRr = trade.effectiveOptimalRr,
             confidence = trade.confidence,
-            report = report,
-            snapshotOverride = reconstructedSnap,
+            report = null,
+            snapshotOverride = null,
             preEntry3Bonus = pre3Bonus,
             preEntry3Code = pre3Code,
-            stateInputs = mergedState,
-            entryTimeMs = trade.openedAt,
+            stateInputs = storedState,
+            entryTimeMs = trade.openedAt.takeIf { it > 0L } ?: -1L,
         )
 
         val pre3Badge = trade.preEntry3CandleCategoryFa.takeIf { it.isNotBlank() }
@@ -2179,22 +2145,23 @@ class NeuralSelfLearningEngine(
         val f8 = if (model.hasHosoda) 1.0 else -1.0
         val f9 = if (model.hasPeloille || model.isDrivePdfStrategy) 1.0 else -1.0
 
-        val er14 = ((trigSnap?.efficiencyRatio14 ?: stratSnap?.efficiencyRatio14 ?: 0.42) * 2.0 - 1.0).coerceIn(-1.0, 1.0)
+        val er14 = (trigSnap?.efficiencyRatio14 ?: stratSnap?.efficiencyRatio14 ?: stateInputs?.er14)
+            ?.let { (it * 2.0 - 1.0).coerceIn(-1.0, 1.0) } ?: 0.0
         val kumoAtr = if (trigSnap != null && trigSnap.atr14 > 0.0) {
             ((trigSnap.kumoThickness / trigSnap.atr14) - 0.8).coerceIn(-1.0, 1.0)
         } else {
-            0.15
+            stateInputs?.kumoThicknessAtr?.let { (it - 0.8).coerceIn(-1.0, 1.0) } ?: 0.0
         }
         val distKijunAtr = if (trigSnap != null && trigSnap.atr14 > 0.0) {
             ((trigSnap.distanceToKijunAtr - 1.2) / 1.5).coerceIn(-1.0, 1.0)
         } else {
-            -0.20
+            stateInputs?.distKijunAtr?.let { ((it - 1.2) / 1.5).coerceIn(-1.0, 1.0) } ?: 0.0
         }
         val adverseWick = if (trigSnap != null) {
             val w = if (action == SignalAction.BUY) trigSnap.upperWickRatio else trigSnap.lowerWickRatio
             (((w - 0.25) * 2.5) - preEntry3Bonus * 0.5).coerceIn(-1.0, 1.0)
         } else {
-            (-0.15 - preEntry3Bonus * 0.5).coerceIn(-1.0, 1.0)
+            0.0 // شدو ثبت نشده؛ حدس نمی‌زنیم.
         }
         val rrNorm = (((optimalRr.coerceAtLeast(1.5)) - 2.0) / 1.5).coerceIn(-1.0, 1.0)
         val confNorm = (((confidence - 80.0) / 20.0) + preEntry3Bonus).coerceIn(-1.0, 1.0)
@@ -2226,7 +2193,7 @@ class NeuralSelfLearningEngine(
         val stateBand = NeuralStateFeatures.build(stateIn)
         val features = baseSixteen + stateBand
 
-        val phaseTag = report?.trendPhase?.name ?: "CORE_EXPANSION"
+        val phaseTag = (report?.trendPhase?.name ?: stateInputs?.trendPhaseCode).orEmpty().ifBlank { "UNKNOWN" }
         val erBand = when {
             er14 < -0.35 -> "LOW_ER_CHOP"
             er14 > 0.20 -> "HIGH_ER_TREND"

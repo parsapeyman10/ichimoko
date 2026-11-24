@@ -166,6 +166,6 @@ object NeuralStateFeatures {
         kumoThicknessAtr = trade.stateKumoThicknessAtr.takeIf { it >= 0.0 },
         volumeRatio20 = trade.stateVolumeRatio20.takeIf { it >= 0.0 },
         planRr = trade.effectiveOptimalRr.takeIf { it > 0.0 },
-        entryTimeMs = trade.openedAt,
+        entryTimeMs = trade.openedAt.takeIf { it > 0L } ?: -1L,
     )
 }

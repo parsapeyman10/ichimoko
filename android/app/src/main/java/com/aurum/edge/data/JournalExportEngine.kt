@@ -664,6 +664,9 @@ object JournalExportEngine {
             "ExitReason",
             "RRFormula",
             "Notes",
+            "OpenedAt_EpochMs", "ClosedAt_EpochMs", "SignalBarTime_EpochMs", "Origin",
+            "Tech1hBuy", "Tech1hNeutral", "Tech1hSell", "Tech4hBuy", "Tech4hNeutral", "Tech4hSell", "TechSnapshotRebuilt",
+            "StateTrendPhase", "StateEr14", "StateAtrPct", "StateDistKijunAtr", "StateKumoThicknessAtr", "StateVolumeRatio20",
         )
         sb.append(headers.joinToString(",")).append("\r\n")
 
@@ -709,6 +712,12 @@ object JournalExportEngine {
                 esc(t.exitReason.orEmpty()),
                 esc(t.buildRrFormulaSummaryFa()),
                 esc(t.note),
+                t.openedAt.takeIf { it > 0 }?.toString().orEmpty(), t.closedAt?.toString().orEmpty(),
+                t.signalBarTime?.toString().orEmpty(), esc(t.origin),
+                t.tech1hBuy.takeIf { it >= 0 }?.toString().orEmpty(), t.tech1hNeutral.takeIf { it >= 0 }?.toString().orEmpty(), t.tech1hSell.takeIf { it >= 0 }?.toString().orEmpty(),
+                t.tech4hBuy.takeIf { it >= 0 }?.toString().orEmpty(), t.tech4hNeutral.takeIf { it >= 0 }?.toString().orEmpty(), t.tech4hSell.takeIf { it >= 0 }?.toString().orEmpty(), t.techSnapshotRebuilt.toString(),
+                esc(t.stateTrendPhaseCode), t.stateEr14.takeIf { it >= 0 }?.toString().orEmpty(), t.stateAtrPctOfPrice.takeIf { it >= 0 }?.toString().orEmpty(),
+                t.stateDistKijunAtr.takeIf { it >= 0 }?.toString().orEmpty(), t.stateKumoThicknessAtr.takeIf { it >= 0 }?.toString().orEmpty(), t.stateVolumeRatio20.takeIf { it >= 0 }?.toString().orEmpty(),
             )
             sb.append(row.joinToString(",")).append("\r\n")
         }
@@ -1877,6 +1886,7 @@ function filterRows() {
         // Parse CSV backup (29 columns)
         val lines = trimmed.lines().map { it.trim() }.filter { it.isNotEmpty() }
         require(lines.size >= 2) { "فرمت فایل بکاپ معتبر نیست (باید JSON یا CSV استاندارد Aurum Edge باشد)" }
+        val headers = splitCsvLine(lines.first().removePrefix("\uFEFF"))
         val dataLines = lines.drop(1)
         val trades = dataLines.mapNotNull { line ->
             val cols = splitCsvLine(line)
@@ -1886,12 +1896,11 @@ function filterRows() {
             val dirRaw = cols.getOrNull(4).orEmpty().uppercase(Locale.ROOT)
             val action = if (dirRaw.contains("SELL") || dirRaw.contains("SHORT")) SignalAction.SELL else SignalAction.BUY
             val tfRaw = cols.getOrNull(5).orEmpty()
-            val interval = if (tfRaw.contains("15")) Interval.M15 else Interval.M5
+            val interval = Interval.entries.firstOrNull { it.label.equals(tfRaw, ignoreCase = true) } ?: Interval.M5
             val stratId = cols.getOrNull(6)?.takeIf { it.isNotBlank() } ?: BitcoinStrategyModel.BASE_ICHIMOKU.id
             val stratTitle = cols.getOrNull(7)?.takeIf { it.isNotBlank() } ?: BitcoinStrategyModel.fromId(stratId).titleFa
             val statusRaw = cols.getOrNull(8).orEmpty().uppercase(Locale.ROOT)
             val isOpen = statusRaw == "OPEN"
-            val holdMins = cols.getOrNull(11)?.toDoubleOrNull() ?: 15.0
             val entry = cols.getOrNull(12)?.toDoubleOrNull() ?: return@mapNotNull null
             val sl = cols.getOrNull(13)?.toDoubleOrNull() ?: return@mapNotNull null
             val initSl = cols.getOrNull(14)?.toDoubleOrNull() ?: sl
@@ -1904,7 +1913,16 @@ function filterRows() {
             val netPnl = cols.getOrNull(24)?.toDoubleOrNull()
             val exitReason = cols.getOrNull(26)?.takeIf { it.isNotBlank() }
             val note = cols.getOrNull(28).orEmpty()
-            val now = System.currentTimeMillis()
+            fun field(name: String): String? = headers.indexOf(name).takeIf { it >= 0 }?.let { cols.getOrNull(it) }?.takeIf { it.isNotBlank() }
+            fun intField(name: String) = field(name)?.toIntOrNull()?.takeIf { it >= 0 } ?: -1
+            fun doubleField(name: String) = field(name)?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 } ?: -1.0
+            // نسخهٔ قدیمی زمان محلی تهران داشت؛ هرگز زمان بازیابی را جایگزین نکن.
+            fun legacyTime(index: Int): Long? = runCatching {
+                java.time.LocalDateTime.parse(cols.getOrNull(index), java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.US))
+                    .atZone(tehranZone).toInstant().toEpochMilli().takeIf { it > 0 }
+            }.getOrNull()
+            val openedEpoch = field("OpenedAt_EpochMs")?.toLongOrNull()?.takeIf { it > 0 } ?: legacyTime(9) ?: 0L
+            val closedEpoch = field("ClosedAt_EpochMs")?.toLongOrNull()?.takeIf { it > 0 } ?: legacyTime(10)
             PaperTrade(
                 id = tradeId,
                 symbol = sym,
@@ -1915,8 +1933,16 @@ function filterRows() {
                 takeProfit = tp,
                 confidence = 90.0,
                 riskReward = plannedRr,
-                openedAt = now - (holdMins * 60_000.0).toLong(),
-                closedAt = if (isOpen) null else now,
+                openedAt = openedEpoch,
+                closedAt = if (isOpen) null else closedEpoch ?: 0L,
+                signalBarTime = field("SignalBarTime_EpochMs")?.toLongOrNull()?.takeIf { it > 0 && openedEpoch > 0 && it <= openedEpoch },
+                origin = field("Origin") ?: if (tradeId.startsWith("bt_", ignoreCase = true)) PaperTrade.ORIGIN_BACKTEST else "UNKNOWN",
+                tech1hBuy = intField("Tech1hBuy"), tech1hNeutral = intField("Tech1hNeutral"), tech1hSell = intField("Tech1hSell"),
+                tech4hBuy = intField("Tech4hBuy"), tech4hNeutral = intField("Tech4hNeutral"), tech4hSell = intField("Tech4hSell"),
+                techSnapshotRebuilt = field("TechSnapshotRebuilt")?.toBooleanStrictOrNull() ?: false,
+                stateTrendPhaseCode = field("StateTrendPhase").orEmpty(), stateEr14 = doubleField("StateEr14"),
+                stateAtrPctOfPrice = doubleField("StateAtrPct"), stateDistKijunAtr = doubleField("StateDistKijunAtr"),
+                stateKumoThicknessAtr = doubleField("StateKumoThicknessAtr"), stateVolumeRatio20 = doubleField("StateVolumeRatio20"),
                 exitPrice = if (isOpen) null else exitP,
                 exitReason = if (isOpen) null else exitReason,
                 pnlUsd = if (isOpen) null else netPnl,
