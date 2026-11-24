@@ -222,6 +222,8 @@ data class PaperTrade(
     val positionUnit: String = "",
     val autoOpened: Boolean = false,
     val signalBarTime: Long? = null,
+    /** Actual time at which the active stop was last changed; unknown for old journals. */
+    val stopUpdatedAt: Long? = null,
     val neuralEntryObservation: NeuralEntryObservation? = null,
     val entryConditions: List<PaperConditionRecord> = emptyList(),
     val leverage: Int = 10,

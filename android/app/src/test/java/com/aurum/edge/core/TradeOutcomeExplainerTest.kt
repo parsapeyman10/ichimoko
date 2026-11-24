@@ -81,7 +81,7 @@ class TradeOutcomeExplainerTest {
         val explanation = TradeOutcomeExplainer.explain(t, candles)
         assertTrue(explanation.headlineFa.startsWith("برد"))
         assertTrue(explanation.headlineFa.contains("دلار"))
-        assertTrue(explanation.reasonsFa.any { it.contains("بیشترین سود شناور") })
+        assertTrue(explanation.reasonsFa.any { it.contains("بیشترین حرکت مساعد") })
         assertTrue(explanation.mfeR > 0.0)
         assertTrue(explanation.barsHeld > 0)
         assertTrue(explanation.textFa().contains("•"))
@@ -127,7 +127,7 @@ class TradeOutcomeExplainerTest {
         val t = trade()
         val explanation = TradeOutcomeExplainer.explain(t, emptyList())
         assertTrue(explanation.reasonsFa.isNotEmpty())
-        assertFalse(explanation.reasonsFa.any { it.contains("بیشترین سود شناور") })
+        assertFalse(explanation.reasonsFa.any { it.contains("بیشترین حرکت مساعد") })
         assertEquals(-1.0, explanation.mfeR, 1e-9)
     }
 
@@ -156,4 +156,16 @@ class TradeOutcomeExplainerTest {
         val backtest = trade().copy(id = "b", origin = PaperTrade.ORIGIN_BACKTEST)
         assertTrue(TradeOutcomeExplainer.aggregate(listOf(open, backtest)).isEmpty())
     }
+    @Test
+    fun exitCandleIsNotUsedForMaximaAfterTheTradeClosed() {
+        val t = trade(openedAt = 1_000_000L, closedAt = 2_350_000L, exit = 99.0, pnl = -5.0)
+        val fullyInside = Candle(1_000_000L, 100.0, 100.2, 99.9, 100.1, closed = true)
+        val overlapsExit = Candle(1_900_000L, 100.1, 120.0, 98.0, 119.0, closed = true)
+        val result = TradeOutcomeExplainer.explain(t, listOf(fullyInside, overlapsExit))
+        assertEquals(1, result.barsHeld)
+        assertEquals(0.2, result.mfeR, 1e-9)
+        assertTrue(result.reasonsFa.any { it.contains("UTC") && it.contains("کندل کامل") })
+        assertFalse(result.tags.contains(TradeOutcomeExplainer.Tags.GAVE_BACK_PROFIT))
+    }
+
 }

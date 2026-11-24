@@ -74,6 +74,10 @@ object LiveQuoteFetcher {
         }
     }
 
+    /** Memory only: safe for the price-tick and exit paths. */
+    fun peekMemoryCandles(symbolInput: String, interval: Interval): List<Candle> =
+        candleCache["${V1Universe.normalize(symbolInput)}|${interval.label}"]?.bars.orEmpty()
+
     fun peekCachedCandles(symbolInput: String, interval: Interval): List<Candle> {
         val symbol = V1Universe.normalize(symbolInput)
         val cached = candleCache["$symbol|${interval.label}"]?.bars.orEmpty()

@@ -1161,7 +1161,7 @@ internal fun BaseStrategyRefinementPanel(
         RuleToggleRow("ماشه ۱: پولبک کیجون/تنکان/S-Point", enablePullback) { enablePullback = it }
         RuleToggleRow("ماشه ۲: شکست کومو و سقف چیکو", enableBreakout) { enableBreakout = it }
         RuleToggleRow(
-            "سیو سود خودکار (ریسک‌فری در +۱R · قفل سود روی تنکان در +۲R)",
+            "حفاظت: سربه‌سر خالص پس از +۱٫۵R؛ سپس تریل ساختاری با فضای نوسان",
             enablePreserve,
         ) { enablePreserve = it }
 

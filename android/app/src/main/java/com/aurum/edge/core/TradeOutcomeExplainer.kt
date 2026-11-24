@@ -72,6 +72,11 @@ object TradeOutcomeExplainer {
         }
     }
 
+    private fun formatPathTime(ms: Long): String = runCatching {
+        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", java.util.Locale.US)
+            .withZone(java.time.ZoneOffset.UTC).format(java.time.Instant.ofEpochMilli(ms))
+    }.getOrDefault("نامعلوم")
+
     /** آمار یک الگو در کل ژورنال. */
     data class PatternStat(
         val tag: String,
@@ -93,7 +98,7 @@ object TradeOutcomeExplainer {
     fun explain(trade: PaperTrade, candles: List<Candle> = emptyList()): Explanation {
         val direction = if (trade.action == SignalAction.SELL) -1.0 else 1.0
         val exit = trade.exitPrice ?: trade.entry
-        val risk = (trade.entry - trade.stopLoss) * direction
+        val risk = (trade.entry - (trade.initialStopLoss ?: trade.stopLoss)) * direction
         val finalR = if (risk > 1e-9) ((exit - trade.entry) * direction) / risk else 0.0
         val pnl = trade.pnlUsd ?: 0.0
         val isWin = pnl >= 0.0
@@ -102,13 +107,19 @@ object TradeOutcomeExplainer {
         var mfeR = -1.0
         var maeR = -1.0
         var barsHeld = 0
+        var pathCoverageFa = ""
         val openedAt = trade.openedAt
         val closedAt = trade.closedAt ?: 0L
         if (candles.isNotEmpty() && risk > 1e-9) {
-            val window = candles.filter { it.time in openedAt..(if (closedAt > 0) closedAt else Long.MAX_VALUE) }
+            val window = candles.filter { it.closed && it.time >= openedAt && closedAt > 0 &&
+                it.time <= closedAt - trade.interval.millis }
             val usable = window
             if (usable.isNotEmpty()) {
                 barsHeld = usable.size
+                val sorted = usable.sortedBy { it.time }
+                val gaps = sorted.zipWithNext().count { (a, b) -> b.time - a.time > trade.interval.millis }
+                // Timestamps in later text expose partial coverage rather than implying a continuous path.
+                pathCoverageFa = "${barsHeld} کندل کامل، از ${formatPathTime(sorted.first().time)} تا ${formatPathTime(sorted.last().time)} UTC؛ $gaps فاصلهٔ خالی بین کندل‌ها"
                 var best = 0.0
                 var worst = 0.0
                 for (c in usable) {
@@ -138,7 +149,8 @@ object TradeOutcomeExplainer {
 
         // ۲) مسیر قیمت
         if (mfeR >= 0.0) {
-            reasons += "بیشترین سود شناور " + f(mfeR) + "R بود و بیشترین ضرر شناور " + f(maeR) + "R؛ " +
+            reasons += "پوشش دادهٔ مسیر: $pathCoverageFa؛ لبه‌های ورود/خروج و فاصله‌های خالی ممکن است حرکت‌هایی داشته باشند."
+            reasons += "در کندل‌های کامل داخل بازهٔ معامله، بیشترین حرکت مساعد " + f(mfeR) + "R و نامساعد " + f(maeR) + "R بود؛ این حداقلِ مشاهده‌شده است، نه اوج قطعی؛ " +
                 when {
                     isWin && mfeR - finalR >= 0.8 -> "بیشینهٔ ثبت‌شده " +
                         f(mfeR - finalR) + "R بالاتر از خروج بود؛ ترتیب حرکت در کندل مشخص نیست."
@@ -147,6 +159,7 @@ object TradeOutcomeExplainer {
                     else -> "سود شناور ثبت‌شده محدود بود؛ ترتیب دقیق حرکت مشخص نیست."
                 }
         }
+        if (mfeR < 0.0) reasons += "کندل کامل قابل اتکا در بازهٔ ورود تا خروج موجود نیست؛ مسیر قابل تعیین نیست."
         if (!isWin && mfeR >= 0.0 && mfeR < 0.2) tags += Tags.NEVER_IN_PROFIT
         if (!isWin && mfeR >= 0.8 && finalR < 0.0) tags += Tags.GAVE_BACK_PROFIT
         if (isWin && mfeR >= 0.0 && mfeR - finalR >= 1.0) tags += Tags.LEFT_RUNNER

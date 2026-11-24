@@ -429,7 +429,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             // معامله‌ای که حد ضررش در سود قفل شده (ریسک‌فری/تریل) نباید با اصلاح پلن به
             // حد ضرر اولیه برگردد؛ این همان چیزی است که Preserve Mode را بی‌اثر می‌کرد.
             val stopLockedInProfit = trade.note.contains(IchimokuStrategyEngine.BE_TAG_MARK) ||
-                trade.note.contains(IchimokuStrategyEngine.TRAIL_TAG_MARK)
+                trade.note.contains(IchimokuStrategyEngine.TRAIL_TAG_MARK) ||
+                trade.note.contains(IchimokuStrategyEngine.STRUCT_TAG_MARK) ||
+                (trade.initialStopLoss != null && trade.stopLoss != trade.initialStopLoss)
             if (stopLockedInProfit) continue
             val report = _allSymbolStrategyReports.value[symbol]
                 ?.takeIf { it.triggerInterval == trade.interval }
@@ -737,7 +739,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         val liveTick = LiveQuoteFetcher.fetchLiveTick(symbol) ?: PriceTick(
             price = summary.lastClose,
             at = now,
-            isTradeTick = true,
+            isTradeTick = false,
             provider = provider,
         )
         applyIncomingTick(symbol, liveTick)
@@ -1394,6 +1396,18 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     }
 
     /** حذف یک معامله از ژورنال. */
+    fun refreshJournalTradePath(tradeId: String) {
+        val trade = trades.value.firstOrNull { it.id == tradeId && !it.isOpen } ?: return
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val vault = runCatching { com.aurum.edge.data.PhoneStorageVaultManager.loadPersistedCandles(trade.symbol, trade.interval) }.getOrDefault(emptyList())
+            val fetched = runCatching { LiveQuoteFetcher.fetchTimeframeCandles(trade.symbol, trade.interval, limit = 500, forceNetwork = true)?.first.orEmpty() }.getOrDefault(emptyList())
+            val bars = (vault + fetched).distinctBy { it.time }.sortedBy { it.time }
+            val ok = container.journalStore.refreshClosedTradeExplanation(tradeId, bars)
+            _toast.value = if (ok) "مسیر بر اساس کندل‌های کامل موجود در بازهٔ معامله بازخوانی شد؛ پوشش و محدودیت‌ها در ژورنال نوشته شده است."
+                else "کندل کامل همان بازه در حافظه یا منبع دریافت‌شده پیدا نشد؛ دادهٔ مفقود ساخته نمی‌شود."
+        }
+    }
+
     fun deleteJournalTrade(tradeId: String) {
         container.journalStore.deleteTrade(tradeId)
         _toast.value = "معامله از ژورنال حذف شد"
@@ -2306,15 +2320,15 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                         val closed = container.journalStore.closeTradeAtPrice(openTrade.id, px, reason, now)
                         if (closed != null) { _toast.value = reason; continue }
                     }
-                    val preserveUpdate = IchimokuStrategyEngine.evaluateOpenTradeManagement(
+                    val preserveUpdate = if (px == null) null else IchimokuStrategyEngine.evaluateOpenTradeManagement(
                         trade = openTrade,
-                        report = matchingReport,
+                        report = matchingReport.copy(livePrice = px),
                         config = stratConfig,
                     )
                     if (preserveUpdate != null && preserveUpdate.updatedStopLoss != null) {
                         val stageNote = when (preserveUpdate.stopStageTag) {
                             "BE" -> "${IchimokuStrategyEngine.BE_TAG_MARK} ریسک‌فری در ${preserveUpdate.lockedRMultiple}R"
-                            "TRAIL" -> "${IchimokuStrategyEngine.TRAIL_TAG_MARK} قفل سود روی تنکان در ${preserveUpdate.lockedRMultiple}R"
+                            "TRAIL" -> "${IchimokuStrategyEngine.TRAIL_TAG_MARK} سود خالص محافظت‌شده ${String.format(Locale.US, "%.2f", preserveUpdate.lockedRMultiple)}R"
                             else -> preserveUpdate.stageTitleFa
                         }
                         val ratcheted = container.journalStore.updateTradeStopLoss(
@@ -2323,6 +2337,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                             stageNote = stageNote,
                             newTakeProfit = preserveUpdate.updatedTakeProfit,
                             allowRatchet = true,
+                            updatedAt = now,
                         )
                         if (ratcheted != null) {
                             _toast.value = "${preserveUpdate.stageTitleFa}: ${openTrade.symbol} (${openTrade.interval.label})"

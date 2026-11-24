@@ -36,6 +36,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -323,6 +324,7 @@ fun JournalRiskScreen(
                     onDeleteTrade = viewModel::deleteJournalTrade,
                     onClearAll = viewModel::clearAllJournalTrades,
                     onOpenChart = onChartSymbol,
+                    onRefreshPath = viewModel::refreshJournalTradePath,
                 )
 
         // ── ۱. کارنامهٔ کلی بازطراحی‌شده (تحلیل کمّی: منحنی سرمایه، ریسک، تفکیک گروه‌ها) ──
@@ -2412,7 +2414,7 @@ private fun AutoMonitoredOpenTradesCard(
                                 color = AurumColors.Cyan,
                             )
                             Text(
-                                text = "🧭 خروج هوشمند فقط بالای +۲R: تا سود معامله به ۲ برابر ریسک نرسد هیچ خروج هوشمندی اجرا نمی‌شود. بالای +۲R: شکست کیجون/TK، شدوی بازگشتی C-Clamp، چرخه هوسودا (9/17/26) با تنکان فلت، یا قفل چیکو و افت ER<20%",
+                                text = "🛡️ پس از تیک تازه با سود خالص حداقل ۱٫۵R، حد فعال به سربه‌سر خالص منتقل می‌شود؛ سپس تریل ساختاری فقط بهبود می‌یابد. سود جاری با سود محافظت‌شده یکی نیست؛ در قطعی یا گپ خروج تضمین ندارد.",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Gold,
                             )
@@ -2481,6 +2483,7 @@ private fun MonthlyPnlCalendarSection(
     onDeleteTrade: (String) -> Unit,
     onClearAll: () -> Unit,
     onOpenChart: (String) -> Unit,
+    onRefreshPath: (String) -> Unit,
 ) {
     val todayZoned = remember(now) { Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()) }
     val todayYm = remember(todayZoned) { YearMonth.from(todayZoned) }
@@ -2850,6 +2853,7 @@ private fun MonthlyPnlCalendarSection(
                         trade = trade,
                         onDelete = { onDeleteTrade(trade.id) },
                         onOpenChart = { onOpenChart(trade.symbol) },
+                        onRefreshPath = { onRefreshPath(trade.id) },
                     )
                 }
             }
@@ -3048,6 +3052,7 @@ private fun ClosedJournalTradeRow(
     trade: PaperTrade,
     onDelete: () -> Unit,
     onOpenChart: () -> Unit,
+    onRefreshPath: () -> Unit,
 ) {
     var detailsExpanded by rememberSaveable("closed_row_${trade.id}") { mutableStateOf(false) }
     val pnl = trade.pnlUsd ?: 0.0
@@ -3297,6 +3302,8 @@ private fun ClosedJournalTradeRow(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
+                    Text("مسیرهای ذخیره‌شده در نسخه‌های قبل ممکن است شامل بخشی از کندل خروج باشند؛ برای محاسبهٔ دوباره از کندل‌های کامل بازخوانی کنید.", color = AurumColors.TextMuted, fontSize = 9.sp)
+                    TextButton(onClick = onRefreshPath) { Text("بازخوانی مسیر کندل‌های این معامله") }
                     Text(
                         text = trade.outcomeReasonFa.ifBlank {
                             "اطلاعات ثبت‌شدهٔ همین معامله؛ مسیر کندل‌ها در دسترس نیست:\n" +

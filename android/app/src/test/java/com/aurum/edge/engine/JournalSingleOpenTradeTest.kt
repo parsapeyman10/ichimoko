@@ -324,4 +324,47 @@ class JournalSingleOpenTradeTest {
         assertEquals("کندل‌های بعد از ورود نباید در بازسازی دخالت کنند", -1, rebuilt.tech1hBuy)
         assertFalse(rebuilt.techSnapshotRebuilt)
     }
+    @Test
+    fun activeStopSurvivesReloadAndLiveExitUsesIt() {
+        val (journal, settings) = freshJournal("active_stop_reload.json")
+        val context = RuntimeEnvironment.getApplication()
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "BTC/USDT", accountBalance = 100_000.0, riskPercent = 0.1,
+            entry = 100.0, stopLoss = 90.0, takeProfit = 130.0,
+        )!!
+        val at = System.currentTimeMillis() - 60_000L
+        val opened = journal.openTrade(calc, now = at)!!
+        val moved = journal.updateTradeStopLoss(opened.id, 102.0, "🔒 STRUCT test", allowRatchet = true, updatedAt = at + 10_000L)!!
+        val reload = JournalStore(context, File(context.filesDir, "active_stop_reload.json"), settings)
+        val restored = reload.trades.value.single()
+        assertEquals(moved.stopLoss, restored.stopLoss, 0.0)
+        assertEquals(opened.initialStopLoss, restored.initialStopLoss)
+        assertEquals(at + 10_000L, restored.stopUpdatedAt)
+        val tick = PriceTick(101.99, at + 20_000L)
+        val exits = reload.onLiveTick("BTC/USDT", tick, nowMillis = tick.at)
+        assertEquals(1, exits.size)
+        assertEquals(101.99, exits.single().exitPrice, 0.00001)
+        assertFalse(reload.trades.value.single().isOpen)
+    }
+
+    @Test
+    fun tickAtThresholdMovesTheStopImmediatelyAndNeverBackwards() {
+        val (journal, _) = freshJournal("tick_break_even.json")
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "BTC/USDT", accountBalance = 100_000.0, riskPercent = 0.1,
+            entry = 100.0, stopLoss = 90.0, takeProfit = 130.0,
+        )!!
+        val at = System.currentTimeMillis() - 60_000L
+        val opened = journal.openTrade(calc, now = at)!!
+        val fee = opened.settlementFeeUsd
+        val thresholdPrice = opened.entry + (1.5 * opened.fixedRiskUsd + fee + 0.02) / opened.positionOz
+        val tick = PriceTick(thresholdPrice, at + 20_000L)
+        journal.onLiveTick("BTC/USDT", tick, nowMillis = tick.at)
+        val protected = journal.trades.value.single()
+        assertTrue(protected.stopLoss > opened.entry)
+        assertTrue(RiskAndCalendarEngine.computeExitPnlUsd(protected, protected.stopLoss).second >= 0.01)
+        assertNull(journal.updateTradeStopLoss(opened.id, opened.stopLoss, "backwards", allowRatchet = true))
+        assertNull(journal.repairOpenTradePlan(opened.id, opened.stopLoss, opened.takeProfit, "repair"))
+    }
+
 }

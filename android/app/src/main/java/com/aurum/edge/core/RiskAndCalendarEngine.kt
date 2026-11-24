@@ -546,17 +546,19 @@ object RiskAndCalendarEngine {
     )
 
     fun evaluateAutoExit(trade: PaperTrade, tick: PriceTick): AutoExitEvaluation? {
-        if (!trade.isOpen) return null
+        if (!trade.isOpen || !tick.isTradeTick || tick.at <= trade.openedAt ||
+            (trade.stopUpdatedAt != null && tick.at < trade.stopUpdatedAt)) return null
         val price = tick.price
         if (!price.isFinite() || price <= 0.0) return null
 
         // محافظ ضد نویز ۱۰ ثانیه اول پس از ورود در کریپتو (جلوگیری از فعال شدن استاپ بر اثر تیک معوق/اختلاف بیسیس صرافی)
-        val fixedStopLoss = trade.initialStopLoss ?: trade.stopLoss
+        val initialStopLoss = trade.initialStopLoss ?: trade.stopLoss
+        val activeStopLoss = trade.stopLoss
         val tradeAgeMs = tick.at - trade.openedAt
-        val stopDist = abs(trade.entry - fixedStopLoss)
+        val stopDist = abs(trade.entry - initialStopLoss)
         val earlyCryptoSpikeBuffer = if (
             AssetClass.of(trade.symbol) == AssetClass.CRYPTO &&
-            tradeAgeMs in 0L..9_999L &&
+            tradeAgeMs in 0L..9_999L && activeStopLoss == initialStopLoss &&
             stopDist > 0.0
         ) {
             stopDist * 0.15
@@ -564,7 +566,7 @@ object RiskAndCalendarEngine {
             0.0
         }
 
-        val oneR = abs(trade.entry - fixedStopLoss)
+        val oneR = abs(trade.entry - initialStopLoss)
         val decimals = priceDecimals(trade.symbol, trade.entry)
         val effectiveTp = if (trade.netSettlementEnabled) trade.takeProfit else when (trade.action) {
             SignalAction.BUY -> {
@@ -587,12 +589,12 @@ object RiskAndCalendarEngine {
         val hitKind: AutoExitKind? = when (trade.action) {
             SignalAction.BUY -> when {
                 price >= effectiveTp -> AutoExitKind.TAKE_PROFIT
-                price <= fixedStopLoss - earlyCryptoSpikeBuffer -> AutoExitKind.STOP_LOSS
+                price <= activeStopLoss - earlyCryptoSpikeBuffer -> AutoExitKind.STOP_LOSS
                 else -> null
             }
             SignalAction.SELL -> when {
                 price <= effectiveTp -> AutoExitKind.TAKE_PROFIT
-                price >= fixedStopLoss + earlyCryptoSpikeBuffer -> AutoExitKind.STOP_LOSS
+                price >= activeStopLoss + earlyCryptoSpikeBuffer -> AutoExitKind.STOP_LOSS
                 else -> null
             }
             SignalAction.NO_TRADE -> null
@@ -601,7 +603,7 @@ object RiskAndCalendarEngine {
         val kind = hitKind ?: return null
         val exitPrice = when (kind) {
             AutoExitKind.TAKE_PROFIT -> effectiveTp
-            AutoExitKind.STOP_LOSS -> fixedStopLoss
+            AutoExitKind.STOP_LOSS -> price // gapped through stop: settle at observed price, not an invented fill
         }
         val (gross, net) = computeExitPnlUsd(trade, exitPrice)
         return AutoExitEvaluation(
@@ -623,17 +625,21 @@ object RiskAndCalendarEngine {
      */
     fun evaluateCandleWindow(trade: PaperTrade, candles: List<Candle>): AutoExitEvaluation? {
         if (!trade.isOpen || candles.isEmpty()) return null
+        // A moved stop must never be replayed before its recorded activation time.
+        val initial = trade.initialStopLoss ?: trade.stopLoss
+        if (trade.stopLoss != initial && trade.stopUpdatedAt == null) return null
+        val replayAfter = maxOf(trade.openedAt, trade.stopUpdatedAt ?: trade.openedAt)
         val ordered = candles
             .filter {
                 // Only inspect candles whose bar opened STRICTLY AFTER the trade opened so pre-entry wicks never stop out a new trade
-                it.time > trade.openedAt &&
+                it.time > replayAfter &&
                     it.high.isFinite() && it.low.isFinite() &&
                     it.high > 0.0 && it.low > 0.0 && it.high >= it.low
             }
             .sortedBy { it.time }
 
-        val fixedStopLoss = trade.initialStopLoss ?: trade.stopLoss
-        val oneR = abs(trade.entry - fixedStopLoss)
+        val fixedStopLoss = trade.stopLoss
+        val oneR = abs(trade.entry - initial)
         val decimals = priceDecimals(trade.symbol, trade.entry)
         val effectiveTp = if (trade.netSettlementEnabled) trade.takeProfit else when (trade.action) {
             SignalAction.BUY -> {

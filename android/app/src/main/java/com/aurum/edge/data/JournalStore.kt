@@ -106,15 +106,8 @@ class JournalStore(
             val assigned = numberedById[t.id] ?: t.tradeNumber
             // حد ضرر ممکن است در مرحلهٔ ریسک‌فری/تریل به سود منتقل شده باشد. بازنویسی آن با
             // `initialStopLoss` یعنی پاک‌شدن Preserve Mode در هر بار بارگذاری ژورنال.
-            val preservedSl = if (t.note.contains(IchimokuStrategyEngine.BE_TAG_MARK) ||
-                t.note.contains(IchimokuStrategyEngine.TRAIL_TAG_MARK) ||
-                t.note.contains("ریسک‌فری")
-            ) {
-                t.stopLoss
-            } else {
-                t.initialStopLoss ?: t.stopLoss
-            }
-            val fixedSl = preservedSl
+            // Never undo a persisted active stop or replace the original risk anchor at reload.
+            val fixedSl = t.stopLoss
             val clampedRr = if (t.riskReward.isFinite()) t.riskReward.coerceIn(1.50, 3.00) else 2.00
             val clampedOptRr = if (t.optimalRiskReward > 0.0 && t.optimalRiskReward.isFinite()) {
                 t.optimalRiskReward.coerceIn(1.50, 3.00)
@@ -127,7 +120,7 @@ class JournalStore(
                 t.tradeNumber != assigned || needsFixedSlReset -> t.copy(
                     tradeNumber = assigned,
                     stopLoss = fixedSl,
-                    initialStopLoss = fixedSl,
+                    initialStopLoss = t.initialStopLoss ?: fixedSl,
                     riskReward = clampedRr,
                     optimalRiskReward = clampedOptRr,
                 )
@@ -551,6 +544,7 @@ class JournalStore(
         stageNote: String,
         newTakeProfit: Double? = null,
         allowRatchet: Boolean = false,
+        updatedAt: Long = System.currentTimeMillis(),
     ): PaperTrade? {
         if (!newStopLoss.isFinite() || newStopLoss <= 0.0) return null
         val target = _trades.value.firstOrNull { it.id == tradeId && it.isOpen } ?: return null
@@ -577,6 +571,7 @@ class JournalStore(
             val modified = target.copy(
                 stopLoss = newStopLoss,
                 initialStopLoss = target.initialStopLoss ?: target.stopLoss,
+                stopUpdatedAt = updatedAt.takeIf { it >= target.openedAt },
                 takeProfit = newTakeProfit ?: target.takeProfit,
                 note = updatedNote,
             )
@@ -585,6 +580,7 @@ class JournalStore(
         }
 
         val fixedInitSl = target.initialStopLoss ?: target.stopLoss
+        if (target.stopLoss != fixedInitSl) return null
         val modified = target.copy(
             stopLoss = fixedInitSl,
             takeProfit = target.takeProfit,
@@ -614,6 +610,7 @@ class JournalStore(
         if (!newStopLoss.isFinite() || newStopLoss <= 0.0) return null
         if (!newTakeProfit.isFinite() || newTakeProfit <= 0.0) return null
         val target = _trades.value.firstOrNull { it.id == tradeId && it.isOpen } ?: return null
+        if (target.initialStopLoss != null && target.stopLoss != target.initialStopLoss) return null
         val stopDistance = abs(target.entry - newStopLoss)
         val targetDistance = abs(newTakeProfit - target.entry)
         if (stopDistance <= 1e-9 || targetDistance <= 1e-9) return null
@@ -646,13 +643,14 @@ class JournalStore(
      * Closes the trade immediately when TP (or 3R ceiling) or SL is reached.
      */
     @Synchronized
-    fun onLiveTick(symbolInput: String, tick: PriceTick): List<AutoExitEvaluation> {
+    fun onLiveTick(symbolInput: String, tick: PriceTick, nowMillis: Long = System.currentTimeMillis()): List<AutoExitEvaluation> {
         val symbol = V1Universe.normalize(symbolInput)
         val current = _trades.value
         if (current.none { it.isOpen && V1Universe.normalize(it.symbol) == symbol }) {
             return emptyList()
         }
         val triggered = mutableListOf<AutoExitEvaluation>()
+        var protectedAny = false
         val closedTradesForAlarm = mutableListOf<Pair<PaperTrade, Boolean>>()
         val updated = current.map { trade ->
             if (!trade.isOpen || V1Universe.normalize(trade.symbol) != symbol) {
@@ -677,14 +675,27 @@ class JournalStore(
                     closedTradesForAlarm += explained to isProfitableClose
                     explained
                 } else {
-                    trade
+                    val validLiveTick = tick.at <= nowMillis && nowMillis - tick.at <= 60_000L &&
+                        !com.aurum.edge.core.MarketHours.closedFor(symbol, nowMillis)
+                    val stop = if (validLiveTick) com.aurum.edge.core.ProfitLockPolicy.breakEvenStop(trade, tick) else null
+                    if (stop == null) trade else {
+                        protectedAny = true
+                        val note = "${IchimokuStrategyEngine.BE_TAG_MARK} حد ضرر سربه‌سر خالص پس از ۱٫۵R؛ اجرا در گپ تضمین نیست"
+                        trade.copy(stopLoss = stop, initialStopLoss = trade.initialStopLoss ?: trade.stopLoss,
+                            stopUpdatedAt = tick.at, note = "${trade.note} · $note".trim(' ', '·'))
+                    }
                 }
             }
+        }
+        if (protectedAny && triggered.isEmpty()) {
+            // Publish the stop atomically now; serialize the latest state on IO, never on the tick itself.
+            _trades.value = ensureSequentialTradeNumbers(updated)
+            ioScope.launch { synchronized(this@JournalStore) { persist(_trades.value) } }
         }
         if (triggered.isNotEmpty()) {
             persist(updated)
             val totalDelta = triggered.sumOf { it.netPnlUsd }
-            settingsStore?.adjustBalance(totalDelta)
+            if (triggered.isNotEmpty()) settingsStore?.adjustBalance(totalDelta)
             val cfg = settingsStore?.read()
             val alarmEnabled = cfg?.notifyOnSignal != false
             val soundUri = cfg?.alertSoundUri.orEmpty()
@@ -773,10 +784,21 @@ class JournalStore(
         return triggered
     }
 
-    private fun explainClosedTrade(trade: PaperTrade, candles: List<Candle> = LiveQuoteFetcher.peekCachedCandles(trade.symbol, trade.interval)): PaperTrade = runCatching {
+    private fun explainClosedTrade(trade: PaperTrade, candles: List<Candle> = LiveQuoteFetcher.peekMemoryCandles(trade.symbol, trade.interval)): PaperTrade = runCatching {
         val result = com.aurum.edge.core.TradeOutcomeExplainer.explain(trade, candles)
         trade.copy(outcomeReasonFa = result.textFa(), outcomeTags = result.tags, mfeR = result.mfeR, maeR = result.maeR)
     }.getOrDefault(trade)
+
+    /** Caller supplies historical candles off the main/tick path; never invents missing bars. */
+    @Synchronized
+    fun refreshClosedTradeExplanation(tradeId: String, candles: List<Candle>): Boolean {
+        val target = _trades.value.firstOrNull { it.id == tradeId && !it.isOpen } ?: return false
+        val result = com.aurum.edge.core.TradeOutcomeExplainer.explain(target, candles)
+        if (result.barsHeld == 0) return false
+        val updated = target.copy(outcomeReasonFa = result.textFa(), outcomeTags = result.tags, mfeR = result.mfeR, maeR = result.maeR)
+        persist(_trades.value.map { if (it.id == tradeId) updated else it })
+        return true
+    }
 
     @Synchronized
     fun closeTradeAtPrice(
@@ -799,7 +821,7 @@ class JournalStore(
         // کندل‌ها فقط از حافظه خوانده می‌شوند (بدون شبکه و بدون دیسک) تا بستن معامله کند نشود.
         closed = runCatching {
             val candles = com.aurum.edge.data.LiveQuoteFetcher
-                .peekCachedCandles(closed.symbol, closed.interval)
+                .peekMemoryCandles(closed.symbol, closed.interval)
             val explanation = com.aurum.edge.core.TradeOutcomeExplainer.explain(closed, candles)
             closed.copy(
                 outcomeReasonFa = explanation.textFa(),
