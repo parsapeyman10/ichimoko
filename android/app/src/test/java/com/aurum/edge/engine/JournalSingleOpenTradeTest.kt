@@ -367,4 +367,19 @@ class JournalSingleOpenTradeTest {
         assertNull(journal.repairOpenTradePlan(opened.id, opened.stopLoss, opened.takeProfit, "repair"))
     }
 
+    @Test
+    fun olderQuoteCannotCloseAfterNewerQuote() {
+        val (journal, _) = freshJournal("tick_order_guard.json")
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "BTC/USDT", accountBalance = 100_000.0, riskPercent = 0.1,
+            entry = 100.0, stopLoss = 90.0, takeProfit = 130.0,
+        )!!
+        val at = System.currentTimeMillis() - 30_000L
+        journal.openTrade(calc, now = at)!!
+        journal.onLiveTick("BTC/USDT", PriceTick(101.0, at + 20_000L), nowMillis = at + 20_000L)
+        val obsolete = journal.onLiveTick("BTC/USDT", PriceTick(89.0, at + 10_000L), nowMillis = at + 21_000L)
+        assertTrue(obsolete.isEmpty())
+        assertTrue(journal.trades.value.single().isOpen)
+    }
+
 }

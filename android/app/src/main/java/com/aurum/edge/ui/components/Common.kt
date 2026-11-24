@@ -285,8 +285,8 @@ fun TradingViewPositionBox(
     val slDist = abs(trade.entry - trade.stopLoss).coerceAtLeast(1e-8)
     val tpDist = abs(trade.takeProfit - trade.entry).coerceAtLeast(1e-8)
     val riskUsd = trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 0.0
-    val rr = trade.riskReward
     val rewardUsd = com.aurum.edge.core.RiskAndCalendarEngine.computeExitPnlUsd(trade, trade.takeProfit).second
+    val rr = if (riskUsd > 0.0) rewardUsd / riskUsd else 0.0
     val stopNetUsd = com.aurum.edge.core.RiskAndCalendarEngine.computeExitPnlUsd(trade, trade.stopLoss).second
     val stopNetR = if (riskUsd > 0) stopNetUsd / riskUsd else null
     val tpPct = (tpDist / trade.entry.coerceAtLeast(1e-8)) * 100.0
@@ -404,7 +404,7 @@ fun TradingViewPositionBox(
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "+$${String.format(Locale.US, "%.2f", rewardUsd)} (+${String.format(Locale.US, "%.2f", rr)}R)",
+                        text = "${String.format(Locale.US, "%+.2f", rewardUsd)}$ (${String.format(Locale.US, "%+.2f", rr)}R)",
                         style = MaterialTheme.typography.labelMedium,
                         color = tvGreen,
                         fontWeight = FontWeight.Bold,

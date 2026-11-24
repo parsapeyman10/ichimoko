@@ -642,10 +642,17 @@ class JournalStore(
      * Evaluates an incoming live market tick against all open trades for [symbolInput].
      * Closes the trade immediately when TP (or 3R ceiling) or SL is reached.
      */
+    private val lastProcessedTickAt = mutableMapOf<String, Long>()
+
     @Synchronized
     fun onLiveTick(symbolInput: String, tick: PriceTick, nowMillis: Long = System.currentTimeMillis()): List<AutoExitEvaluation> {
         val symbol = V1Universe.normalize(symbolInput)
         val current = _trades.value
+        if (tick.isTradeTick && tick.price.isFinite() && tick.price > 0.0) {
+            val last = lastProcessedTickAt[symbol]
+            if (last != null && tick.at < last) return emptyList()
+            if (tick.at <= nowMillis && nowMillis - tick.at <= 60_000L) lastProcessedTickAt[symbol] = tick.at
+        }
         if (current.none { it.isOpen && V1Universe.normalize(it.symbol) == symbol }) {
             return emptyList()
         }

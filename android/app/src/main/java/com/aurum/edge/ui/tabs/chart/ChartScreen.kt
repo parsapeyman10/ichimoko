@@ -1038,11 +1038,11 @@ private fun NativeIchimokuCanvasChart(
                     }
 
                     // هـ) برچسب‌های حرفه‌ای تریدینگ‌ویو روی خطوط TP، Entry و SL
-                    val slDist = abs(activeTrade.entry - activeTrade.stopLoss).coerceAtLeast(1e-8)
-                    val tpDist = abs(activeTrade.takeProfit - activeTrade.entry).coerceAtLeast(1e-8)
-                    val rr = (tpDist / slDist).coerceIn(0.1, 50.0)
-                    val riskUsd = if (activeTrade.fixedRiskUsd > 0.0) activeTrade.fixedRiskUsd else 5.0
-                    val rewardUsd = riskUsd * rr
+                    val riskUsd = activeTrade.fixedRiskUsd.takeIf { it > 0.0 } ?: 0.0
+                    val rewardUsd = com.aurum.edge.core.RiskAndCalendarEngine.computeExitPnlUsd(activeTrade, activeTrade.takeProfit).second
+                    val stopUsd = com.aurum.edge.core.RiskAndCalendarEngine.computeExitPnlUsd(activeTrade, activeTrade.stopLoss).second
+                    val rr = if (riskUsd > 0.0) rewardUsd / riskUsd else 0.0
+                    val stopR = if (riskUsd > 0.0) stopUsd / riskUsd else 0.0
                     val valuation = LiveTradeValuation.from(activeTrade, curP)
                     val pnlUsd = valuation?.netPnlUsd ?: 0.0
                     val pnlSign = if (pnlUsd >= 0.0) "+" else "-"
@@ -1085,14 +1085,14 @@ private fun NativeIchimokuCanvasChart(
 
                     // تگ حد سود (TP)
                     drawTvBadge(
-                        text = "TP: ${formatPriceFor(symbol, activeTrade.takeProfit)}  (+$${String.format(Locale.US, "%.2f", rewardUsd)} | ${String.format(Locale.US, "%.2f", rr)}R)",
+                        text = "TP: ${formatPriceFor(symbol, activeTrade.takeProfit)}  (${String.format(Locale.US, "%+.2f", rewardUsd)}$ | ${String.format(Locale.US, "%+.2f", rr)}R net)",
                         anchorY = tpY,
                         bgColorInt = AndroidColor.argb(235, 8, 153, 129),
                         alignRight = true,
                     )
                     // تگ حد ضرر (SL)
                     drawTvBadge(
-                        text = "SL: ${formatPriceFor(symbol, activeTrade.stopLoss)}  (-$${String.format(Locale.US, "%.2f", riskUsd)} | -1R)",
+                        text = "SL: ${formatPriceFor(symbol, activeTrade.stopLoss)}  (${String.format(Locale.US, "%+.2f", stopUsd)}$ | ${String.format(Locale.US, "%+.2f", stopR)}R net)",
                         anchorY = slY,
                         bgColorInt = AndroidColor.argb(235, 242, 54, 69),
                         alignRight = true,
