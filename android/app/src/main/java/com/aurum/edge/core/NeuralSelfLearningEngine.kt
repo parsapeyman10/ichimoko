@@ -3974,14 +3974,10 @@ class NeuralSelfLearningEngine(
             )
         }
 
-        // ── ۱) سنجش بیرون‌نمونه‌ای: شبکه‌ای از صفر، فقط روی ۷۰٪ اولِ زمانی ──────────
-        // از حالت «تازه» شروع می‌کنیم تا دانش قبلی نتواند جواب معامله‌های آینده را لو بدهد.
-        val cut = (samples.size * (1.0 - oosFraction.coerceIn(0.05, 0.5))).toInt()
-            .coerceIn(1, (samples.size - 1).coerceAtLeast(1))
-        val early = samples.take(cut)
-        val late = samples.drop(cut)
+        // ارزیابی مستقل: فقط زمان‌های معتبر، ورودهای زنده، بدون نتیجهٔ بازیابی‌شده یا
+        // تکراری اقتصادی احتمالی. دادهٔ نامعلوم از ژورنال حذف نمی‌شود؛ فقط سنجش کنار می‌رود.
+        val evaluationSamples = NeuralTemporalValidation.eligible(samples, nowMs)
         val savedState = persistedState
-
         fun trainOn(subset: List<JournalTrainingSample>) {
             subset.forEach { s ->
                 learnFromClosedTradeInternal(
@@ -4008,36 +4004,37 @@ class NeuralSelfLearningEngine(
             atMs = s.atMs,
         )
 
+        val cut = (evaluationSamples.size * (1.0 - oosFraction.coerceIn(0.05, 0.5))).toInt()
+        val holdout = NeuralTemporalValidation.split(evaluationSamples, cut, evaluationSamples.size)
         val oosPoints = try {
-            persistedState = createFreshInitializedState()
-            trainOn(early)
-            late.map { pointOf(it) }
-        } finally {
-            // هیچ‌کدام از اثرهای تمرین آزمایشی نباید در حافظهٔ واقعی بماند.
-            persistedState = savedState
-        }
+            if (holdout == null) emptyList() else {
+                persistedState = createFreshInitializedState()
+                trainOn(holdout.training)
+                holdout.test.map { pointOf(it) }
+            }
+        } finally { persistedState = savedState }
 
-        // ── ۱-ب) اعتبارسنجی گام‌به‌گام (Walk-Forward) ─────────────────────────────
-        // یک تقسیم ۷۰/۳۰ فقط یک شاهد است. این‌جا هر فولد روی «گذشته تا آن لحظه» آموزش
-        // می‌بیند و روی بازهٔ بعدی سنجیده می‌شود — همان چیزی که در معاملهٔ واقعی رخ می‌دهد.
         val foldPoints = ArrayList<List<NeuralCalibrationPoint>>()
+        val foldRates = ArrayList<Double>()
+        val foldSizes = ArrayList<Int>()
         val requestedFolds = walkForwardFolds.coerceIn(0, 5)
         val minPerFold = NeuralCalibration.MIN_FOLD_TEST_SAMPLES
-        if (requestedFolds > 0 && samples.size >= (requestedFolds + 1) * minPerFold) {
+        if (requestedFolds > 0 && evaluationSamples.size >= (requestedFolds + 1) * minPerFold) {
             try {
                 for (k in 1..requestedFolds) {
-                    val trainEnd = samples.size * k / (requestedFolds + 1)
-                    val testEnd = samples.size * (k + 1) / (requestedFolds + 1)
-                    if (trainEnd < 5 || testEnd <= trainEnd) continue
+                    val start = evaluationSamples.size * k / (requestedFolds + 1)
+                    val end = evaluationSamples.size * (k + 1) / (requestedFolds + 1)
+                    val split = NeuralTemporalValidation.split(evaluationSamples, start, end) ?: continue
+                    if (split.training.size < 5 || split.test.size < minPerFold) continue
                     persistedState = createFreshInitializedState()
-                    trainOn(samples.subList(0, trainEnd))
-                    foldPoints += samples.subList(trainEnd, testEnd).map { pointOf(it) }
+                    trainOn(split.training)
+                    foldPoints += split.test.map { pointOf(it) }
+                    foldRates += split.training.count { it.won }.toDouble() / split.training.size
+                    foldSizes += split.training.size
                 }
-            } finally {
-                persistedState = savedState
-            }
+            } finally { persistedState = savedState }
         }
-        val walkForward = NeuralCalibration.evaluateWalkForward(foldPoints)
+        val walkForward = NeuralCalibration.evaluateWalkForward(foldPoints, trainingWinRates = foldRates, trainingSizes = foldSizes)
 
         // ── ۲) یادگیری واقعی روی همهٔ نمونه‌ها (دفتر و شمارنده هم به‌روز می‌شوند) ─────
         val beforeLearned = persistedState.totalLearnedTrades
@@ -4046,8 +4043,12 @@ class NeuralSelfLearningEngine(
 
         // ── ۳) سنجش درون‌نمونه‌ای با شبکهٔ نهایی ──────────────────────────────────
         val inSamplePoints = samples.map { pointOf(it) }
-        val inSample = NeuralCalibration.evaluate(inSamplePoints, oosFraction)
-        val outOfSample = NeuralCalibration.evaluate(oosPoints, oosFraction)
+        val inSample = NeuralCalibration.evaluate(inSamplePoints, oosFraction).copy(oosSamples = 0, oosBrier = Double.NaN,
+            verdictFa = "ارزیابی روی دادهٔ آموزش؛ مقایسهٔ خارج نمونه نیست")
+        val baseRate = holdout?.training?.let { train -> train.count { it.won }.toDouble() / train.size }
+        val rawOutOfSample = NeuralCalibration.evaluate(oosPoints, oosFraction, baselineProbability = baseRate)
+        val outOfSample = rawOutOfSample.copy(oosSamples = oosPoints.size, oosBrier = rawOutOfSample.brier,
+            verdictFa = "پس‌نگر؛ پایه از آموزش و فاصلهٔ پاک‌سازی یک ساعت است. داده‌های دیده‌شده و همبسته تضمین آینده نیستند.")
         val ece = NeuralCalibration.expectedCalibrationError(inSamplePoints)
 
         // شمارش صادقانهٔ نمونه‌هایی که مدل برایشان «حالت بازار» واقعاً داشت. بردار ۱۶..۲۳ هم
@@ -4060,6 +4061,7 @@ class NeuralSelfLearningEngine(
         }
         val summary = "🧠 آموزش از ژورنال: ${samples.size} نمونهٔ واقعی (${samples.count { it.won }} برد / " +
             "${samples.count { !it.won }} باخت) · $newlyLearned تازه آموخته شد · $oosText · " +
+            "ارزیابی: ${evaluationSamples.size} ردیف واجد شرایط، فاصلهٔ یک‌ساعته، پایه از آموزش؛ پس‌نگر و نه آیندهٔ کور · " +
             "گام‌به‌گام: ${walkForward.verdictFa} · " +
             "درون‌نمونه Brier ${if (inSample.brier.isFinite()) String.format(Locale.US, "%.3f", inSample.brier) else "—"}"
 
@@ -4092,7 +4094,7 @@ class NeuralSelfLearningEngine(
             newlyLearned = newlyLearned,
             alreadyLearned = reconcile.distinctJournalTrades - reconcile.newlyLearnedThisRun,
             trainingSamples = samples.size,
-            holdoutSamples = late.size,
+            holdoutSamples = holdout?.test?.size ?: 0,
             inSample = inSample,
             outOfSample = outOfSample,
             expectedCalibrationError = if (ece.isFinite()) Math.round(ece * 1000.0) / 1000.0 else Double.NaN,
