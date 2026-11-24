@@ -33,4 +33,9 @@ class DailyBackupCryptoTest {
         assertTrue(DailyBackupSnapshot.allowedSettingKey("btc_base_strategy_config_json"))
         assertTrue(DailyBackupSnapshot.allowedSettingKey("btc_custom_strategies_json"))
     }
+    @Test fun decryptsPythonEnvelopeWithUnicodePassphrase() {
+        val envelope = """{"format":"AurumDailyBackup","version":1,"iterations":310000,"salt":"AAECAwQFBgcICQoLDA0ODw==","nonce":"AAECAwQFBgcICQoL","ciphertext":"A4HzWRcqb3NLbJyrkEDlYcJ/zqwSwjeBxidHmJ8cmWzOWaw="}"""
+        assertEquals("cross-language-test", String(DailyBackupCrypto.decrypt(envelope.toByteArray(), "رمز عبور آزمایشی".toCharArray())))
+    }
+
 }

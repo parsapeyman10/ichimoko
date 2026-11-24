@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import com.aurum.edge.data.DailyGithubBackup
 import com.aurum.edge.ui.components.SectionCard
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -80,8 +82,13 @@ fun DailyBackupCard() {
                 DailyGithubBackup.status(context, message)
             }) { Text("ارسال فوری") }
             Button(enabled = !busy, onClick = {
-                DailyGithubBackup.disconnect(context)
-                message = DailyGithubBackup.currentStatus(context)
+                scope.launch {
+                    busy = true
+                    try {
+                        withContext(Dispatchers.IO) { DailyGithubBackup.disconnect(context) }
+                        message = DailyGithubBackup.currentStatus(context)
+                    } finally { busy = false }
+                }
             }) { Text("قطع ارسال خودکار") }
             Text(message)
         }
