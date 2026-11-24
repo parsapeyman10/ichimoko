@@ -514,7 +514,7 @@ fun NeuralBrainScreen(
                     }
                 }
 
-                // کشویی ۲: شیب رگرسیونی تک‌تک ۲۴ ویژگی ورودی شبکه عصبی (پیش‌فرض بسته)
+                // کشویی ۲: شیب رگرسیونی تک‌تک ۲۸ ویژگی ورودی شبکه عصبی (پیش‌فرض بسته)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -533,13 +533,13 @@ fun NeuralBrainScreen(
                     ) {
                         Text(
                             modifier = Modifier.weight(1f).padding(end = 6.dp),
-                            text = "🧬 شیب رگرسیونی ۲۴ ویژگی ورودی (Huber β_R & Ridge β_Win)",
+                            text = "🧬 شیب رگرسیونی ۲۸ ویژگی ورودی (Huber β_R & Ridge β_Win)",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = if (showRegSlopesTable) "▲ بستن" else "▼ باز کردن (۲۴ ویژگی)",
+                            text = if (showRegSlopesTable) "▲ بستن" else "▼ باز کردن (۲۸ ویژگی)",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Gold,
                         )
@@ -1513,7 +1513,7 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۱-پ-۲. تیونینگ اختصاصی تمام ۲۴ ویژگی یادگرفته‌شده شبکه عصبی به تفکیک هر استراتژی ──
+        // ── ۱-پ-۲. تیونینگ اختصاصی تمام ۲۸ ویژگی یادگرفته‌شده شبکه عصبی به تفکیک هر استراتژی ──
         SectionCard(
             title = "🧬 شخصیت آموخته‌شدهٔ هر نماد بازار (۱۵ نماد)",
             onCopy = { viewModel.copyNeuralBrainSection("persymbol") },
@@ -1632,9 +1632,9 @@ fun NeuralBrainScreen(
         }
 
         SectionCard(
-            title = "🧬 تیونینگ اختصاصی تمام ۲۴ ویژگی شبکه عصبی برای هر استراتژی",
+            title = "🧬 تیونینگ اختصاصی تمام ۲۸ ویژگی شبکه عصبی برای هر استراتژی",
             onCopy = { viewModel.copyNeuralBrainSection("perstrategy") },
-            subtitle = "تنظیم مستقل وزن، ضریب اهمیت و آستانه هر ۲۴ ویژگی یادگرفته‌شده شبکه عصبی + پارامترهای ساختاری مختص هر یک از استراتژی‌های مشمول یادگیری",
+            subtitle = "تنظیم مستقل وزن، ضریب اهمیت و آستانه هر ۲۸ ویژگی یادگرفته‌شده شبکه عصبی + پارامترهای ساختاری مختص هر یک از استراتژی‌های مشمول یادگیری",
             initiallyExpanded = false,
         ) {
             var selectedStratId by rememberSaveable {
@@ -1649,7 +1649,7 @@ fun NeuralBrainScreen(
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "انتخاب استراتژی جهت مشاهده و تیونینگ اختصاصی ۲۴ ویژگی شبکه عصبی:",
+                    text = "انتخاب استراتژی جهت مشاهده و تیونینگ اختصاصی ۲۸ ویژگی شبکه عصبی:",
                     style = MaterialTheme.typography.labelMedium,
                     color = AurumColors.Gold,
                     fontWeight = FontWeight.Bold,
@@ -1748,7 +1748,7 @@ fun NeuralBrainScreen(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
-                                text = "⚡ تیونینگ خودکار اختصاصی «${selectedModel.badgeFa}» (هر ۲۴ ویژگی + پارامترها)",
+                                text = "⚡ تیونینگ خودکار اختصاصی «${selectedModel.badgeFa}» (هر ۲۸ ویژگی + پارامترها)",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -1885,7 +1885,7 @@ fun NeuralBrainScreen(
                         }
                     }
 
-                    // کشویی ۲: تیونینگ تک‌تک ۲۴ ویژگی یادگرفته‌شده شبکه عصبی مختص همین استراتژی (پیش‌فرض بسته)
+                    // کشویی ۲: تیونینگ تک‌تک ۲۸ ویژگی یادگرفته‌شده شبکه عصبی مختص همین استراتژی (پیش‌فرض بسته)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1904,13 +1904,13 @@ fun NeuralBrainScreen(
                         ) {
                             Text(
                                 modifier = Modifier.weight(1f).padding(end = 6.dp),
-                                text = "🧠 تیونینگ تک‌تک ۲۴ ویژگی یادگرفته‌شده در «${selectedModel.badgeFa}»",
+                                text = "🧠 تیونینگ تک‌تک ۲۸ ویژگی یادگرفته‌شده در «${selectedModel.badgeFa}»",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = AurumColors.Green,
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                text = if (showFeaturesDrawer) "▲ بستن" else "▼ باز کردن (۲۴ ویژگی)",
+                                text = if (showFeaturesDrawer) "▲ بستن" else "▼ باز کردن (۲۸ ویژگی)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Cyan,
                             )
@@ -2332,11 +2332,11 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۵. وزن و اهمیت ۲۴ ویژگی ورودی شبکه (FT-Transformer Self-Attention) ──
+        // ── ۵. وزن و اهمیت ۲۸ ویژگی ورودی شبکه (FT-Transformer Self-Attention) ──
         SectionCard(
-            title = "⚖️ کالبدشکافی ۲۴ ویژگی ایچیموکو در مغز شبکه (FT-Attention Weights)",
+            title = "⚖️ کالبدشکافی ۲۸ ویژگی ایچیموکو در مغز شبکه (FT-Attention Weights)",
             onCopy = { viewModel.copyNeuralBrainSection("features") },
-            subtitle = "کدام شروط ایچیموکو و پرایس‌اکشن بیشترین وزن را در تصمیم‌گیری شبکه عصبی دارند؟",
+            subtitle = "چهار ورودی سنجش ۱H/۴H در مسیر جداگانه‌اند و سهم توجه ندارند؛ اعداد دیگر وزن‌های خام، نه اثر علّی هستند.",
             initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -2362,7 +2362,7 @@ fun NeuralBrainScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             Pill(
-                                text = "توجه: ${feat.attentionPercent}%",
+                                text = if (feat.index >= 25) "بدون سهم توجه" else "شاخص وزن خام: ${feat.attentionPercent}%",
                                 color = AurumColors.Gold,
                             )
                         }

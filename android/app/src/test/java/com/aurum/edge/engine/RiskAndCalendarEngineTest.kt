@@ -6,6 +6,7 @@ import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.CustomStrategySlot
 import com.aurum.edge.core.IchimokuStrategyEngine
+import com.aurum.edge.core.NeuralSelfLearningEngine
 import com.aurum.edge.core.NeuralLearningLedger
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
@@ -970,7 +971,7 @@ class RiskAndCalendarEngineTest {
         // Verify Neural Brain explainability fields (learnedInsightsFeedFa, featureInsights, recentLessons)
         val brainSummary = neuralEngine.state.value
         // ۱۶ ویژگی هویتی + ۸ حالت بازار (R19) ⇒ ۲۴
-        assertEquals(24, brainSummary.featureInsights.size)
+        assertEquals(NeuralSelfLearningEngine.INPUT_DIM, brainSummary.featureInsights.size)
         assertTrue(brainSummary.learnedInsightsFeedFa.isNotEmpty())
         assertEquals(6, brainSummary.recentLessons.size)
         assertTrue(brainSummary.noTradeClusters.isNotEmpty())
@@ -1133,7 +1134,7 @@ class RiskAndCalendarEngineTest {
             val prof = tunedParams.perStrategyProfiles[stratModel.id]
             assertNotNull("Missing profile for ${stratModel.id}", prof)
             // ۱۶ ویژگی هویتی + ۸ حالت بازار (R19)
-            assertEquals(24, prof!!.featureTunings.size)
+            assertEquals(NeuralSelfLearningEngine.INPUT_DIM, prof!!.featureTunings.size)
         }
         val tunedFeatProfile = neuralEngineV3919.tuneStrategyFeature(
             strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
@@ -1215,7 +1216,7 @@ class RiskAndCalendarEngineTest {
             huberDelta = 1.35,
         )
         assertEquals(10, regReportAll.parameterRows.size)
-        assertEquals(24, regReportAll.featureSlopes.size)
+        assertEquals(NeuralSelfLearningEngine.INPUT_DIM, regReportAll.featureSlopes.size)
         // R² از باقی‌ماندهٔ واقعی مدل محاسبه می‌شود (نه از شمار نمونه). برازش لب‌به‌مرز
         // لازم نیست بخشی از قرارداد باشد؛ آنچه قرارداد است، عددِ محدود و قابل‌دفاع است.
         // R² حالا **واقعی** است و می‌تواند منفی باشد (بدتر از میانگین) یا وقتی نمونه برای

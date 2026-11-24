@@ -193,9 +193,11 @@ data class NeuralEntryObservation(
     val predictedWinProbability: Double,
     val expectedR: Double,
 ) {
-    fun isUsableFor(openedAt: Long): Boolean = schema == 1 && evaluatedAt > 0 && evaluatedAt <= openedAt &&
-        signalBarTime > 0 && signalBarTime <= evaluatedAt && features.size == 24 &&
-        features.all { it.isFinite() && it in -1.0..1.0 } && conditionKey.isNotBlank() &&
+    fun isUsableFor(openedAt: Long): Boolean = ((schema == 1 && features.size == 24) || (schema == 2 && features.size == 28)) &&
+        evaluatedAt > 0 && evaluatedAt <= openedAt && signalBarTime > 0 && signalBarTime <= evaluatedAt &&
+        features.all { it.isFinite() && it in -1.0..1.0 } &&
+        (schema != 2 || ((features[25] == 0.0 || features[25] == 1.0) && (features[27] == 0.0 || features[27] == 1.0) &&
+            (features[25] == 1.0 || features[24] == 0.0) && (features[27] == 1.0 || features[26] == 0.0))) && conditionKey.isNotBlank() &&
         predictedWinProbability.isFinite() && predictedWinProbability in 0.0..1.0 && expectedR.isFinite()
 }
 

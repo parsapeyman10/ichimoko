@@ -1245,7 +1245,6 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         val entryReport = matchedReport?.takeIf {
             signalBarTime != null && it.triggerBarTime == signalBarTime && it.action == calc.action
         }
-        val entryObservation = entryReport?.let { container.neuralEngine.observeEntry(it, calc.riskReward, now) }
         val matchedBreakdown = entryReport?.rrBreakdown
         val entryCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
         // سنجش تکنیکال ۱ ساعته و ۴ ساعته در همان لحظهٔ ورود ثبت می‌شود و بعداً تغییر نمی‌کند.
@@ -1253,6 +1252,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         val gauge4h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H4).filter { it.closed && it.time + 14_400_000L <= now }
         val rating1 = freshTechnicalRating(normSym, Interval.H1, now)
         val rating4 = freshTechnicalRating(normSym, Interval.H4, now)
+        val entryObservation = entryReport?.let { container.neuralEngine.observeEntry(it, calc.riskReward, now, rating1, rating4) }
         val weightedRating = com.aurum.edge.core.WeightedTechnicalRating.score(calc.action, rating1, rating4)
         val ratingDecision = com.aurum.edge.core.RatingEvidenceGate.evaluate(
             trades = trades.value, symbol = normSym, strategy = strategyId, action = calc.action,
@@ -1273,6 +1273,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             enforceProfitRisk = true,
             signalBarTime = signalBarTime,
             neuralEntryObservation = entryObservation,
+            entryRatingOverride = rating1 to rating4,
             gaugeCandles1h = gauge1h,
             gaugeCandles4h = gauge4h,
             stateInputs = com.aurum.edge.core.NeuralStateFeatures.fromReport(
@@ -2369,7 +2370,8 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                     if (!hasOpenSameStrategyTf &&
                         report.triggerBarTime > 0L && report.triggerBarTime != lastFiredBar
                     ) {
-                        val neuralEval = container.neuralEngine.evaluateReport(report)
+                        val ratings = ratingCache[report.symbol]
+                        val neuralEval = container.neuralEngine.evaluateReport(report, ratings?.first, ratings?.second, now)
 
                         val rawEntry = report.suggestedEntry
                         val rawSl = report.suggestedStopLoss
@@ -2648,7 +2650,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             container.settingsStore.update { cur ->
                 cur.copy(baseStrategyConfig = updatedCfg)
             }
-            _toast.value = "🎛️ تیونینگ خودکار پارامترها و ۲۴ ویژگی هر استراتژی‌های مشمول یادگیری (نسل #${tuned.tuningGeneration} · CEM + Bayesian) اعمال شد"
+            _toast.value = "🎛️ تیونینگ خودکار پارامترها و ۲۸ ویژگی هر استراتژی‌های مشمول یادگیری (نسل #${tuned.tuningGeneration} · CEM + Bayesian) اعمال شد"
             scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
         }
     }
@@ -2720,7 +2722,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     /**
      * آموزش یک‌جای شبکهٔ عصبی روی **همهٔ استراتژی‌های مشمول یادگیری و همهٔ نمادها**.
      *
-     * هر استراتژی پروفایل ۲۴ ویژگی و پارامترهای خودش را از دادهٔ اختصاصی‌اش می‌گیرد و در صورت
+     * هر استراتژی پروفایل ۲۸ ویژگی و پارامترهای خودش را از دادهٔ اختصاصی‌اش می‌گیرد و در صورت
      * کمبود داده، از تجربهٔ بقیهٔ استراتژی‌ها (یادگیری انتقالی) پر می‌شود. هم‌زمان «شخصیت» هر
      * نماد (روندسواری، نویز شدوی، اعتبار شکست، بهترین استراتژی و حد ضرر مناسبش) ساخته می‌شود و
      * در پیکربندی موتور اعمال می‌گردد.
@@ -2755,7 +2757,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             container.settingsStore.update { cur ->
                 cur.copy(baseStrategyConfig = updatedCfg)
             }
-            _toast.value = "🎯 تیونینگ هوشمند اختصاصی «${prof.strategyBadgeFa}» (نسل #${prof.tuningGeneration}) روی تمام ۲۴ ویژگی و پارامترها اعمال شد"
+            _toast.value = "🎯 تیونینگ هوشمند اختصاصی «${prof.strategyBadgeFa}» (نسل #${prof.tuningGeneration}) روی تمام ۲۸ ویژگی و پارامترها اعمال شد"
             scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
         }
     }
@@ -3363,7 +3365,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 }
                 if (reg.featureSlopes.isNotEmpty()) {
                     add("")
-                    add("شیب ۲۴ ویژگی (بر اساس اهمیت):")
+                    add("شیب ۲۸ ویژگی (بر اساس اهمیت):")
                     reg.featureSlopes.sortedByDescending { it.importancePct }.take(16).forEach { f ->
                         add(
                             "• ${f.featureTitleFa} — اهمیت ${R.pct(f.importancePct)} | β برد ${R.number(f.ridgeBetaWin, 3)} | " +
@@ -3621,15 +3623,16 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
 
         sections += NeuralCopySection(
             key = "features",
-            titleFa = "وزن ۲۴ ویژگی ایچیموکو در مغز شبکه",
+            titleFa = "وزن ۲۸ ویژگی ایچیموکو در مغز شبکه",
             lines = buildList {
+                add("چهار ورودی سنجش ۱H/۴H در مسیر جداگانه‌اند و سهم توجه ندارند؛ شاخص‌های دیگر اثر علّی نیستند.")
                 if (s.featureInsights.isEmpty()) add("وزن ویژگی‌ها هنوز محاسبه نشده است.")
                 val attnSpread = (s.featureInsights.maxOfOrNull { it.attentionPercent } ?: 0.0) -
                     (s.featureInsights.minOfOrNull { it.attentionPercent } ?: 0.0)
                 val uniformAttention = s.featureInsights.isNotEmpty() && attnSpread < 1.0
                 if (uniformAttention) {
                     add(
-                        "ℹ️ سهم توجه (Self-Attention) در حال حاضر یکنواخت است: هر یک از ۲۴ ویژگی " +
+                        "ℹ️ سهم توجه (Self-Attention) در حال حاضر یکنواخت است: هر یک از ۲۸ ویژگی " +
                             "${R.pct(s.featureInsights.first().attentionPercent)} — یعنی شبکه هنوز هیچ ویژگی را بر دیگری ترجیح نداده است. " +
                             "برای دیدن تفکیک واقعی، ستون «اثر خالص وزن» را بخوانید؛ این فهرست بر اساس همان اثر مرتب شده است.",
                     )
@@ -3638,7 +3641,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 s.featureInsights
                     .sortedByDescending { if (uniformAttention) kotlin.math.abs(it.netWeightImpact) else it.attentionPercent }
                     .forEach { f ->
-                        val attnPart = if (uniformAttention) "" else "سهم توجه ${R.pct(f.attentionPercent)} | "
+                        val attnPart = if (f.index >= 25) "مسیر جداگانه | " else if (uniformAttention) "" else "شاخص وزن خام ${R.pct(f.attentionPercent)} | "
                         add("• #${f.index} ${f.titleFa} — ${attnPart}اثر خالص وزن ${R.number(f.netWeightImpact, 3)} | ${f.impactLabelFa}")
                         if (f.explanationFa.isNotBlank()) add("   ${f.explanationFa}")
                     }

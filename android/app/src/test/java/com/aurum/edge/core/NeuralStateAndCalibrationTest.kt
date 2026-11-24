@@ -329,11 +329,11 @@ class NeuralStateAndCalibrationTest {
 
     @Test
     fun `network input dimension is sixteen plus eight state features`() {
-        assertEquals(24, NeuralSelfLearningEngine.INPUT_DIM)
+        assertEquals(28, NeuralSelfLearningEngine.INPUT_DIM)
         assertEquals(16, NeuralSelfLearningEngine.LEGACY_INPUT_DIM)
         assertEquals(
             NeuralSelfLearningEngine.INPUT_DIM,
-            NeuralSelfLearningEngine.LEGACY_INPUT_DIM + NeuralStateFeatures.COUNT,
+            NeuralSelfLearningEngine.LEGACY_INPUT_DIM + NeuralStateFeatures.COUNT + NeuralGaugeFeatures.COUNT,
         )
     }
     @Test
@@ -374,10 +374,10 @@ class NeuralStateAndCalibrationTest {
             confidence = 80.0, riskReward = 2.0, openedAt = 30_000_000L, closedAt = 31_000_000L, pnlUsd = 4.0,
             signalBarTime = 29_000_000L, neuralEntryObservation = observation)
         val (observed, key) = engine.extractConditionFeaturesForClosedTrade(trade)
-        assertEquals(features, observed)
+        assertEquals(features + List(4) { 0.0 }, observed)
         assertEquals("observation", key)
-        assertEquals(features, engine.buildJournalTrainingSamples(listOf(trade)).single().features)
-        val invalid = listOf(observation.copy(evaluatedAt = 30_000_001L), observation.copy(schema = 2),
+        assertEquals(observed, engine.buildJournalTrainingSamples(listOf(trade)).single().features)
+        val invalid = listOf(observation.copy(evaluatedAt = 30_000_001L), observation.copy(schema = 99),
             observation.copy(features = List(24) { Double.NaN }), observation.copy(signalBarTime = 28_000_000L))
         invalid.forEach { bad -> assertTrue(engine.extractConditionFeaturesForClosedTrade(trade.copy(neuralEntryObservation = bad)).second != "observation") }
     }
