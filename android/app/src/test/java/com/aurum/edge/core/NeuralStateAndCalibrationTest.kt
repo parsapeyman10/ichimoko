@@ -363,4 +363,23 @@ class NeuralStateAndCalibrationTest {
         assertEquals(0.0, missing[13], 0.0)
     }
 
+    @Test
+    fun `training uses the exact observed entry vector and rejects invalid snapshots`() {
+        val engine = NeuralSelfLearningEngine(context = null, storageFile = null)
+        val features = List(24) { (it - 12) / 24.0 }
+        val observation = NeuralEntryObservation(evaluatedAt = 30_000_000L, signalBarTime = 29_000_000L,
+            features = features, conditionKey = "observation", predictedWinProbability = 0.42, expectedR = 0.1)
+        val trade = PaperTrade(id = "snapshot", symbol = "XAU/USD", interval = com.aurum.edge.domain.Interval.M15,
+            action = com.aurum.edge.domain.SignalAction.BUY, entry = 100.0, stopLoss = 99.0, takeProfit = 102.0,
+            confidence = 80.0, riskReward = 2.0, openedAt = 30_000_000L, closedAt = 31_000_000L, pnlUsd = 4.0,
+            signalBarTime = 29_000_000L, neuralEntryObservation = observation)
+        val (observed, key) = engine.extractConditionFeaturesForClosedTrade(trade)
+        assertEquals(features, observed)
+        assertEquals("observation", key)
+        assertEquals(features, engine.buildJournalTrainingSamples(listOf(trade)).single().features)
+        val invalid = listOf(observation.copy(evaluatedAt = 30_000_001L), observation.copy(schema = 2),
+            observation.copy(features = List(24) { Double.NaN }), observation.copy(signalBarTime = 28_000_000L))
+        invalid.forEach { bad -> assertTrue(engine.extractConditionFeaturesForClosedTrade(trade.copy(neuralEntryObservation = bad)).second != "observation") }
+    }
+
 }

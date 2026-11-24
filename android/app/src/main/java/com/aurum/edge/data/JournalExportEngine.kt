@@ -667,6 +667,7 @@ object JournalExportEngine {
             "OpenedAt_EpochMs", "ClosedAt_EpochMs", "SignalBarTime_EpochMs", "Origin",
             "Tech1hBuy", "Tech1hNeutral", "Tech1hSell", "Tech4hBuy", "Tech4hNeutral", "Tech4hSell", "TechSnapshotRebuilt",
             "StateTrendPhase", "StateEr14", "StateAtrPct", "StateDistKijunAtr", "StateKumoThicknessAtr", "StateVolumeRatio20",
+            "NeuralSchema", "NeuralEvaluatedAt_EpochMs", "NeuralSignalBarTime_EpochMs", "NeuralFeatures", "NeuralConditionKey", "NeuralWinProbability", "NeuralExpectedR",
         )
         sb.append(headers.joinToString(",")).append("\r\n")
 
@@ -718,6 +719,10 @@ object JournalExportEngine {
                 t.tech4hBuy.takeIf { it >= 0 }?.toString().orEmpty(), t.tech4hNeutral.takeIf { it >= 0 }?.toString().orEmpty(), t.tech4hSell.takeIf { it >= 0 }?.toString().orEmpty(), t.techSnapshotRebuilt.toString(),
                 esc(t.stateTrendPhaseCode), t.stateEr14.takeIf { it >= 0 }?.toString().orEmpty(), t.stateAtrPctOfPrice.takeIf { it >= 0 }?.toString().orEmpty(),
                 t.stateDistKijunAtr.takeIf { it >= 0 }?.toString().orEmpty(), t.stateKumoThicknessAtr.takeIf { it >= 0 }?.toString().orEmpty(), t.stateVolumeRatio20.takeIf { it >= 0 }?.toString().orEmpty(),
+                t.neuralEntryObservation?.schema?.toString().orEmpty(), t.neuralEntryObservation?.evaluatedAt?.toString().orEmpty(),
+                t.neuralEntryObservation?.signalBarTime?.toString().orEmpty(), esc(t.neuralEntryObservation?.features?.joinToString("|").orEmpty()),
+                esc(t.neuralEntryObservation?.conditionKey.orEmpty()), t.neuralEntryObservation?.predictedWinProbability?.toString().orEmpty(),
+                t.neuralEntryObservation?.expectedR?.toString().orEmpty(),
             )
             sb.append(row.joinToString(",")).append("\r\n")
         }
@@ -1923,6 +1928,16 @@ function filterRows() {
             }.getOrNull()
             val openedEpoch = field("OpenedAt_EpochMs")?.toLongOrNull()?.takeIf { it > 0 } ?: legacyTime(9) ?: 0L
             val closedEpoch = field("ClosedAt_EpochMs")?.toLongOrNull()?.takeIf { it > 0 } ?: legacyTime(10)
+            val signalEpoch = field("SignalBarTime_EpochMs")?.toLongOrNull()?.takeIf { it > 0 && openedEpoch > 0 && it <= openedEpoch }
+            val observation = runCatching {
+                com.aurum.edge.core.NeuralEntryObservation(
+                    schema = field("NeuralSchema")!!.toInt(), evaluatedAt = field("NeuralEvaluatedAt_EpochMs")!!.toLong(),
+                    signalBarTime = field("NeuralSignalBarTime_EpochMs")!!.toLong(),
+                    features = field("NeuralFeatures")!!.split("|").map { it.toDouble() },
+                    conditionKey = field("NeuralConditionKey")!!, predictedWinProbability = field("NeuralWinProbability")!!.toDouble(),
+                    expectedR = field("NeuralExpectedR")!!.toDouble(),
+                )
+            }.getOrNull()?.takeIf { it.isUsableFor(openedEpoch) && it.signalBarTime == signalEpoch }
             PaperTrade(
                 id = tradeId,
                 symbol = sym,
@@ -1935,7 +1950,7 @@ function filterRows() {
                 riskReward = plannedRr,
                 openedAt = openedEpoch,
                 closedAt = if (isOpen) null else closedEpoch ?: 0L,
-                signalBarTime = field("SignalBarTime_EpochMs")?.toLongOrNull()?.takeIf { it > 0 && openedEpoch > 0 && it <= openedEpoch },
+                signalBarTime = signalEpoch, neuralEntryObservation = observation,
                 origin = field("Origin") ?: if (tradeId.startsWith("bt_", ignoreCase = true)) PaperTrade.ORIGIN_BACKTEST else "UNKNOWN",
                 tech1hBuy = intField("Tech1hBuy"), tech1hNeutral = intField("Tech1hNeutral"), tech1hSell = intField("Tech1hSell"),
                 tech4hBuy = intField("Tech4hBuy"), tech4hNeutral = intField("Tech4hNeutral"), tech4hSell = intField("Tech4hSell"),

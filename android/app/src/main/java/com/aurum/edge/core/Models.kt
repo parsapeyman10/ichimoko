@@ -182,6 +182,23 @@ data class PreEntry3CandleContext(
     val candles: List<PreEntryCandleSlot> = emptyList(),
 )
 
+/** پیش‌بینی مشاهده‌ای و بردار واقعی همان ارزیابی، نه نتیجه یا بازسازی تاریخی. */
+@Serializable
+data class NeuralEntryObservation(
+    val schema: Int = 1,
+    val evaluatedAt: Long,
+    val signalBarTime: Long,
+    val features: List<Double>,
+    val conditionKey: String,
+    val predictedWinProbability: Double,
+    val expectedR: Double,
+) {
+    fun isUsableFor(openedAt: Long): Boolean = schema == 1 && evaluatedAt > 0 && evaluatedAt <= openedAt &&
+        signalBarTime > 0 && signalBarTime <= evaluatedAt && features.size == 24 &&
+        features.all { it.isFinite() && it in -1.0..1.0 } && conditionKey.isNotBlank() &&
+        predictedWinProbability.isFinite() && predictedWinProbability in 0.0..1.0 && expectedR.isFinite()
+}
+
 @Serializable
 data class PaperTrade(
     val id: String,
@@ -203,6 +220,7 @@ data class PaperTrade(
     val positionUnit: String = "",
     val autoOpened: Boolean = false,
     val signalBarTime: Long? = null,
+    val neuralEntryObservation: NeuralEntryObservation? = null,
     val entryConditions: List<PaperConditionRecord> = emptyList(),
     val leverage: Int = 10,
     val marginUsd: Double = 0.0,

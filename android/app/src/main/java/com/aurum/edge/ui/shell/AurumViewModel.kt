@@ -1242,7 +1242,11 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         val effectiveNote = if (sessionWarningFa.isBlank()) note else "$note · $sessionWarningFa".trim(' ', '·')
         val matchedReport = _dualSymbolStrategyReports.value[normSym]
             ?.reportFor(entryInterval, strategyId)
-        val matchedBreakdown = matchedReport?.rrBreakdown
+        val entryReport = matchedReport?.takeIf {
+            signalBarTime != null && it.triggerBarTime == signalBarTime && it.action == calc.action
+        }
+        val entryObservation = entryReport?.let { container.neuralEngine.observeEntry(it, calc.riskReward, now) }
+        val matchedBreakdown = entryReport?.rrBreakdown
         val entryCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
         // سنجش تکنیکال ۱ ساعته و ۴ ساعته در همان لحظهٔ ورود ثبت می‌شود و بعداً تغییر نمی‌کند.
         val gauge1h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H1).filter { it.closed && it.time + 3_600_000L <= now }
@@ -1268,10 +1272,11 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             preEntryCandles = entryCandles,
             enforceProfitRisk = true,
             signalBarTime = signalBarTime,
+            neuralEntryObservation = entryObservation,
             gaugeCandles1h = gauge1h,
             gaugeCandles4h = gauge4h,
             stateInputs = com.aurum.edge.core.NeuralStateFeatures.fromReport(
-                report = matchedReport,
+                report = entryReport,
                 planRr = matchedBreakdown?.optimalRiskReward ?: calc.riskReward,
                 entryTimeMs = now,
             ),
@@ -1282,7 +1287,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 ?: "⛔ معامله باز نشد (همین لحظه روی همین نماد یا همین استراتژی معاملهٔ باز هست)"
             return
         }
-        val condRecords = matchedReport?.conditions?.map { c ->
+        val condRecords = entryReport?.conditions?.map { c ->
             com.aurum.edge.core.PaperConditionRecord(
                 name = c.titleFa,
                 status = if (c.passed) "CONFIRMED" else "BLOCKED",

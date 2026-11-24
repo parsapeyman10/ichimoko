@@ -2077,6 +2077,9 @@ class NeuralSelfLearningEngine(
         trade: PaperTrade,
         report: StrategyEvaluationReport? = null,
     ): Triple<List<Double>, String, String> {
+        trade.neuralEntryObservation?.takeIf { it.isUsableFor(trade.openedAt) && it.signalBarTime == trade.signalBarTime }?.let {
+            return Triple(it.features, it.conditionKey, "بردار ثبت‌شدهٔ ارزیابی واقعی در لحظهٔ ورود")
+        }
         // گزارش جاری یا کندل بازسازی‌شده الزاماً وضعیت قابل مشاهده هنگام ورود نیست.
         // فقط اسنپ‌شات ثبت‌شده در خود معامله به آموزش تاریخی وارد می‌شود.
         val pre3Code = trade.preEntry3CandleCategoryCode
@@ -2376,17 +2379,36 @@ class NeuralSelfLearningEngine(
             optimalRr = report.optimalRiskReward ?: 2.0,
             confidence = report.confidence,
             report = report,
+            entryTimeMs = System.currentTimeMillis(),
         )
         val baseEval = evaluateFeatures(
             symbol = report.symbol,
             features = features.toDoubleArray(),
             conditionKey = sigKey,
+            strategyId = report.strategyId,
         )
         return baseEval.copy(
             summaryFa = "${baseEval.summaryFa} · علت بازار: ${causalAttr.primaryCauseBadgeFa}",
             causalAttributionFa = "${causalAttr.whatIsHappeningFa} (${causalAttr.whyItIsHappeningFa})",
             newsCatalystFa = causalAttr.newsImpactSummaryFa,
         )
+    }
+
+    /** ارزیابی تازه هنگام ثبت؛ صرفاً دادهٔ مشاهده‌ای است و حق رد معامله ندارد. */
+    @Synchronized
+    fun observeEntry(report: StrategyEvaluationReport, planRr: Double, nowMs: Long): NeuralEntryObservation? {
+        if (!BitcoinStrategyModel.fromId(report.strategyId).neuralLearningEnabled || report.triggerSnapshot == null ||
+            report.triggerBarTime <= 0 || report.triggerBarTime > nowMs || !planRr.isFinite()) return null
+        val (features, key, _) = extractConditionFeatures(
+            symbolInput = report.symbol, action = report.action, interval = report.triggerInterval,
+            strategyId = report.strategyId, optimalRr = planRr, confidence = report.confidence,
+            report = report, entryTimeMs = nowMs,
+        )
+        if (features.size != INPUT_DIM || features.any { !it.isFinite() || it !in -1.0..1.0 }) return null
+        val evaluation = evaluateFeatures(report.symbol, features.toDoubleArray(), key, report.strategyId)
+        return NeuralEntryObservation(evaluatedAt = nowMs, signalBarTime = report.triggerBarTime,
+            features = features, conditionKey = key, predictedWinProbability = evaluation.predictedWinProb,
+            expectedR = evaluation.expectedR).takeIf { it.isUsableFor(nowMs) }
     }
 
     /**
@@ -2411,10 +2433,11 @@ class NeuralSelfLearningEngine(
         symbol: String,
         features: DoubleArray,
         conditionKey: String,
+        strategyId: String? = null,
     ): NeuralSignalEvaluation {
         val normSym = V1Universe.normalize(symbol)
         val featList = features.toList()
-        val (neuralWinProb, neuralExpectedR) = forwardPass(featList, persistedState, symbol = normSym)
+        val (neuralWinProb, neuralExpectedR) = forwardPass(featList, persistedState, strategyId = strategyId, symbol = normSym)
         val cluster = persistedState.conditionClusters[conditionKey]
 
         val blendedWinProb = if (cluster != null && cluster.totalCount >= 2) {
@@ -2455,7 +2478,7 @@ class NeuralSelfLearningEngine(
             expectedR = blendedExpectedR,
             clusterFlaggedNoTrade = cluster?.isFlaggedNoTradeRegime == true,
             clusterSamples = cluster?.totalCount ?: 0,
-            tunedGatePct = strategyGatePct(persistedState, normSym, conditionKey),
+            tunedGatePct = strategyGatePct(persistedState, normSym, strategyId.orEmpty()),
         )
         // «پرخطر» = زیر کف پلهٔ فعلی؛ «مسدود» = گیت در مدار است و همان شرط‌ها را اعمال می‌کند.
         val isNoTrade = policy.blocksTrade ||
@@ -2581,7 +2604,9 @@ class NeuralSelfLearningEngine(
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
         val features = featuresOverride?.toList() ?: extractedFeatures
-        val sigKey = conditionKeyOverride?.takeIf { it.isNotBlank() } ?: noteConditionKey ?: extractedKey
+        val sigKey = conditionKeyOverride?.takeIf { it.isNotBlank() }
+            ?: trade.neuralEntryObservation?.takeIf { it.isUsableFor(trade.openedAt) && it.signalBarTime == trade.signalBarTime }?.conditionKey
+            ?: noteConditionKey ?: extractedKey
 
         // تحلیل خطای پس از خروج از روی کندل‌های ذخیره‌شده ۱ ماهه در حافظه گوشی (Mistake Forensics Feedback)
         val vaultMistake = if (!won && deepForensics) {
@@ -3881,7 +3906,7 @@ class NeuralSelfLearningEngine(
                 val (features, key, descFa) = extractConditionFeaturesForClosedTrade(trade, null)
                 if (features.size != INPUT_DIM) return@mapNotNull null
                 val state = NeuralStateFeatures.fromTrade(trade)
-                val session = NeuralStateFeatures.sessionCodeOf(trade.openedAt).ifBlank { "نامعلوم" }
+                val session = NeuralStateFeatures.sessionCodeOf(trade.openedAt.takeIf { it > 0L } ?: -1L).ifBlank { "نامعلوم" }
                 val phase = state.trendPhaseCode.ifBlank { "نامعلوم" }
                 JournalTrainingSample(
                     trade = trade,
