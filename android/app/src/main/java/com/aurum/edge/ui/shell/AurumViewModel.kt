@@ -1265,7 +1265,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         }
         val cloudLesson = com.aurum.edge.core.CloudLifetimeEvidence.lesson(
             trades.value, normSym, strategyId, entryInterval, calc.action, now)
-        val cloudNote = (cloudEvidence?.textFa() ?: "سن و انتهای ابر نامعلوم؛ دادهٔ هم‌زمان کافی نیست") + " · " + cloudLesson.textFa()
+        val structure = matchedReport?.takeIf { cloudBar != null }?.let { com.aurum.edge.core.TrendStructureEvidence.extract(it) }
+        val cloudNote = (cloudEvidence?.textFa() ?: "سن و انتهای ابر نامعلوم؛ دادهٔ هم‌زمان کافی نیست") + " · " +
+            (structure?.textFa() ?: "ساختار کندل سیگنال نامعلوم") + " · " + cloudLesson.textFa()
         // سنجش تکنیکال ۱ ساعته و ۴ ساعته در همان لحظهٔ ورود ثبت می‌شود و بعداً تغییر نمی‌کند.
         val gauge1h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H1).filter { it.closed && it.time + 3_600_000L <= now }
         val gauge4h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H4).filter { it.closed && it.time + 14_400_000L <= now }

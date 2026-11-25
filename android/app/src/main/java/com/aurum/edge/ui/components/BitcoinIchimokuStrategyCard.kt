@@ -511,6 +511,13 @@ private fun Live12ConditionChecklistPage(
             color = if (cloudPreview?.longNearTwist == true) AurumColors.Gold else AurumColors.TextSecondary,
         )
 
+        val structureEvidence = remember(report) { com.aurum.edge.core.TrendStructureEvidence.extract(report) }
+        Text(
+            text = "🔎 " + (structureEvidence?.textFa() ?: "ساختار جهت‌دار کندل سیگنال نامعلوم است."),
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextSecondary,
+        )
+
         val statusColor = when (report.readiness) {
             StrategyReadinessState.SIGNAL_BUY -> AurumColors.Green
             StrategyReadinessState.SIGNAL_SELL -> AurumColors.Red
