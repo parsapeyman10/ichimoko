@@ -59,6 +59,8 @@ class AppContainer(context: Context) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + appExceptionHandler)
 
     private var protectionMonitorJob: kotlinx.coroutines.Job? = null
+    private val _unprotectedQuoteSymbols = MutableStateFlow<Set<String>>(emptySet())
+    val unprotectedQuoteSymbols: StateFlow<Set<String>> = _unprotectedQuoteSymbols.asStateFlow()
 
     /** One process-wide monitor, also started by a restarted foreground service. */
     @Synchronized
@@ -69,16 +71,19 @@ class AppContainer(context: Context) {
                 val symbols = journalStore.trades.value.filter { it.isOpen }
                     .map { com.aurum.edge.core.V1Universe.normalize(it.symbol) }.distinct()
                     .filterNot { com.aurum.edge.core.MarketHours.closedFor(it, System.currentTimeMillis()) }
-                kotlinx.coroutines.coroutineScope {
+                val results = kotlinx.coroutines.coroutineScope {
                     symbols.map { symbol -> async {
-                        runCatching {
+                        val ok = runCatching {
                             val tick = com.aurum.edge.data.LiveQuoteFetcher.fetchLiveTick(symbol)
                             if (tick != null && com.aurum.edge.core.TradeQuotePolicy.accepts(tick)) {
                                 journalStore.onLiveTick(symbol, tick)
-                            }
-                        }
+                                true
+                            } else false
+                        }.getOrDefault(false)
+                        symbol to ok
                     } }.awaitAll()
                 }
+                _unprotectedQuoteSymbols.value = results.filterNot { it.second }.map { it.first }.toSet()
                 delay(if (symbols.isEmpty()) 10_000L else 3_000L)
             }
         }

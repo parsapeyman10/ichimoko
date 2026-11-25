@@ -210,6 +210,16 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 syncBackgroundServiceState()
             }
         }
+        container.appScope.launch {
+            container.journalStore.protectionStorageError.collect { failed ->
+                if (failed) _toast.value = "⚠️ ذخیرهٔ محافظت روی گوشی ناموفق است؛ حد پس از توقف برنامه تضمین نیست."
+            }
+        }
+        container.appScope.launch {
+            container.unprotectedQuoteSymbols.collect { missing ->
+                if (missing.isNotEmpty()) _toast.value = "⚠️ قیمت معتبر برای ${missing.joinToString()} در دسترس نیست؛ حفاظت Paper ممکن است اجرا نشود."
+            }
+        }
         syncBackgroundServiceState()
         startLiveMonitor()
     }
@@ -343,7 +353,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             val symbol = V1Universe.normalize(trade.symbol)
             val lastTick = latestTicks[symbol] ?: _liveTicks.value[symbol]
             val lastPrice = lastTick?.price?.takeIf { it.isFinite() && it > 0.0 }
-            val tickIsFresh = lastTick?.let { now - it.at < 15 * 60_000L } == true
+            val tickIsFresh = lastTick?.let { com.aurum.edge.core.TradeQuotePolicy.accepts(it, now) } == true
             val plan = SessionExitPlanner.plan(
                 symbol = symbol,
                 now = now,
@@ -616,7 +626,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 }
 
                 if (notifyOnSuccess && totalTriggered == 0 && lastSummary != null) {
-                    _toast.value = "✅ ${lastSummary.candlesCount} کندل ساعات قطعی (${lastSummary.symbol}) بازیابی و تا این لحظه همگام شد"
+                    _toast.value = "⚠️ ${lastSummary.candlesCount} کندل ${lastSummary.symbol} دریافت شد؛ خروج زمان قطعی نامعلوم است و فقط قیمت معتبر فعلی بررسی می‌شود."
                 }
             } finally {
                 _isBackfilling.value = false
@@ -723,18 +733,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
 
         _backfillSummaries.value = _backfillSummaries.value + (symbol to summary)
 
-        // Chronologically replay the gap candles against open trades for this symbol
-        val autoClosed = container.journalStore.onBackfillCandles(symbol, candles)
-        if (autoClosed.isNotEmpty()) {
-            val first = autoClosed.first()
-            val pnlStr = String.format(Locale.US, "%s$%.2f", if (first.netPnlUsd >= 0) "+" else "", first.netPnlUsd)
-            _toast.value = when (first.kind) {
-                AutoExitKind.TAKE_PROFIT ->
-                    "🎯 در ساعات قطعی، ${first.symbol} به حد سود (TP) رسیده و خودکار در ژورنال ثبت شد ($pnlStr)"
-                AutoExitKind.STOP_LOSS ->
-                    "🛑 در ساعات قطعی، ${first.symbol} به حد ضرر (SL) رسیده و خودکار در ژورنال ثبت شد ($pnlStr)"
-            }
-        }
+        // OHLC cannot establish execution order, source identity or a fill price.
+        // Keep the trade open and wait for a valid current quote instead.
+        val autoClosed = emptyList<com.aurum.edge.core.AutoExitEvaluation>()
 
         // Also update the latest price tick from the newest candle close + live quote
         val liveTick = LiveQuoteFetcher.fetchLiveTick(symbol) ?: PriceTick(
@@ -778,6 +779,8 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             }
             _toast.value = msg
         }
+
+        if (!com.aurum.edge.core.TradeQuotePolicy.accepts(tick)) return
 
         // شکار لحظه‌ای نقطه‌زنی ورود (Real-Time Sniper Pocket Fill) روی هر دو تایم‌فریم 15m و 5m و همه استراتژی‌های فعال (با الزام قطعی R:R >= 1:1.5)
         val cfg = settings.value
@@ -2361,7 +2364,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                     val matchingReport = dual.reportFor(openTrade.interval, openTrade.strategyId)
                     // خروج تکنیکال فقط با قیمت تازه و سود خالص دست‌کم ۱٫۵R؛ SL/TP و خروج‌های حفاظتی مستقل‌اند.
                     val quote = latestTicks[V1Universe.normalize(symbol)] ?: _liveTicks.value[V1Universe.normalize(symbol)]
-                    val px = quote?.takeIf { it.at <= now && now - it.at <= 60_000L && it.price.isFinite() && it.price > 0.0 }?.price
+                    val px = quote?.takeIf { com.aurum.edge.core.TradeQuotePolicy.accepts(it, now) && it.at <= now }?.price
                     val score = com.aurum.edge.core.WeightedTechnicalRating.score(openTrade.action,
                         freshTechnicalRating(symbol, Interval.H1, now), freshTechnicalRating(symbol, Interval.H4, now))
                     val net = px?.let { RiskAndCalendarEngine.computeExitPnlUsd(openTrade, it).second }
@@ -2445,10 +2448,14 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                         val rawTp = report.primaryTakeProfit
                         if (rawEntry != null && rawSl != null && rawTp != null) {
                             // لنگر انداختن نقطهٔ ورود، حد ضرر و حد سود به قیمت لحظه‌ای اجرا + دالان نوسان تایم‌فریم
-                            val liveTickPrice = _liveTicks.value[symbol]?.price?.takeIf { it.isFinite() && it > 0.0 }
-                            val executionEntry = liveTickPrice
-                                ?: report.livePrice?.takeIf { it.isFinite() && it > 0.0 }
-                                ?: rawEntry
+                            val validQuote = _liveTicks.value[symbol]?.takeIf {
+                                com.aurum.edge.core.TradeQuotePolicy.accepts(it) && it.at <= System.currentTimeMillis()
+                            }
+                            if (validQuote == null) {
+                                _toast.value = "⚠️ ورود $symbol انجام نشد: قیمت با زمان معتبر موجود نیست."
+                                continue
+                            }
+                            val executionEntry = validQuote.price
                             val desiredRr = (report.optimalRiskReward ?: RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
                                 .coerceAtLeast(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
                             val guarded = TradePlanGuard.rebaseToLive(

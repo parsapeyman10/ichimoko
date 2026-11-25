@@ -105,14 +105,14 @@ class RiskAndCalendarEngineTest {
         assertTrue(openedBuy.isOpen)
 
         // Price between SL and TP -> remains open
-        val midHits = journalStore.onLiveTick("XAU/USD", PriceTick(price = 2612.0, at = day1Millis + 5000L))
+        val midHits = journalStore.onLiveTick("XAU/USD", PriceTick(price = 2612.0, at = day1Millis + 5000L), nowMillis = day1Millis + 5000L)
         assertTrue(midHits.isEmpty())
         assertEquals(1, journalStore.trades.value.count { it.isOpen })
 
         // Price reaches TP -> auto-closed at TP!
         // نکته: TP حالا کارمزد را هم پوشش می‌دهد، پس چند سنت دورتر از ۲۶۲۰٫۰۰ است.
         assertTrue(journalStore.trades.value.first().takeProfit > 2620.0)
-        val tpHits = journalStore.onLiveTick("XAU/USD", PriceTick(price = 2621.0, at = day1Millis + 10_000L))
+        val tpHits = journalStore.onLiveTick("XAU/USD", PriceTick(price = 2621.0, at = day1Millis + 10_000L), nowMillis = day1Millis + 10_000L)
         assertEquals(1, tpHits.size)
         assertEquals(AutoExitKind.TAKE_PROFIT, tpHits.first().kind)
         assertEquals(0, journalStore.trades.value.count { it.isOpen })
@@ -129,7 +129,7 @@ class RiskAndCalendarEngineTest {
             takeProfit = 64000.0,
         )!!
         journalStore.openTrade(calcSell, note = "تست فروش بیت‌کوین", now = day2Millis)
-        val slHits = journalStore.onLiveTick("BTC/USDT", PriceTick(price = 65510.0, at = day2Millis + 15_000L))
+        val slHits = journalStore.onLiveTick("BTC/USDT", PriceTick(price = 65510.0, at = day2Millis + 15_000L), nowMillis = day2Millis + 15_000L)
         assertEquals(1, slHits.size)
         assertEquals(AutoExitKind.STOP_LOSS, slHits.first().kind)
 
@@ -198,15 +198,8 @@ class RiskAndCalendarEngineTest {
         assertEquals(2645.0, summary.periodLow, 0.001)
 
         val hits = journalStore.onBackfillCandles("XAU/USD", gapCandles)
-        assertEquals(1, hits.size)
-        val hit = hits.first()
-        assertTrue(hit.fromBackfill)
-        assertEquals(AutoExitKind.TAKE_PROFIT, hit.kind)
-        // حد سود همان چیزی است که در ژورنال ذخیره شده (۲۶۷۰ + پوشش کارمزد ≈ ۲۶۷۰٫۶۰)
-        assertEquals(journalStore.trades.value.first().takeProfit, hit.exitPrice, 0.001)
-        assertTrue(hit.exitPrice in 2670.0..2672.5)
-        assertEquals(hour3, hit.closedAt) // Closed at the exact hour-3 candle when TP was touched!
-        assertFalse(journalStore.trades.value.first().isOpen)
+        assertTrue(hits.isEmpty())
+        assertTrue(journalStore.trades.value.first().isOpen)
     }
 
     @Test

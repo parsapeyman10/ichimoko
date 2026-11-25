@@ -87,30 +87,16 @@ class TradeOutcomeExplainerTest {
     }
 
     @Test
-    fun aWinReportsThePathAndTheResult() {
-        val t = trade()
-        val candles = series(t.openedAt, 15, 900_000L, step = 0.15, start = 100.0)
-        val explanation = TradeOutcomeExplainer.explain(t, candles)
-        assertTrue(explanation.headlineFa.startsWith("برد"))
-        assertTrue(explanation.headlineFa.contains("دلار"))
-        assertTrue(explanation.reasonsFa.any { it.contains("بیشترین حرکت مساعد") })
-        assertTrue(explanation.mfeR > 0.0)
-        assertTrue(explanation.barsHeld > 0)
-        assertTrue(explanation.textFa().contains("•"))
-    }
-
-    @Test
-    fun aLossThatWentIntoSixTenthsOfRIsTaggedAsGaveBack() {
-        // قیمت اول ۰٫۹R بالا رفت و بعد تا حد ضرر برگشت.
-        val t = trade(exit = 99.0, pnl = -5.0, exitReason = "حد ضرر")
-        val up = series(t.openedAt, 6, 900_000L, step = 0.15, start = 100.0)
-        val down = series(t.openedAt + 6 * 900_000L, 6, 900_000L, step = -0.25, start = 100.9)
-        val explanation = TradeOutcomeExplainer.explain(t, up + down)
-        assertTrue(explanation.headlineFa.startsWith("باخت"))
-        assertTrue(
-            "باید برچسب «سود رفت و برگشت» بخورد: ${explanation.tags}",
-            TradeOutcomeExplainer.Tags.GAVE_BACK_PROFIT in explanation.tags,
-        )
+    fun unknownVenueCandlesDoNotCreateProfitPathForCrypto() {
+        val t = trade(exit = 99.0, pnl = -5.0)
+        val candles = series(t.openedAt, 6, 900_000L, step = 0.15, start = 100.0)
+        val result = TradeOutcomeExplainer.explain(t, candles)
+        assertEquals(-1.0, result.mfeR, 0.0)
+        assertEquals(0, result.barsHeld)
+        assertFalse(result.tags.contains(TradeOutcomeExplainer.Tags.GAVE_BACK_PROFIT))
+        assertTrue(result.textFa().contains("منشأ"))
+        val old = t.copy(mfeR = 1.5, outcomeTags = listOf(TradeOutcomeExplainer.Tags.GAVE_BACK_PROFIT))
+        assertFalse(TradeOutcomeExplainer.tagsOf(old).contains(TradeOutcomeExplainer.Tags.GAVE_BACK_PROFIT))
     }
 
     @Test
@@ -174,9 +160,9 @@ class TradeOutcomeExplainerTest {
         val fullyInside = Candle(1_000_000L, 100.0, 100.2, 99.9, 100.1, closed = true)
         val overlapsExit = Candle(1_900_000L, 100.1, 120.0, 98.0, 119.0, closed = true)
         val result = TradeOutcomeExplainer.explain(t, listOf(fullyInside, overlapsExit))
-        assertEquals(1, result.barsHeld)
-        assertEquals(0.2, result.mfeR, 1e-9)
-        assertTrue(result.reasonsFa.any { it.contains("UTC") && it.contains("کندل کامل") })
+        assertEquals(0, result.barsHeld)
+        assertEquals(-1.0, result.mfeR, 1e-9)
+        assertTrue(result.reasonsFa.any { it.contains("منشأ") })
         assertFalse(result.tags.contains(TradeOutcomeExplainer.Tags.GAVE_BACK_PROFIT))
     }
 

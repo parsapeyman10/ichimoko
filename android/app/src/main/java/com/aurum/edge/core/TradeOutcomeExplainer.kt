@@ -112,7 +112,7 @@ object TradeOutcomeExplainer {
         val closedAt = trade.closedAt ?: 0L
         // Legacy gold candles can mix futures, spot and token prices with no per-bar provenance.
         // They are not evidence of the quotes that protected this paper trade.
-        val unverifiedGold = V1Universe.normalize(trade.symbol) == "XAU/USD"
+        val unverifiedGold = true // No stored per-bar execution-venue provenance exists for any symbol.
         if (!unverifiedGold && candles.isNotEmpty() && risk > 1e-9) {
             val window = candles.filter { it.closed && it.time >= openedAt && closedAt > 0 &&
                 it.time <= closedAt - trade.interval.millis }
@@ -162,7 +162,7 @@ object TradeOutcomeExplainer {
                     else -> "سود شناور ثبت‌شده محدود بود؛ ترتیب دقیق حرکت مشخص نیست."
                 }
         }
-        if (mfeR < 0.0) reasons += if (unverifiedGold) "مسیر طلا نامشخص است: منشأ کندل‌های ذخیره‌شده و تطابق آن با قیمت معامله ثبت نشده؛ سقف و کف کندل اثبات تیک یا فعال‌شدن قفل نیست." else "کندل کامل قابل اتکا در بازهٔ ورود تا خروج موجود نیست؛ مسیر قابل تعیین نیست."
+        if (mfeR < 0.0) reasons += if (unverifiedGold) "مسیر معامله نامشخص است: منشأ کندل‌های ذخیره‌شده و تطابق آن با قیمت معامله ثبت نشده؛ سقف و کف کندل اثبات تیک یا فعال‌شدن قفل نیست." else "کندل کامل قابل اتکا در بازهٔ ورود تا خروج موجود نیست؛ مسیر قابل تعیین نیست."
         if (!isWin && mfeR >= 0.0 && mfeR < 0.2) tags += Tags.NEVER_IN_PROFIT
         if (!isWin && mfeR >= 0.8 && finalR < 0.0) tags += Tags.GAVE_BACK_PROFIT
         if (isWin && mfeR >= 0.0 && mfeR - finalR >= 1.0) tags += Tags.LEFT_RUNNER
@@ -298,17 +298,14 @@ object TradeOutcomeExplainer {
      * می‌شوند (اگر هنگام بسته شدن توضیح ساخته شده باشد) یا از وضعیت ثبت‌شدهٔ ورود بازسازی می‌شوند.
      */
     fun tagsOf(trade: PaperTrade): List<String> {
-        if (trade.outcomeTags.isNotEmpty()) return trade.outcomeTags
+        val unverifiedPathTags = setOf(Tags.NEVER_IN_PROFIT, Tags.GAVE_BACK_PROFIT, Tags.LEFT_RUNNER, Tags.FAST_WIN, Tags.SLOW_BLEED)
+        if (trade.outcomeTags.isNotEmpty()) return trade.outcomeTags.filterNot { it in unverifiedPathTags }
         val tags = mutableListOf<String>()
         if (trade.stateKumoThicknessAtr >= 0.8) tags += Tags.HEAVY_KUMO
         if (trade.stateDistKijunAtr >= 1.5) tags += Tags.LATE_ENTRY
         if (trade.stateEr14 in 0.0..0.25) tags += Tags.CHOP
         if (trade.stateEr14 >= 0.45) tags += Tags.CLEAN_TREND
         if (trade.stateVolumeRatio20 in 0.0..0.8) tags += Tags.THIN_VOLUME
-        if (trade.mfeR >= 0.0 && (trade.pnlUsd ?: 0.0) < 0.0) {
-            if (trade.mfeR < 0.2) tags += Tags.NEVER_IN_PROFIT
-            if (trade.mfeR >= 0.8) tags += Tags.GAVE_BACK_PROFIT
-        }
         return tags
     }
 

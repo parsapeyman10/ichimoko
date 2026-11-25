@@ -131,7 +131,48 @@ class JournalStore(
 
     /** خواندن همگام و سبک فایل اصلی دفترچه (بدون شاردها). */
     @Synchronized
-    private fun loadLocalJournal(): List<PaperTrade> = ensureSequentialTradeNumbers(readLocalFile())
+    private fun loadLocalJournal(): List<PaperTrade> {
+        val local = readLocalFile()
+        val saved = runCatching {
+            val atomic = android.util.AtomicFile(File(file.path + ".protection"))
+            json.decodeFromString(listSerializer, atomic.openRead().bufferedReader().use { it.readText() })
+        }.getOrDefault(emptyList()).associateBy { it.id }
+        return ensureSequentialTradeNumbers(local.map { trade ->
+            val checkpoint = saved[trade.id]
+            val newer = checkpoint != null && checkpoint.isOpen && trade.isOpen &&
+                checkpoint.openedAt == trade.openedAt && checkpoint.action == trade.action &&
+                checkpoint.stopUpdatedAt != null && checkpoint.stopUpdatedAt >= (trade.stopUpdatedAt ?: trade.openedAt)
+            val better = if (!newer) false else when (trade.action) {
+                SignalAction.BUY -> checkpoint!!.stopLoss > trade.stopLoss
+                SignalAction.SELL -> checkpoint!!.stopLoss < trade.stopLoss
+                else -> false
+            }
+            if (better) trade.copy(stopLoss = checkpoint!!.stopLoss,
+                initialStopLoss = trade.initialStopLoss ?: checkpoint.initialStopLoss,
+                stopUpdatedAt = checkpoint.stopUpdatedAt, note = checkpoint.note) else trade
+        })
+    }
+
+    /** Synchronous, small crash-recovery checkpoint written before publishing a new lock. */
+    private fun checkpointProtection(trades: List<PaperTrade>): Boolean {
+        val atomic = android.util.AtomicFile(File(file.path + ".protection"))
+        return try {
+            file.parentFile?.mkdirs()
+            val out = atomic.startWrite()
+            try {
+                out.write(json.encodeToString(listSerializer, trades.filter { it.isOpen && it.stopUpdatedAt != null }).toByteArray(Charsets.UTF_8))
+                out.fd.sync()
+                atomic.finishWrite(out)
+            } catch (e: Exception) {
+                atomic.failWrite(out)
+                throw e
+            }
+            true
+        } catch (_: Exception) { false }
+    }
+
+    private val _protectionStorageError = MutableStateFlow(false)
+    val protectionStorageError: StateFlow<Boolean> = _protectionStorageError.asStateFlow()
 
     /**
      * ادغام پس‌زمینه‌ای شاردهای روزانه با آنچه همین حالا در حافظه است.
@@ -648,6 +689,7 @@ class JournalStore(
     fun onLiveTick(symbolInput: String, tick: PriceTick, nowMillis: Long = System.currentTimeMillis()): List<AutoExitEvaluation> {
         val symbol = V1Universe.normalize(symbolInput)
         val current = _trades.value
+        if (!com.aurum.edge.core.TradeQuotePolicy.accepts(tick, nowMillis)) return emptyList()
         if (tick.isTradeTick && tick.price.isFinite() && tick.price > 0.0) {
             val last = lastProcessedTickAt[symbol]
             if (last != null && tick.at < last) return emptyList()
@@ -695,7 +737,8 @@ class JournalStore(
             }
         }
         if (protectedAny && triggered.isEmpty()) {
-            // Publish the stop atomically now; serialize the latest state on IO, never on the tick itself.
+            // Durable checkpoint first; full journal and backups still run off the tick path.
+            _protectionStorageError.value = !checkpointProtection(updated)
             _trades.value = ensureSequentialTradeNumbers(updated)
             ioScope.launch { synchronized(this@JournalStore) { persist(_trades.value) } }
         }
@@ -727,68 +770,12 @@ class JournalStore(
         return triggered
     }
 
-    /**
-     * Chronologically evaluates historical OHLC candles (fetched after an offline gap)
-     * against all open trades for [symbolInput]. Any trade whose TP or SL was hit during
-     * the offline hours is closed at the exact candle timestamp and settled in the journal.
-     */
+    /** Historical candles have no same-feed tick provenance or intra-bar execution order.
+     * They are for review only and must never settle an open paper position. */
     @Synchronized
     fun onBackfillCandles(symbolInput: String, candles: List<Candle>): List<AutoExitEvaluation> {
-        val symbol = V1Universe.normalize(symbolInput)
-        val current = _trades.value
-        if (candles.isEmpty() || current.none { it.isOpen && V1Universe.normalize(it.symbol) == symbol }) {
-            return emptyList()
-        }
-        val triggered = mutableListOf<AutoExitEvaluation>()
-        val closedTradesForAlarm = mutableListOf<Pair<PaperTrade, Boolean>>()
-        val updated = current.map { trade ->
-            if (!trade.isOpen || V1Universe.normalize(trade.symbol) != symbol) {
-                trade
-            } else {
-                val hit = RiskAndCalendarEngine.evaluateCandleWindow(trade, candles)
-                if (hit != null) {
-                    triggered += hit
-                    val isProfit = hit.kind == com.aurum.edge.core.AutoExitKind.TAKE_PROFIT || hit.netPnlUsd > 0.0
-                    val closedTrade = trade.copy(
-                        closedAt = hit.closedAt,
-                        exitPrice = hit.exitPrice,
-                        exitReason = "${hit.kind.reasonFa} · بازیابی ساعات قطعی",
-                        pnlUsd = hit.netPnlUsd,
-                    )
-                    val explained = explainClosedTrade(closedTrade, candles)
-                    closedTradesForAlarm += explained to isProfit
-                    explained
-                } else {
-                    trade
-                }
-            }
-        }
-        if (triggered.isNotEmpty()) {
-            persist(updated)
-            val totalDelta = triggered.sumOf { it.netPnlUsd }
-            settingsStore?.adjustBalance(totalDelta)
-            val cfg = settingsStore?.read()
-            val alarmEnabled = cfg?.notifyOnSignal != false
-            val soundUri = cfg?.alertSoundUri.orEmpty()
-            closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
-                if (isProfit) {
-                    com.aurum.edge.notify.TradeEventAlarmManager.triggerTakeProfitAlarm(
-                        context = appContext,
-                        trade = closedTrade,
-                        enabled = alarmEnabled,
-                        customSoundUri = soundUri,
-                    )
-                } else {
-                    com.aurum.edge.notify.TradeEventAlarmManager.triggerStopLossAlarm(
-                        context = appContext,
-                        trade = closedTrade,
-                        enabled = alarmEnabled,
-                        customSoundUri = soundUri,
-                    )
-                }
-            }
-        }
-        return triggered
+        // Keep the API for callers; do not fabricate a historical fill from OHLC.
+        return emptyList()
     }
 
     private fun explainClosedTrade(trade: PaperTrade, candles: List<Candle> = LiveQuoteFetcher.peekMemoryCandles(trade.symbol, trade.interval)): PaperTrade = runCatching {
@@ -801,7 +788,7 @@ class JournalStore(
     fun refreshClosedTradeExplanation(tradeId: String, candles: List<Candle>): Boolean {
         val target = _trades.value.firstOrNull { it.id == tradeId && !it.isOpen } ?: return false
         val result = com.aurum.edge.core.TradeOutcomeExplainer.explain(target, candles)
-        if (result.barsHeld == 0 && V1Universe.normalize(target.symbol) != "XAU/USD") return false
+        // Refresh also removes historical path tags whose venue cannot be established.
         val updated = target.copy(outcomeReasonFa = result.textFa(), outcomeTags = result.tags, mfeR = result.mfeR, maeR = result.maeR)
         persist(_trades.value.map { if (it.id == tradeId) updated else it })
         return true

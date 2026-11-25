@@ -2179,10 +2179,10 @@ internal fun OfflineGapBackfillCard(
 ) {
     SectionCard(
         title = "🔄 بازیابی دیتای ساعات قطعی (Backfill)",
-        subtitle = "دریافت یکجای کندل‌های ساعاتی که آفلاین بودید و بررسی خودکار برخورد High/Low به TP و SL",
+        subtitle = "کندل فقط برای بررسی است؛ ترتیب، قیمت و زمان خروج در قطعی نامعلوم است و معامله با کندل بسته نمی‌شود. قیمت نامعتبر نیز محافظت نمی‌کند.",
         trailing = {
             Pill(
-                text = if (isBackfilling) "در حال دریافت..." else if (summary != null) "همگام تا این لحظه ✓" else "آماده همگام‌سازی",
+                text = if (isBackfilling) "در حال دریافت..." else if (summary != null) "کندل دریافت شد" else "آماده همگام‌سازی",
                 color = if (isBackfilling) AurumColors.Gold else if (summary != null) AurumColors.Green else AurumColors.Cyan,
             )
         },
@@ -2234,7 +2234,7 @@ internal fun OfflineGapBackfillCard(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "بازهٔ پوشش: از ${formatDateTime(summary.fromMillis)} تا ${formatDateTime(summary.toMillis)}",
+                    text = "زمان شروع نخستین تا آخرین کندل دریافتی: از ${formatDateTime(summary.fromMillis)} تا ${formatDateTime(summary.toMillis)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
                 )
@@ -3302,7 +3302,7 @@ private fun ClosedJournalTradeRow(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    Text("مسیرهای قدیمی ممکن است منبع نامرتبط یا بخشی از کندل خروج داشته باشند. بازخوانی کنید؛ کندل تاریخی اثبات تیک یا اجرای قفل نیست. ساعت مسیر UTC است و ساعت کارت محلی است.", color = AurumColors.TextMuted, fontSize = 9.sp)
+                    Text("گزارش قدیمی همهٔ نمادها ممکن است کندل نامرتبط داشته باشد؛ برای حذف اعداد و برچسب‌های نامطمئن بازخوانی کنید. کندل تاریخی اثبات تیک یا اجرای قفل نیست.", color = AurumColors.TextMuted, fontSize = 9.sp)
                     TextButton(onClick = onRefreshPath) { Text("بازخوانی مسیر کندل‌های این معامله") }
                     Text(
                         text = trade.outcomeReasonFa.ifBlank {

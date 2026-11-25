@@ -731,8 +731,8 @@ object RiskAndCalendarEngine {
         if (valid.isEmpty()) return null
         return CandleBackfillSummary(
             symbol = V1Universe.normalize(symbolInput),
-            fromMillis = minOf(requestedFromMillis, valid.first().time),
-            toMillis = max(valid.last().time, syncedAt),
+            fromMillis = valid.first().time,
+            toMillis = valid.last().time,
             candlesCount = valid.size,
             periodHigh = valid.maxOf { it.high },
             periodLow = valid.minOf { it.low },
