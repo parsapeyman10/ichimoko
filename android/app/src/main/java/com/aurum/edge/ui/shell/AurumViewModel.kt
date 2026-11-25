@@ -1785,9 +1785,21 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             String.format(Locale.US, "آزمون آینده‌نگر: %d بسته، Brier شبکه %.3f / پایه %.3f", experiment.count, experiment.neuralBrier, experiment.baselineBrier)
         else "آزمون آینده‌نگر: ${experiment.count} بستهٔ معتبر از حداقل ۳۰"
         val health = com.aurum.edge.core.AssistantHealthReview.inspect(journal, _liveTicks.value, now)
+        // Small, bounded, off-UI retrospective shadow experiment; no configuration is written.
+        val shadowTrades = journal.asSequence().filter { !it.isOpen && !it.isBacktest && it.origin == PaperTrade.ORIGIN_LIVE }
+            .distinctBy { it.id }.sortedByDescending { it.closedAt }.take(10).toList()
+        val shadow = shadowTrades.map { trade ->
+            val candles = LiveQuoteFetcher.peekCachedCandles(trade.symbol, trade.interval)
+            com.aurum.edge.core.TradingShadowComparison.compare(trade, candles, now)
+        }
+        val pairs = shadow.mapNotNull { it.comparison }
+        val shadowText = if (pairs.isEmpty()) "مقایسهٔ سایهٔ ۰٫۳۵ و ۰٫۴۰ ATR: از ${shadow.size} معاملهٔ بررسی‌شده هیچ مسیر قابل استفاده نبود."
+            else String.format(Locale.US, "مقایسهٔ سایهٔ ۰٫۳۵ / ۰٫۴۰ ATR: %d مسیر، خالص مدل‌شده %.2f$ / %.2f$؛ %d مسیر ناکافی یا مبهم.",
+                pairs.size, pairs.sumOf { it.currentNetUsd }, pairs.sumOf { it.candidateNetUsd }, shadow.size - pairs.size)
         _assistantEvidenceFa.value = "انتخاب برای گزارش: ${if (selected == "NEURAL") "شبکه" else "پایه"} · ${if (autoEnabled) "خودکار" else "پایهٔ دستی"} · ${review.eligible} معاملهٔ معتبر\n" +
             score + " · " + experiment.reasonFa + "\n" +
             (if (health.isEmpty()) "هشدار عملیاتی در داده‌های بررسی‌شده پیدا نشد." else "هشدار عملیاتی: " + health.joinToString(" | ")) + "\n" +
+            shadowText + "\nمقایسهٔ سایه در کندل بسته، خروج تکنیکال و توالی تیک زنده را بازسازی نمی‌کند؛ معیار مجوز اجرای واقعی نیست.\n" +
             "مرور پس‌نگر: " + review.reasonFa + "\n" + foldText + "\n" + preview +
             "\nپیش‌بینی‌های ثبت‌شدهٔ ورود، ۳ بخش زمانی و فاصلهٔ یک‌ساعته؛ از همین داده برای انتخاب استفاده شده، پس آزمون آینده‌نگر مستقل نیست و هم‌بستگی یا آموزش قبلی ممکن است نتیجه را مخدوش کند. " +
             "آزمایش آینده‌نگر فقط کیفیت احتمال را به‌طور اکتشافی می‌سنجد، نه سودآوری یا اثر تغییر استراتژی. تا آزمون معتبر جداگانه، تغییر پارامتر معامله صرفاً پیشنهاد است." +
