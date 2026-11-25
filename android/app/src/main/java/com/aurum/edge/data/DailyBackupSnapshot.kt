@@ -44,6 +44,7 @@ object DailyBackupSnapshot {
             .put("trades", JSONArray(tradesJson)).put("neural", JSONObject(neuralJson))
             .put("settings", preferences).put("otherLearning", auxiliary)
             .put("assistantReviewAudit", JSONArray(AssistantReviewStore.history(context)))
+            .put("assistantProspectiveExperiment", JSONArray(AssistantProspectiveStore.export(context)))
         val out = ByteArrayOutputStream()
         GZIPOutputStream(out).use { it.write(snapshot.toString().toByteArray(Charsets.UTF_8)) }
         return out.toByteArray()

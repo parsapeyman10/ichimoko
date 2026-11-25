@@ -27,4 +27,18 @@ class AssistantReviewStoreTest {
         assertEquals(2, JSONArray(AssistantReviewStore.history(ctx)).length())
         assertFalse(AssistantReviewStore.enabled(ctx))
     }
+    @Test fun prospectivePromotionAndRollbackUsePersistedState() {
+        val ctx = RuntimeEnvironment.getApplication()
+        ctx.getSharedPreferences("assistant_review", Context.MODE_PRIVATE).edit().clear().commit()
+        fun samples(prediction: Double) = List(30) { i ->
+            com.aurum.edge.core.AssistantProspectiveExperiment.Record("$i", i*10L+1, i*10L+2,
+                40, 0.5, prediction, i*10L+3, 1.0)
+        }
+        assertEquals(AssistantEvidenceReview.Source.NEURAL, AssistantReviewStore.recordProspective(ctx, samples(0.9), 1000).proposed)
+        assertEquals(AssistantEvidenceReview.Source.BASELINE, AssistantReviewStore.recordProspective(ctx, samples(0.1), 2000).proposed)
+        val audit = JSONArray(AssistantReviewStore.history(ctx))
+        assertEquals(2, audit.length())
+        assertEquals("prospective_rolling", audit.getJSONObject(1).getString("evaluation"))
+    }
+
 }

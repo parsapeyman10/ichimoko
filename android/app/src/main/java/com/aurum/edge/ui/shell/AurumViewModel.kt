@@ -202,6 +202,10 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             container.journalStore.trades.collect { currentTrades ->
                 _stats.value = container.journalStore.stats()
                 _lastDisplayMarks.value = OpenPositionDisplay.onlyOpen(_lastDisplayMarks.value, currentTrades)
+                // Capture only a genuinely open position near entry, before observing its outcome.
+                if (container.journalStore.shardsMerged.value) {
+                    runCatching { com.aurum.edge.data.AssistantProspectiveStore.update(container.appContext, currentTrades, System.currentTimeMillis()) }
+                }
                 container.neuralEngine.syncWithClosedJournalTrades(currentTrades)
                 // Learning is retained; it does not silently rewrite trading parameters.
                 syncBackgroundServiceState()
@@ -1757,7 +1761,10 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         // Suggestions are not experiments. They must never modify trading parameters merely
         // because automatic paper trading is enabled or a text mentions a few losses.
         val review = com.aurum.edge.core.AssistantEvidenceReview.evaluate(journal, now)
-        val selected = com.aurum.edge.data.AssistantReviewStore.record(container.appContext, review, now)
+        val records = if (container.journalStore.shardsMerged.value)
+            com.aurum.edge.data.AssistantProspectiveStore.update(container.appContext, journal, now) else emptyList()
+        val experiment = com.aurum.edge.data.AssistantReviewStore.recordProspective(container.appContext, records, now)
+        val selected = experiment.proposed.name
         val example = journal.asSequence().filter { it.isOpen }
             .mapNotNull { t -> t.neuralEntryObservation?.takeIf { it.isUsableFor(t.openedAt) }?.let { t.symbol to it.predictedWinProbability } }
             .firstOrNull()
@@ -1774,10 +1781,16 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             "${java.time.Instant.ofEpochMilli(item.getLong("at"))}: ${item.optString("from")} → ${item.optString("to")} (${item.optInt("samples")} نمونه)"
         }.joinToString("\n") else ""
         val autoEnabled = com.aurum.edge.data.AssistantReviewStore.enabled(container.appContext)
+        val score = if (experiment.neuralBrier != null && experiment.baselineBrier != null)
+            String.format(Locale.US, "آزمون آینده‌نگر: %d بسته، Brier شبکه %.3f / پایه %.3f", experiment.count, experiment.neuralBrier, experiment.baselineBrier)
+        else "آزمون آینده‌نگر: ${experiment.count} بستهٔ معتبر از حداقل ۳۰"
+        val health = com.aurum.edge.core.AssistantHealthReview.inspect(journal, _liveTicks.value, now)
         _assistantEvidenceFa.value = "انتخاب برای گزارش: ${if (selected == "NEURAL") "شبکه" else "پایه"} · ${if (autoEnabled) "خودکار" else "پایهٔ دستی"} · ${review.eligible} معاملهٔ معتبر\n" +
-            review.reasonFa + "\n" + foldText + "\n" + preview +
+            score + " · " + experiment.reasonFa + "\n" +
+            (if (health.isEmpty()) "هشدار عملیاتی در داده‌های بررسی‌شده پیدا نشد." else "هشدار عملیاتی: " + health.joinToString(" | ")) + "\n" +
+            "مرور پس‌نگر: " + review.reasonFa + "\n" + foldText + "\n" + preview +
             "\nپیش‌بینی‌های ثبت‌شدهٔ ورود، ۳ بخش زمانی و فاصلهٔ یک‌ساعته؛ از همین داده برای انتخاب استفاده شده، پس آزمون آینده‌نگر مستقل نیست و هم‌بستگی یا آموزش قبلی ممکن است نتیجه را مخدوش کند. " +
-            "تا آزمون معتبر جداگانه، تغییر پارامتر معامله صرفاً پیشنهاد است." +
+            "آزمایش آینده‌نگر فقط کیفیت احتمال را به‌طور اکتشافی می‌سنجد، نه سودآوری یا اثر تغییر استراتژی. تا آزمون معتبر جداگانه، تغییر پارامتر معامله صرفاً پیشنهاد است." +
             if (history.isNotBlank()) "\nتاریخچهٔ انتخاب UTC:\n$history" else ""
 
         // ── ۳. ماتریس برتری و توزیع بودجهٔ ریسک ──
