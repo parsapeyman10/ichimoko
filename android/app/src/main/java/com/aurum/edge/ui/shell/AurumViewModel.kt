@@ -1253,6 +1253,19 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         }
         val matchedBreakdown = entryReport?.rrBreakdown
         val entryCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
+        // The exact signal bar and closed history must match; no post-entry reconstruction.
+        val cloudBar = matchedReport?.takeIf { report ->
+            report.action == calc.action && report.triggerBarTime > 0 &&
+                now >= report.triggerBarTime + entryInterval.millis &&
+                now - report.triggerBarTime <= entryInterval.millis * 2 &&
+                (signalBarTime == null || report.triggerBarTime == signalBarTime)
+        }?.triggerBarTime
+        val cloudEvidence = cloudBar?.let {
+            com.aurum.edge.core.CloudLifetimeEvidence.measure(entryCandles, entryInterval, it, now, settings.value.activeBitcoinStrategyConfig())
+        }
+        val cloudLesson = com.aurum.edge.core.CloudLifetimeEvidence.lesson(
+            trades.value, normSym, strategyId, entryInterval, calc.action, now)
+        val cloudNote = (cloudEvidence?.textFa() ?: "سن و انتهای ابر نامعلوم؛ دادهٔ هم‌زمان کافی نیست") + " · " + cloudLesson.textFa()
         // سنجش تکنیکال ۱ ساعته و ۴ ساعته در همان لحظهٔ ورود ثبت می‌شود و بعداً تغییر نمی‌کند.
         val gauge1h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H1).filter { it.closed && it.time + 3_600_000L <= now }
         val gauge4h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H4).filter { it.closed && it.time + 14_400_000L <= now }
@@ -1268,7 +1281,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         val ratingNote = ratingDecision.reasonFa.replace("ورود مسدود شد.", "هشدار؛ منع پیش‌بینی اعمال نشد.")
         val openedRaw = container.journalStore.openTrade(
             calc = calc,
-            note = "$effectiveNote · سنجش وزنی ۱H/۴H (۴۰٪/۶۰٪): ${weightedRating?.let { String.format(Locale.US, "%.2f", it) } ?: "نامعلوم"} · $ratingNote · ${quality.textFa()} · $sessionNote".trim(' ', '·'),
+            note = "$effectiveNote · $cloudNote · سنجش وزنی ۱H/۴H (۴۰٪/۶۰٪): ${weightedRating?.let { String.format(Locale.US, "%.2f", it) } ?: "نامعلوم"} · $ratingNote · ${quality.textFa()} · $sessionNote".trim(' ', '·'),
             now = now,
             entryInterval = entryInterval,
             strategyId = strategyId,
@@ -1279,6 +1292,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             enforceProfitRisk = true,
             signalBarTime = signalBarTime,
             neuralEntryObservation = entryObservation,
+            cloudEvidence = cloudEvidence,
             entryRatingOverride = rating1 to rating4,
             gaugeCandles1h = gauge1h,
             gaugeCandles4h = gauge4h,

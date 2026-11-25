@@ -480,6 +480,7 @@ class JournalStore(
         signalBarTime: Long? = null,
         neuralEntryObservation: com.aurum.edge.core.NeuralEntryObservation? = null,
         entryRatingOverride: Pair<com.aurum.edge.core.TechnicalRating?, com.aurum.edge.core.TechnicalRating?>? = null,
+        cloudEvidence: com.aurum.edge.core.CloudLifetimeEvidence.Snapshot? = null,
     ): PaperTrade? {
         // ── قاعدهٔ «یک معاملهٔ باز برای هر استراتژی» ─────────────────────────────
         // تا تکلیف معاملهٔ باز روشن نشود، همین استراتژی معاملهٔ تازه نمی‌گیرد. این گارد در خودِ
@@ -530,6 +531,10 @@ class JournalStore(
         val trade = rawTrade.copy(
             signalBarTime = signalBarTime?.takeIf { it > 0L && it <= now },
             neuralEntryObservation = neuralEntryObservation?.takeIf { it.isUsableFor(now) && it.signalBarTime == signalBarTime },
+            cloudAgeBars = cloudEvidence?.ageBars ?: -1,
+            cloudAgeCensored = cloudEvidence?.ageCensored ?: false,
+            cloudTwistAheadBars = cloudEvidence?.twistAheadBars ?: -1,
+            cloudSignalBarTime = cloudEvidence?.barTime ?: 0L,
             tradeNumber = nextTradeNum,
             preEntry3CandleCategoryCode = pre3Context.categoryCode,
             preEntry3CandleCategoryFa = pre3Context.categoryBadgeFa,

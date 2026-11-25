@@ -667,6 +667,7 @@ object JournalExportEngine {
             "OpenedAt_EpochMs", "ClosedAt_EpochMs", "SignalBarTime_EpochMs", "Origin",
             "Tech1hBuy", "Tech1hNeutral", "Tech1hSell", "Tech4hBuy", "Tech4hNeutral", "Tech4hSell", "TechSnapshotRebuilt",
             "StateTrendPhase", "StateEr14", "StateAtrPct", "StateDistKijunAtr", "StateKumoThicknessAtr", "StateVolumeRatio20",
+            "CloudAgeBars", "CloudAgeCensored", "CloudTwistAheadBars", "CloudSignalBarTime_EpochMs",
             "NeuralSchema", "NeuralEvaluatedAt_EpochMs", "NeuralSignalBarTime_EpochMs", "NeuralFeatures", "NeuralConditionKey", "NeuralWinProbability", "NeuralExpectedR",
         )
         sb.append(headers.joinToString(",")).append("\r\n")
@@ -719,6 +720,8 @@ object JournalExportEngine {
                 t.tech4hBuy.takeIf { it >= 0 }?.toString().orEmpty(), t.tech4hNeutral.takeIf { it >= 0 }?.toString().orEmpty(), t.tech4hSell.takeIf { it >= 0 }?.toString().orEmpty(), t.techSnapshotRebuilt.toString(),
                 esc(t.stateTrendPhaseCode), t.stateEr14.takeIf { it >= 0 }?.toString().orEmpty(), t.stateAtrPctOfPrice.takeIf { it >= 0 }?.toString().orEmpty(),
                 t.stateDistKijunAtr.takeIf { it >= 0 }?.toString().orEmpty(), t.stateKumoThicknessAtr.takeIf { it >= 0 }?.toString().orEmpty(), t.stateVolumeRatio20.takeIf { it >= 0 }?.toString().orEmpty(),
+                t.cloudAgeBars.takeIf { it > 0 }?.toString().orEmpty(), t.cloudAgeCensored.toString(),
+                t.cloudTwistAheadBars.takeIf { it > 0 }?.toString().orEmpty(), t.cloudSignalBarTime.takeIf { it > 0 }?.toString().orEmpty(),
                 t.neuralEntryObservation?.schema?.toString().orEmpty(), t.neuralEntryObservation?.evaluatedAt?.toString().orEmpty(),
                 t.neuralEntryObservation?.signalBarTime?.toString().orEmpty(), esc(t.neuralEntryObservation?.features?.joinToString("|").orEmpty()),
                 esc(t.neuralEntryObservation?.conditionKey.orEmpty()), t.neuralEntryObservation?.predictedWinProbability?.toString().orEmpty(),
@@ -1958,6 +1961,10 @@ function filterRows() {
                 stateTrendPhaseCode = field("StateTrendPhase").orEmpty(), stateEr14 = doubleField("StateEr14"),
                 stateAtrPctOfPrice = doubleField("StateAtrPct"), stateDistKijunAtr = doubleField("StateDistKijunAtr"),
                 stateKumoThicknessAtr = doubleField("StateKumoThicknessAtr"), stateVolumeRatio20 = doubleField("StateVolumeRatio20"),
+                cloudAgeBars = intField("CloudAgeBars"),
+                cloudAgeCensored = field("CloudAgeCensored")?.toBooleanStrictOrNull() ?: false,
+                cloudTwistAheadBars = intField("CloudTwistAheadBars"),
+                cloudSignalBarTime = field("CloudSignalBarTime_EpochMs")?.toLongOrNull()?.takeIf { it > 0 && it <= openedEpoch } ?: 0L,
                 exitPrice = if (isOpen) null else exitP,
                 exitReason = if (isOpen) null else exitReason,
                 pnlUsd = if (isOpen) null else netPnl,

@@ -294,6 +294,11 @@ data class PaperTrade(
     val stateDistKijunAtr: Double = -1.0,
     val stateKumoThicknessAtr: Double = -1.0,
     val stateVolumeRatio20: Double = -1.0,
+    // Snapshot at signal time; -1 means unknown, not zero. Never reconstructed after exit.
+    val cloudAgeBars: Int = -1,
+    val cloudAgeCensored: Boolean = false,
+    val cloudTwistAheadBars: Int = -1,
+    val cloudSignalBarTime: Long = 0L,
 
     // ── سنجش تکنیکال در لحظهٔ ورود (فقط داده — هیچ اثری در تصمیم ندارد) ──────────
     // تعداد رأی‌های «خرید / خنثی / فروش» نوار سنجش تکنیکال در تایم‌فریم ۱ ساعته و ۴ ساعته.

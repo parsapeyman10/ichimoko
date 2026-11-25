@@ -221,6 +221,7 @@ fun BitcoinIchimokuStrategyCard(
                 dualReport = dualReports[focusedSymbol],
                 aiChecking = aiChecking,
                 avalAiEnabled = settings.avalAiEnabled,
+                cloudConfig = currentConfig,
                 onSelectSymbol = { sym -> viewModel.selectFocusedStrategySymbol(sym) },
                 onSelectInterval = { interval -> viewModel.selectFocusedStrategyInterval(interval) },
                 onSelectStrategy = { stratId -> viewModel.activateSingleBitcoinStrategy(stratId, enableExecution = settings.autoPaperTrading) },
@@ -426,6 +427,7 @@ private fun Live12ConditionChecklistPage(
     dualReport: DualTimeframeSymbolReport?,
     aiChecking: Boolean,
     avalAiEnabled: Boolean,
+    cloudConfig: BaseStrategyConfig,
     onSelectSymbol: (String) -> Unit,
     onSelectInterval: (Interval) -> Unit,
     onSelectStrategy: (String) -> Unit,
@@ -497,6 +499,17 @@ private fun Live12ConditionChecklistPage(
             )
             return@Column
         }
+
+        val cloudPreview = remember(report, cloudConfig) {
+            com.aurum.edge.core.CloudLifetimeEvidence.measure(
+                com.aurum.edge.data.LiveQuoteFetcher.peekMemoryCandles(report.symbol, report.triggerInterval),
+                report.triggerInterval, report.triggerBarTime, System.currentTimeMillis(), cloudConfig)
+        }
+        Text(
+            text = "☁️ " + (cloudPreview?.textFa() ?: "سن و انتهای ابر نامعلوم؛ کندل بستهٔ هم‌زمان کافی نیست."),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (cloudPreview?.longNearTwist == true) AurumColors.Gold else AurumColors.TextSecondary,
+        )
 
         val statusColor = when (report.readiness) {
             StrategyReadinessState.SIGNAL_BUY -> AurumColors.Green

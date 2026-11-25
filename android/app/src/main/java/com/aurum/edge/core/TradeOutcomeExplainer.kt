@@ -182,6 +182,12 @@ object TradeOutcomeExplainer {
             }
         }
 
+        if (trade.cloudAgeBars > 0 && trade.cloudSignalBarTime > 0L) {
+            val cloud = CloudLifetimeEvidence.Snapshot(trade.cloudAgeBars, trade.cloudAgeCensored,
+                trade.cloudTwistAheadBars.takeIf { it > 0 }, trade.cloudSignalBarTime)
+            reasons += cloud.textFa() + "؛ نتیجهٔ این معامله به‌تنهایی علت را ثابت نمی‌کند."
+        }
+
         // ۴) فاصله از کیه‌جین = دیرآمدن
         val distKijun = trade.stateDistKijunAtr
         if (distKijun >= 0.0) {
