@@ -82,6 +82,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     val aiTraderForecasts: StateFlow<List<AiTraderEngine.SymbolConditionsForecast>> =
         _aiTraderForecasts.asStateFlow()
 
+    private val _assistantEvidenceFa = MutableStateFlow("در انتظار ارزیابی شواهد ثبت‌شده…")
+    val assistantEvidenceFa: StateFlow<String> = _assistantEvidenceFa.asStateFlow()
+
     private val _aiTraderHealings = MutableStateFlow<List<AiTraderEngine.SelfHealingAction>>(emptyList())
     val aiTraderHealings: StateFlow<List<AiTraderEngine.SelfHealingAction>> =
         _aiTraderHealings.asStateFlow()
@@ -196,16 +199,8 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             container.journalStore.trades.collect { currentTrades ->
                 _stats.value = container.journalStore.stats()
                 _lastDisplayMarks.value = OpenPositionDisplay.onlyOpen(_lastDisplayMarks.value, currentTrades)
-                val reconciliation = container.neuralEngine.syncWithClosedJournalTrades(currentTrades)
-                // بعد از یادگیری معامله‌های تازه، شخصیت نمادها/استراتژی‌ها در پیکربندی موتور
-                // تازه‌سازی می‌شود تا ارزیابی‌های بعدی از آموخته‌های جدید استفاده کنند.
-                if (reconciliation.newlyLearnedThisRun > 0) {
-                    runCatching {
-                        val refreshed = container.neuralEngine
-                            .applyAutoTunedParametersToConfig(settings.value.baseStrategyConfig)
-                        container.settingsStore.update { cur -> cur.copy(baseStrategyConfig = refreshed) }
-                    }
-                }
+                container.neuralEngine.syncWithClosedJournalTrades(currentTrades)
+                // Learning is retained; it does not silently rewrite trading parameters.
                 syncBackgroundServiceState()
             }
         }
@@ -253,8 +248,6 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             TraderMemoryStore.init(container.appContext)
             runCatching {
                 container.neuralEngine.learnAllStrategiesNow(settings.value.baseStrategyConfig)
-                val refreshed = container.neuralEngine.applyAutoTunedParametersToConfig(settings.value.baseStrategyConfig)
-                container.settingsStore.update { cur -> cur.copy(baseStrategyConfig = refreshed) }
             }
             // حافظهٔ معامله‌گر از گوشی و یک چرخهٔ کامل (پیش‌بینی + خودترمیمی + ماتریس برتری).
             runCatching { _aiTraderMemory.value = TraderMemoryStore.read(container.appContext) }
@@ -1701,8 +1694,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
      *
      * ۱. **پیش‌بینی خبری** روی همهٔ نمادهای رصدشده: شرایط نوظهور هر نماد را پیش از رسیدن به
      *    سیگنال بیرون می‌کشد (نه واکنش، پیش‌دستی).
-     * ۲. **خودترمیمی**: از گلوگاه‌های واقعی (دلیل‌های باخت) و نکات دستیار، اقدام‌های مشخص با
-     *    نمونه می‌سازد و روی کانفیگ اعمال می‌کند — نکته به تغییر تبدیل می‌شود.
+     * ۲. پیشنهاد گلوگاه‌ها و ارزیابی جداگانه؛ پیشنهاد خام پارامترها را خودکار تغییر نمی‌دهد.
      * ۳. **ماتریس برتری**: بودجهٔ ریسک هر استراتژی را با لبهٔ تعدیل‌شده با نمونه توزیع می‌کند.
      *
      * @param force اگر false باشد، حداکثر هر ۱۵ دقیقه یک‌بار اجرا می‌شود (هزینهٔ محاسباتی).
@@ -1759,14 +1751,25 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         )
         _aiTraderHealings.value = healings
 
-        // اصلاح‌ها فقط اگر کاربر «مدیریت خودکار» را روشن کرده باشد روی موتور اعمال می‌شوند.
-        if (healings.isNotEmpty() && cfg.autoPaperTrading) {
-            val (nextConfig, applied) = AiTraderEngine.applyHealing(cfg.baseStrategyConfig, healings)
-            if (applied.isNotEmpty()) {
-                container.settingsStore.update { current -> current.copy(baseStrategyConfig = nextConfig) }
-                TraderMemoryStore.recordActions(applied, container.appContext)
-            }
-        }
+        // Suggestions are not experiments. They must never modify trading parameters merely
+        // because automatic paper trading is enabled or a text mentions a few losses.
+        val review = com.aurum.edge.core.AssistantEvidenceReview.evaluate(journal, now)
+        val selected = com.aurum.edge.data.AssistantReviewStore.record(container.appContext, review, now)
+        val example = journal.asSequence().filter { it.isOpen }
+            .mapNotNull { t -> t.neuralEntryObservation?.takeIf { it.isUsableFor(t.openedAt) }?.let { t.symbol to it.predictedWinProbability } }
+            .firstOrNull()
+        val estimate = if (selected == "NEURAL") example?.second else review.currentBaseline
+        val preview = if (estimate != null && example != null)
+            "نمونهٔ گزارش ${example.first}: ${String.format(Locale.US, "%.1f", estimate * 100)}٪؛ تخمین مشاهده‌ای نه سیگنال یا تضمین."
+        else "نمونهٔ معاملهٔ باز دارای پیش‌بینی ثبت‌شده یا پایهٔ کافی در دسترس نیست."
+        val foldText = review.folds.mapIndexed { index, f ->
+            String.format(Locale.US, "بخش %d: آموزش %d، آزمون %d، Brier شبکه %.3f / پایه %.3f", index + 1, f.train, f.test, f.neuralBrier, f.baselineBrier)
+        }.joinToString("\n")
+        val autoEnabled = com.aurum.edge.data.AssistantReviewStore.enabled(container.appContext)
+        _assistantEvidenceFa.value = "انتخاب برای گزارش: ${if (selected == "NEURAL") "شبکه" else "پایه"} · ${if (autoEnabled) "خودکار" else "پایهٔ دستی"} · ${review.eligible} معاملهٔ معتبر\n" +
+            review.reasonFa + "\n" + foldText + "\n" + preview +
+            "\nپیش‌بینی‌های ثبت‌شدهٔ ورود، ۳ بخش زمانی و فاصلهٔ یک‌ساعته؛ از همین داده برای انتخاب استفاده شده، پس آزمون آینده‌نگر مستقل نیست و هم‌بستگی یا آموزش قبلی ممکن است نتیجه را مخدوش کند. " +
+            "تا آزمون معتبر جداگانه، تغییر پارامتر معامله صرفاً پیشنهاد است."
 
         // ── ۳. ماتریس برتری و توزیع بودجهٔ ریسک ──
         val summary = neuralSummaryNow
@@ -1780,7 +1783,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             matrix = matrix,
         ) + summary.learnedInsightsFeedFa.take(20)
         val headLine = "چرخهٔ معامله‌گر: ${forecasts.count { it.isActionable }} نماد آماده · " +
-            "${healings.size} اصلاح · ${matrix.count { it.allocationShare > 0.0 }} استراتژی با بودجه"
+            "${healings.size} پیشنهاد بررسی‌نشده · ${matrix.count { it.allocationShare > 0.0 }} استراتژی در ماتریس مشاهده‌ای"
         _aiTraderSummaryFa.value = lines
         val memory = TraderMemoryStore.recordLessons(
             linesFa = lines,
@@ -1844,6 +1847,20 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 CrashReporter.recordNonFatal(container.appContext, "revertSelfHealing", err)
                 _toast.value = "⚠️ برگرداندن اصلاح ناموفق بود: ${err.message}"
             }
+        }
+    }
+
+    fun resetAssistantDiagnosticChoice() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.aurum.edge.data.AssistantReviewStore.setEnabled(container.appContext, false)
+            runAiTraderCycleInternal(System.currentTimeMillis())
+        }
+    }
+
+    fun enableAssistantDiagnosticChoice() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.aurum.edge.data.AssistantReviewStore.setEnabled(container.appContext, true)
+            runAiTraderCycleInternal(System.currentTimeMillis())
         }
     }
 

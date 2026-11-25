@@ -43,6 +43,7 @@ object DailyBackupSnapshot {
             .put("consistency", "Component snapshots are independently captured, not a global atomic transaction")
             .put("trades", JSONArray(tradesJson)).put("neural", JSONObject(neuralJson))
             .put("settings", preferences).put("otherLearning", auxiliary)
+            .put("assistantReviewAudit", JSONArray(AssistantReviewStore.history(context)))
         val out = ByteArrayOutputStream()
         GZIPOutputStream(out).use { it.write(snapshot.toString().toByteArray(Charsets.UTF_8)) }
         return out.toByteArray()

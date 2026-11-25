@@ -61,6 +61,7 @@ fun NeuralBrainScreen(
     viewModel: AurumViewModel,
 ) {
     val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
+    val assistantEvidence by viewModel.assistantEvidenceFa.collectAsStateWithLifecycle()
     val allStrategyLearningFa by viewModel.allStrategyLearningFa.collectAsStateWithLifecycle()
     val neuralJournalCalibrationFa by viewModel.neuralJournalCalibrationFa.collectAsStateWithLifecycle()
     val dualReports by viewModel.dualSymbolStrategyReports.collectAsStateWithLifecycle()
@@ -866,7 +867,7 @@ fun NeuralBrainScreen(
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             Text(
-                                text = "🛠️ دستور دقیق اصلاح (برای اعمال الان یا در نسخه بعدی):",
+                                text = "🛠️ پیشنهاد بررسی‌نشده (اثربخشی هنوز ثابت نیست):",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Green,
                                 fontWeight = FontWeight.Bold,
@@ -882,7 +883,7 @@ fun NeuralBrainScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Text(
-                                        text = "⚡ اعمال خودکار این تنظیم پیشنهادی دستیار روی استراتژی",
+                                        text = "⚠️ اعمال دستی پیشنهادِ ارزیابی‌نشده",
                                         fontSize = 11.sp,
                                         color = AurumColors.Gold,
                                         fontWeight = FontWeight.Bold,
@@ -892,6 +893,18 @@ fun NeuralBrainScreen(
                         }
                     }
                 }
+            }
+        }
+
+        SectionCard(title = "🧪 دستیار بهبود: ارزیابی و کنترل", initiallyExpanded = true) {
+            Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(assistantEvidence, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { viewModel.runAiTraderCycleNow() }) { Text("ارزیابی اکنون") }
+                    OutlinedButton(onClick = { viewModel.resetAssistantDiagnosticChoice() }) { Text("بازگشت به پایه") }
+                }
+                OutlinedButton(onClick = { viewModel.enableAssistantDiagnosticChoice() }) { Text("فعال‌سازی انتخاب خودکار گزارش") }
+                Text("تغییر تنظیمات معامله با این انتخاب انجام نمی‌شود؛ گزارش تغییر انتخاب روی گوشی ثبت می‌شود.", style = MaterialTheme.typography.labelSmall)
             }
         }
 

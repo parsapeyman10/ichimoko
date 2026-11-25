@@ -403,7 +403,7 @@ object AiTraderEngine {
                         conditionTitleFa = note.categoryFa,
                         problemFa = note.problemDetectedFa,
                         reasonFa = note.exactFixInstructionFa,
-                        samples = MIN_SAMPLES_FOR_ACTION,
+                        samples = 0,
                         previousValue = config.slBufferAtr,
                         newValue = round(proposed * 100.0) / 100.0,
                         createdAtMs = nowMillis,
@@ -422,7 +422,7 @@ object AiTraderEngine {
                         conditionTitleFa = note.categoryFa,
                         problemFa = note.problemDetectedFa,
                         reasonFa = note.exactFixInstructionFa,
-                        samples = MIN_SAMPLES_FOR_ACTION,
+                        samples = 0,
                         previousValue = config.maxKijunExtensionAtr,
                         newValue = round(proposed * 100.0) / 100.0,
                         createdAtMs = nowMillis,
@@ -441,7 +441,7 @@ object AiTraderEngine {
                         conditionTitleFa = note.categoryFa,
                         problemFa = note.problemDetectedFa,
                         reasonFa = note.exactFixInstructionFa,
-                        samples = MIN_SAMPLES_FOR_ACTION,
+                        samples = 0,
                         previousValue = config.minRiskReward,
                         newValue = round(proposed * 100.0) / 100.0,
                         createdAtMs = nowMillis,
@@ -632,7 +632,7 @@ object AiTraderEngine {
                 ),
             )
         }
-        add("🛠️ خودترمیمی: ${healings.size} اصلاح آماده است")
+        add("🛠️ پیشنهادهای بررسی‌نشده: ${healings.size} مورد؛ هیچ‌یک به صورت خودکار در تنظیمات معامله اعمال نشده‌اند")
         healings.take(6).forEach { h -> add("• ${h.summaryFa} — ${h.problemFa}") }
         val withEdge = matrix.filter { it.allocationShare > 0.0 }
         add(
