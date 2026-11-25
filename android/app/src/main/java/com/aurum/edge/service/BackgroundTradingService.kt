@@ -61,6 +61,7 @@ class BackgroundTradingService : Service() {
         if (monitorJob?.isActive == true) return
         monitorJob = serviceScope.launch {
             val app = application as? AurumApplication ?: return@launch
+            app.container.startProtectionMonitor()
             while (isActive) {
                 runCatching {
                     val settings = app.container.settingsStore.read()

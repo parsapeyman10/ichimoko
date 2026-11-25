@@ -801,7 +801,7 @@ class JournalStore(
     fun refreshClosedTradeExplanation(tradeId: String, candles: List<Candle>): Boolean {
         val target = _trades.value.firstOrNull { it.id == tradeId && !it.isOpen } ?: return false
         val result = com.aurum.edge.core.TradeOutcomeExplainer.explain(target, candles)
-        if (result.barsHeld == 0) return false
+        if (result.barsHeld == 0 && V1Universe.normalize(target.symbol) != "XAU/USD") return false
         val updated = target.copy(outcomeReasonFa = result.textFa(), outcomeTags = result.tags, mfeR = result.mfeR, maeR = result.maeR)
         persist(_trades.value.map { if (it.id == tradeId) updated else it })
         return true

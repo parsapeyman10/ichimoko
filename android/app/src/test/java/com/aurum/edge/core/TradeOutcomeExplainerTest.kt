@@ -75,6 +75,18 @@ class TradeOutcomeExplainerTest {
     }
 
     @Test
+    fun goldCandlesWithoutQuoteProvenanceCannotAssertProfitOrLock() {
+        val t = trade(action = SignalAction.SELL, entry = 3534.40, stop = 3545.51,
+            exit = 3559.20, pnl = -11.03).copy(symbol = "XAU/USD")
+        val bars = listOf(Candle(t.openedAt, 3534.40, 3534.40, 3511.29, 3515.0, 1.0, true))
+        val result = TradeOutcomeExplainer.explain(t, bars)
+        assertEquals(-1.0, result.mfeR, 0.0)
+        assertEquals(0, result.barsHeld)
+        assertFalse(TradeOutcomeExplainer.Tags.GAVE_BACK_PROFIT in result.tags)
+        assertTrue(result.textFa().contains("منشأ"))
+    }
+
+    @Test
     fun aWinReportsThePathAndTheResult() {
         val t = trade()
         val candles = series(t.openedAt, 15, 900_000L, step = 0.15, start = 100.0)

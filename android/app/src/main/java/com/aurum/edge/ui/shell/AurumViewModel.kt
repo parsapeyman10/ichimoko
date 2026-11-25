@@ -180,7 +180,6 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     private var updateCheckStarted = false
     private val aiCycleMutex = Mutex()
     private var liveMonitorJob: Job? = null
-    private var protectionMonitorJob: Job? = null
     private var lastScanned15mBucket: Long = -1L
     private var lastScanned5mBucket: Long = -1L
     private var lastMidBarCheckedBucket: Long = -1L
@@ -465,7 +464,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     }
 
     private fun startLiveMonitor() {
-        startProtectionMonitor()
+        container.startProtectionMonitor()
         if (liveMonitorJob?.isActive == true) return
         liveMonitorJob = container.appScope.launch {
             while (isActive) {
@@ -583,28 +582,6 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 // با فاصلهٔ بیشتری اجرا می‌شود تا پردازنده/باتری و رشتهٔ اصلی آزاد بمانند.
                 val idleLight = openSymbolSet.isEmpty() && !settings.value.autoPaperTrading
                 delay(if (idleLight) 12_000L else 4_000L)
-            }
-        }
-    }
-
-    /** Independent of strategy scans; each observed fresh quote is passed directly to the journal.
-     * Polling is not a continuous stream: brief peaks, network outages and process death remain gaps. */
-    private fun startProtectionMonitor() {
-        if (protectionMonitorJob?.isActive == true) return
-        protectionMonitorJob = container.appScope.launch {
-            while (isActive) {
-                val symbols = trades.value.filter { it.isOpen }
-                    .map { V1Universe.normalize(it.symbol) }.distinct()
-                    .filterNot { com.aurum.edge.core.MarketHours.closedFor(it, System.currentTimeMillis()) }
-                coroutineScope {
-                    symbols.map { symbol -> async {
-                        val tick = LiveQuoteFetcher.fetchLiveTick(symbol)
-                        if (tick != null && com.aurum.edge.core.TradeQuotePolicy.accepts(tick)) {
-                            container.journalStore.onLiveTick(symbol, tick)
-                        }
-                    } }.awaitAll()
-                }
-                delay(if (symbols.isEmpty()) 10_000L else 3_000L)
             }
         }
     }
@@ -1427,7 +1404,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             val fetched = runCatching { LiveQuoteFetcher.fetchTimeframeCandles(trade.symbol, trade.interval, limit = 500, forceNetwork = true)?.first.orEmpty() }.getOrDefault(emptyList())
             val bars = (vault + fetched).distinctBy { it.time }.sortedBy { it.time }
             val ok = container.journalStore.refreshClosedTradeExplanation(tradeId, bars)
-            _toast.value = if (ok) "مسیر بر اساس کندل‌های کامل موجود در بازهٔ معامله بازخوانی شد؛ پوشش و محدودیت‌ها در ژورنال نوشته شده است."
+            _toast.value = if (ok) "گزارش با داده‌های قابل اتکا بازخوانی شد؛ محدودیت منشأ و پوشش در ژورنال نوشته شده است."
                 else "کندل کامل همان بازه در حافظه یا منبع دریافت‌شده پیدا نشد؛ دادهٔ مفقود ساخته نمی‌شود."
         }
     }

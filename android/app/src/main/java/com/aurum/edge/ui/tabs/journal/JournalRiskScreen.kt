@@ -3302,7 +3302,7 @@ private fun ClosedJournalTradeRow(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    Text("مسیرهای ذخیره‌شده در نسخه‌های قبل ممکن است شامل بخشی از کندل خروج باشند؛ برای محاسبهٔ دوباره از کندل‌های کامل بازخوانی کنید.", color = AurumColors.TextMuted, fontSize = 9.sp)
+                    Text("مسیرهای قدیمی ممکن است منبع نامرتبط یا بخشی از کندل خروج داشته باشند. بازخوانی کنید؛ کندل تاریخی اثبات تیک یا اجرای قفل نیست. ساعت مسیر UTC است و ساعت کارت محلی است.", color = AurumColors.TextMuted, fontSize = 9.sp)
                     TextButton(onClick = onRefreshPath) { Text("بازخوانی مسیر کندل‌های این معامله") }
                     Text(
                         text = trade.outcomeReasonFa.ifBlank {

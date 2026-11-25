@@ -110,7 +110,10 @@ object TradeOutcomeExplainer {
         var pathCoverageFa = ""
         val openedAt = trade.openedAt
         val closedAt = trade.closedAt ?: 0L
-        if (candles.isNotEmpty() && risk > 1e-9) {
+        // Legacy gold candles can mix futures, spot and token prices with no per-bar provenance.
+        // They are not evidence of the quotes that protected this paper trade.
+        val unverifiedGold = V1Universe.normalize(trade.symbol) == "XAU/USD"
+        if (!unverifiedGold && candles.isNotEmpty() && risk > 1e-9) {
             val window = candles.filter { it.closed && it.time >= openedAt && closedAt > 0 &&
                 it.time <= closedAt - trade.interval.millis }
             val usable = window
@@ -150,7 +153,7 @@ object TradeOutcomeExplainer {
         // ۲) مسیر قیمت
         if (mfeR >= 0.0) {
             reasons += "پوشش دادهٔ مسیر: $pathCoverageFa؛ لبه‌های ورود/خروج و فاصله‌های خالی ممکن است حرکت‌هایی داشته باشند."
-            reasons += "در کندل‌های کامل داخل بازهٔ معامله، بیشترین حرکت مساعد " + f(mfeR) + "R و نامساعد " + f(maeR) + "R بود؛ این حداقلِ مشاهده‌شده است، نه اوج قطعی؛ " +
+            reasons += "در کندل‌های کامل داخل بازهٔ معامله، بیشترین حرکت مساعد " + f(mfeR) + "R و نامساعد " + f(maeR) + "R بود؛ این مقادیر کندل تاریخی‌اند، نه تیک‌های اجرای معامله؛ منبع ممکن است متفاوت باشد؛ " +
                 when {
                     isWin && mfeR - finalR >= 0.8 -> "بیشینهٔ ثبت‌شده " +
                         f(mfeR - finalR) + "R بالاتر از خروج بود؛ ترتیب حرکت در کندل مشخص نیست."
@@ -159,7 +162,7 @@ object TradeOutcomeExplainer {
                     else -> "سود شناور ثبت‌شده محدود بود؛ ترتیب دقیق حرکت مشخص نیست."
                 }
         }
-        if (mfeR < 0.0) reasons += "کندل کامل قابل اتکا در بازهٔ ورود تا خروج موجود نیست؛ مسیر قابل تعیین نیست."
+        if (mfeR < 0.0) reasons += if (unverifiedGold) "مسیر طلا نامشخص است: منشأ کندل‌های ذخیره‌شده و تطابق آن با قیمت معامله ثبت نشده؛ سقف و کف کندل اثبات تیک یا فعال‌شدن قفل نیست." else "کندل کامل قابل اتکا در بازهٔ ورود تا خروج موجود نیست؛ مسیر قابل تعیین نیست."
         if (!isWin && mfeR >= 0.0 && mfeR < 0.2) tags += Tags.NEVER_IN_PROFIT
         if (!isWin && mfeR >= 0.8 && finalR < 0.0) tags += Tags.GAVE_BACK_PROFIT
         if (isWin && mfeR >= 0.0 && mfeR - finalR >= 1.0) tags += Tags.LEFT_RUNNER
