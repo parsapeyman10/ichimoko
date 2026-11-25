@@ -60,6 +60,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.aurum.edge.core.CrashReporter
 
 /**
@@ -176,6 +178,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     val toast: StateFlow<String?> = _toast.asStateFlow()
 
     private var updateCheckStarted = false
+    private val aiCycleMutex = Mutex()
     private var liveMonitorJob: Job? = null
     private var protectionMonitorJob: Job? = null
     private var lastScanned15mBucket: Long = -1L
@@ -1710,7 +1713,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         }
     }
 
-    private suspend fun runAiTraderCycleInternal(now: Long) {
+    private suspend fun runAiTraderCycleInternal(now: Long) = aiCycleMutex.withLock {
         val cfg = settings.value
         val journal = trades.value
 
@@ -1765,11 +1768,17 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         val foldText = review.folds.mapIndexed { index, f ->
             String.format(Locale.US, "بخش %d: آموزش %d، آزمون %d، Brier شبکه %.3f / پایه %.3f", index + 1, f.train, f.test, f.neuralBrier, f.baselineBrier)
         }.joinToString("\n")
+        val audit = runCatching { org.json.JSONArray(com.aurum.edge.data.AssistantReviewStore.history(container.appContext)) }.getOrNull()
+        val history = if (audit != null) (maxOf(0, audit.length() - 3) until audit.length()).map { i ->
+            val item = audit.getJSONObject(i)
+            "${java.time.Instant.ofEpochMilli(item.getLong("at"))}: ${item.optString("from")} → ${item.optString("to")} (${item.optInt("samples")} نمونه)"
+        }.joinToString("\n") else ""
         val autoEnabled = com.aurum.edge.data.AssistantReviewStore.enabled(container.appContext)
         _assistantEvidenceFa.value = "انتخاب برای گزارش: ${if (selected == "NEURAL") "شبکه" else "پایه"} · ${if (autoEnabled) "خودکار" else "پایهٔ دستی"} · ${review.eligible} معاملهٔ معتبر\n" +
             review.reasonFa + "\n" + foldText + "\n" + preview +
             "\nپیش‌بینی‌های ثبت‌شدهٔ ورود، ۳ بخش زمانی و فاصلهٔ یک‌ساعته؛ از همین داده برای انتخاب استفاده شده، پس آزمون آینده‌نگر مستقل نیست و هم‌بستگی یا آموزش قبلی ممکن است نتیجه را مخدوش کند. " +
-            "تا آزمون معتبر جداگانه، تغییر پارامتر معامله صرفاً پیشنهاد است."
+            "تا آزمون معتبر جداگانه، تغییر پارامتر معامله صرفاً پیشنهاد است." +
+            if (history.isNotBlank()) "\nتاریخچهٔ انتخاب UTC:\n$history" else ""
 
         // ── ۳. ماتریس برتری و توزیع بودجهٔ ریسک ──
         val summary = neuralSummaryNow
