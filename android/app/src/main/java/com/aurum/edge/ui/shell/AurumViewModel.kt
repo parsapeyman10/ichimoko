@@ -312,9 +312,6 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
     /** هم‌گراسازی انتشار وضعیت به UI (حداکثر ۴ بار در ثانیه برای هر کلید). */
     private val uiCoalescer = com.aurum.edge.core.UiUpdateCoalescer(minIntervalMs = 250L)
 
-    /** پوزیشن‌هایی که پلن‌شان یک‌بار اصلاح شده است. */
-    private val repairedPlanTradeIds = mutableSetOf<String>()
-
     /** پوزیشن‌هایی که در بازار بسته باز مانده‌اند و باید در اولین تیک بازگشایی بسته شوند. */
     private val carriedOverClosureIds = mutableSetOf<String>()
 
@@ -338,12 +335,11 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
      *    `بسته‌شدن − زمان سربار` که از `SessionExitLearning` می‌آید (پیش‌فرض سهام ۱۲ دقیقه).
      * ۳. پوزیشنی که از سشن قبل باز مانده، در **اولین تیک معتبر پس از بازگشایی** بسته می‌شود؛
      *    قیمت همان تیک در ژورنال ثبت و پاداش واقعی به موتور یادگیری داده می‌شود.
-     * ۴. پلن قدیمی و متورم (نمونهٔ BNB 5m با ۱R = ۵.۶۶٪) با `TradePlanGuard` اصلاح می‌شود.
+     * ۴. پلن قدیمی خودکار تغییر نمی‌کند؛ برای بررسی گزارش می‌شود.
      */
     private fun maintainTradingHygiene(now: Long) {
         val openTrades = trades.value.filter { it.isOpen }
         if (openTrades.isEmpty()) {
-            repairedPlanTradeIds.clear()
             carriedOverClosureIds.clear()
             lastClosedStateBySymbol.clear()
             leadMinutesCache.clear()
@@ -434,42 +430,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 continue
             }
 
-            // قاعدهٔ ۴: اصلاح پلن قدیمی و متورم.
-            if (trade.id in repairedPlanTradeIds) continue
-            // معامله‌ای که حد ضررش در سود قفل شده (ریسک‌فری/تریل) نباید با اصلاح پلن به
-            // حد ضرر اولیه برگردد؛ این همان چیزی است که Preserve Mode را بی‌اثر می‌کرد.
-            val stopLockedInProfit = trade.note.contains(IchimokuStrategyEngine.BE_TAG_MARK) ||
-                trade.note.contains(IchimokuStrategyEngine.TRAIL_TAG_MARK) ||
-                trade.note.contains(IchimokuStrategyEngine.STRUCT_TAG_MARK) ||
-                (trade.initialStopLoss != null && trade.stopLoss != trade.initialStopLoss)
-            if (stopLockedInProfit) continue
-            val report = _allSymbolStrategyReports.value[symbol]
-                ?.takeIf { it.triggerInterval == trade.interval }
-            val atr = report?.triggerSnapshot?.atr14 ?: 0.0
-            val review = TradePlanGuard.reviewStoredPlan(
-                symbol = symbol,
-                action = trade.action,
-                entryPrice = trade.entry,
-                stopLoss = trade.initialStopLoss ?: trade.stopLoss,
-                takeProfit = trade.takeProfit,
-                triggerInterval = trade.interval,
-                referenceAtr14 = atr,
-                strategyAtr = report?.strategySnapshot?.atr14 ?: atr,
-            )
-            if (!review.needsRepair) {
-                repairedPlanTradeIds.add(trade.id)
-                continue
-            }
-            val repaired = container.journalStore.repairOpenTradePlan(
-                tradeId = trade.id,
-                newStopLoss = review.guarded.stopLoss,
-                newTakeProfit = review.guarded.takeProfit,
-                reasonFa = "🛡️ ${review.reasonFa}",
-            )
-            if (repaired != null) {
-                repairedPlanTradeIds.add(trade.id)
-                _toast.value = "🛡️ پلن معاملهٔ #${repaired.displayTradeNumber} $symbol (${trade.interval.label}) اصلاح شد — ${review.reasonFa}"
-            }
+            // Never rewrite an open position's initial stop/target as an automatic hygiene repair.
+            // A historical anomaly is reported for review; the user's original risk is preserved.
+
         }
     }
 

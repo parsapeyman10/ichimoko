@@ -79,6 +79,11 @@ object ComprehensiveResearchExport {
                         if (!entry.isDirectory) add("journal_and_experiments/${entry.name}", old.getInputStream(entry), "session_research_export")
                     }
                 }
+                val profiles = com.aurum.edge.core.SessionStrategyEvidence.profiles(trades)
+                val profileJson = kotlinx.serialization.json.Json { encodeDefaults = true }
+                addText("analysis/session_strategy_profiles.jsonl", profiles.joinToString("\n", postfix = if (profiles.isEmpty()) "" else "\n") {
+                    profileJson.encodeToString(com.aurum.edge.core.SessionStrategyEvidence.Profile.serializer(), it)
+                }, "computed_live_journal_descriptive")
                 addText("neural/live_state.json", neuralJson, "synchronized_neural_state")
                 addText("settings/trading_preferences.json", settings(context), "allowlisted_preferences")
                 addText("assistant/prospective.json", AssistantProspectiveStore.export(context), "assistant_prospective")

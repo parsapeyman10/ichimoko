@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +15,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -34,6 +37,10 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.StrategyAuditReport
 import com.aurum.edge.core.SessionPerformanceReport
+import com.aurum.edge.core.SessionStrategyEvidence
+import com.aurum.edge.core.V1Universe
+import com.aurum.edge.domain.Interval
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.data.BacktestJob
 import com.aurum.edge.data.BacktestJobStore
 import com.aurum.edge.data.BacktestSession
@@ -63,6 +70,17 @@ private fun shareReport(context: Context, file: File, mime: String) {
 }
 
 @Composable
+private fun EvidenceSelector(label: String, value: String, choices: List<String>, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }) { Text("$label: $value", fontSize = 10.sp) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            choices.forEach { choice -> DropdownMenuItem(text = { Text(choice) }, onClick = { onSelect(choice); expanded = false }) }
+        }
+    }
+}
+
+@Composable
 fun StrategyReportsScreen(viewModel: AurumViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val neural by viewModel.neuralState.collectAsStateWithLifecycle()
@@ -79,6 +97,20 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
     }
     val strategies = remember(settings, neural) { StrategyAuditReport.build(settings, neural) }
     val performance = remember(trades) { SessionPerformanceReport.build(trades) }
+    var chosenSymbol by remember { mutableStateOf("XAU/USD") }
+    var chosenStrategy by remember { mutableStateOf(com.aurum.edge.core.BitcoinStrategyModel.BASE_ICHIMOKU.id) }
+    var chosenInterval by remember { mutableStateOf(Interval.M5) }
+    var chosenDirection by remember { mutableStateOf("هر دو") }
+    val symbols = remember(trades) { (V1Universe.allSymbols + trades.map { V1Universe.normalize(it.symbol) }).filter { it.isNotBlank() }.distinct().sorted() }
+    val strategyIds = remember(strategies, trades) { (strategies.map { it.id } + trades.map { it.strategyId }).filter { it.isNotBlank() }.distinct().sorted() }
+    val direction = when (chosenDirection) { "خرید" -> SignalAction.BUY; "فروش" -> SignalAction.SELL; else -> null }
+    val selectedTrades = remember(trades, chosenSymbol, chosenStrategy, chosenInterval, direction) {
+        trades.filter { V1Universe.normalize(it.symbol) == chosenSymbol && it.strategyId == chosenStrategy &&
+            it.interval == chosenInterval && !it.isBacktest && (direction == null || it.action == direction) }.sortedByDescending { it.openedAt }
+    }
+    val evidence = remember(trades, chosenSymbol, chosenStrategy, chosenInterval, direction) {
+        SessionStrategyEvidence.build(trades, chosenSymbol, chosenStrategy, chosenInterval, direction)
+    }
     var grouping by remember { mutableStateOf("استراتژی") }
     val groups = when (grouping) { "نماد" -> performance.bySymbol; "سشن" -> performance.bySession; else -> performance.byStrategy }
     fun exportFile(make: () -> File, mime: String) {
@@ -128,10 +160,39 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
             Text("ZIP حاوی تنظیمات و پروفایل‌ها، گزارش کارها، آخرین نشست و آرشیوهای CSV/JSON موجود است؛ کلیدهای API صادر نمی‌شوند. داده‌ها می‌توانند شامل اطلاعات معاملات شخصی باشند.", color = AurumColors.TextSecondary, fontSize = 10.sp)
         }
         item {
+            Text("🛡️ ممیزی حد سود و ضرر", color = AurumColors.Gold, fontWeight = FontWeight.Bold)
+            Text("قواعد پلن: ریسک پایه ۵ دلار به‌علاوه ۰٫۵٪ سود واجد شرایط، هدف خالص ۲ تا ۳R؛ قفل سربه‌سر با تیک معتبر پس از ۱٫۵R خالص و سپس فقط بهبود. ممیزی پلن بر اساس مدل هزینهٔ فعلی است، نه تضمین اجرا یا گواه مسیر تاریخی. گپ/قطعی و بافر ۱۰ ثانیهٔ اولیهٔ برخی نمادهای کریپتو می‌تواند باعث فاصلهٔ اجرا از حد شود. اصلاح خودکار پلن باز متوقف است.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+            Text("🔎 بررسی نماد × استراتژی × تایم‌فریم × جهت", color = AurumColors.Gold, fontWeight = FontWeight.Bold)
+            Text("ژورنال Paper غیر‌بک‌تست؛ باز و بسته در بررسی معامله، فقط بستهٔ معتبر در آمار. همهٔ سشن‌ها UTC؛ نمونهٔ صفر نامعلوم است. این آمار پس‌نگر است، نه آزمون مستقل یا مجوز ورود.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+            EvidenceSelector("نماد", chosenSymbol, symbols) { chosenSymbol = it }
+            EvidenceSelector("استراتژی", chosenStrategy, strategyIds) { chosenStrategy = it }
+            Row {
+                EvidenceSelector("تایم", chosenInterval.label, Interval.entries.map { it.label }) { label -> chosenInterval = Interval.entries.first { it.label == label } }
+                EvidenceSelector("جهت", chosenDirection, listOf("هر دو", "خرید", "فروش")) { chosenDirection = it }
+            }
+            Text("هر ترکیب از انتخاب‌های بالا جداگانه قابل بررسی است. اطلاعات شبکه و جزئیات کامل هر معامله نیز در خروجی جامع ZIP قرار دارد.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+        }
+        items(evidence, key = { "matrix-session:" + it.session }) { row ->
+            val fmt: (Double?) -> String = { x -> x?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "نامعلوم" }
+            Column(Modifier.fillMaxWidth().background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp)).padding(8.dp)) {
+                Text(SessionPerformanceReport.sessionLabel(row.session), color = AurumColors.TextPrimary, fontWeight = FontWeight.SemiBold)
+                Text(if (row.count == 0) "INSUFFICIENT DATA — معامله بستهٔ معتبر ثبت نشده" else
+                    "${row.count} معامله · برد ${row.wins} / باخت ${row.losses} / صفر ${row.breakeven} · نرخ برد ${fmt(if (row.wins + row.losses > 0) row.wins * 100.0 / (row.wins + row.losses) else null)}٪ · خالص ${fmt(row.netUsd)} دلار · سود ناخالص ${fmt(row.grossProfitUsd)} / زیان ناخالص ${fmt(row.grossLossUsd)} · PF ${fmt(row.profitFactor)}\nمیانگین R ${fmt(row.meanR)} (${row.rSamples} نمونه) · میانه ${fmt(row.medianR)} · افت تجمع R ${fmt(row.maxDrawdownR)} · باخت پیاپی ${row.losingStreak} · مدت ${fmt(row.averageDurationMinutes)} دقیقه · مشاهده معتبر شبکه در ورود ${row.neuralEntryCount}", color = AurumColors.TextSecondary, fontSize = 10.sp)
+            }
+        }
+        item { Text("جزئیات معاملات انتخاب‌شده (${selectedTrades.size})", color = AurumColors.Gold, fontWeight = FontWeight.Bold) }
+        items(selectedTrades, key = { "evidence-trade:" + it.id }) { t ->
+            Column(Modifier.fillMaxWidth().background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp)).padding(8.dp)) {
+                val n = t.neuralEntryObservation
+                Text("${t.id} · ${t.action.name} · ${if (t.isOpen) "باز" else "بسته"} · ورود ${java.time.Instant.ofEpochMilli(t.openedAt)} UTC", color = AurumColors.TextPrimary, fontSize = 10.sp)
+                Text("ورود ${t.entry} · حد اولیه ${t.initialStopLoss ?: "نامعلوم"} · حد فعلی ${t.stopLoss} · هدف ${t.takeProfit} · ریسک ${t.fixedRiskUsd} دلار · P/L ${t.pnlUsd ?: "نامعلوم"}\n${SessionStrategyEvidence.planReviewFa(t)}\nشبکه در ورود: ${if (n == null) "ثبت نشده" else "احتمال ${n.predictedWinProbability}, R پیش‌بینی ${n.expectedR}, ویژگی‌ها ${n.features.size}, اعتبار زمانی ${n.isUsableFor(t.openedAt)}"}", color = AurumColors.TextSecondary, fontSize = 10.sp)
+            }
+        }
+        item {
             Text("📈 کارنامهٔ دسته‌بندی‌شده", color = AurumColors.Gold, fontWeight = FontWeight.Bold)
             val best = performance.bestSession
-            Text(if (best == null) "سشن برتر قابل اتکا در داده‌های موجود نیست: هر سشن به حداقل ۳۰ معاملهٔ دارای ریسک معتبر و میانگین R مثبت نیاز دارد." else "سشن برتر تاریخی: ${best.labelFa} · ${best.rSamples} نمونه · میانگین ${String.format(java.util.Locale.US, "%+.2f", best.meanR)}R؛ تضمین آینده نیست.", color = AurumColors.TextSecondary, fontSize = 11.sp)
-            Text("این رتبه‌بندی کلی است؛ ورود خودکار برای هر نماد و استراتژی جداگانه، پس از حداقل ۳۰ نمونه در هر یک از دو سشن، بهترین سشن با میانگین R مثبت را انتخاب می‌کند؛ در کمبود داده محدودیتی اعمال نمی‌شود. UTC ثابت است، نه ساعت محلی بازار.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+            Text(if (best == null) "سشن برتر توصیفی در داده‌های موجود نیست: هر سشن به حداقل ۳۰ معاملهٔ دارای ریسک معتبر و میانگین R مثبت نیاز دارد." else "سشن برتر تاریخی: ${best.labelFa} · ${best.rSamples} نمونه · میانگین ${String.format(java.util.Locale.US, "%+.2f", best.meanR)}R؛ تضمین آینده نیست.", color = AurumColors.TextSecondary, fontSize = 11.sp)
+            Text("رتبه‌بندی کلی فقط توصیفی است؛ سشن تاریخی مانع قطعی ورود نیست. UTC ثابت است، نه ساعت محلی بازار.", color = AurumColors.TextSecondary, fontSize = 10.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("استراتژی", "نماد", "سشن").forEach { mode ->
                     OutlinedButton(onClick = { grouping = mode }) { Text(if (mode == grouping) "✓ $mode" else mode, fontSize = 10.sp) }
