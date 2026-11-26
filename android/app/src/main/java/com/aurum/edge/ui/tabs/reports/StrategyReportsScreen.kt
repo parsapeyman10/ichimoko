@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -38,7 +39,7 @@ import com.aurum.edge.data.BacktestJobStore
 import com.aurum.edge.data.BacktestSession
 import com.aurum.edge.data.BacktestSessionStore
 import com.aurum.edge.data.StrategyReportExport
-import com.aurum.edge.data.SessionResearchExport
+import com.aurum.edge.data.ComprehensiveResearchExport
 import com.aurum.edge.ui.theme.AurumColors
 import java.io.File
 import java.text.DateFormat
@@ -70,6 +71,7 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
     val scope = rememberCoroutineScope()
     var revision by remember { mutableIntStateOf(0) }
     var message by remember { mutableStateOf("") }
+    var confirmComprehensive by remember { mutableStateOf(false) }
     val inventory by produceState<ExperimentInventory?>(null, revision) {
         value = withContext(Dispatchers.IO) {
             ExperimentInventory(BacktestJobStore(context).list(), BacktestSessionStore(context).read(), StrategyReportExport.archives(context))
@@ -94,6 +96,22 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
         return File(directory, name).apply { writeText(content, Charsets.UTF_8) }
     }
 
+    if (confirmComprehensive) {
+        AlertDialog(onDismissRequest = { confirmComprehensive = false },
+            title = { Text("خروجی جامع بدون رمز") },
+            text = { Text("فایل شامل همهٔ معاملات، اطلاعات حساب، تنظیمات، حافظه و وزن شبکه و دادهٔ بازار موجود است. بدون رمز فقط برای شخص مورد اعتماد بفرستید؛ حجم فایل ممکن است زیاد باشد. ادامه می‌دهید؟") },
+            confirmButton = { Button(onClick = {
+                confirmComprehensive = false
+                exportFile({
+                    val container = viewModel.container
+                    check(container.journalStore.awaitShardMerge(120_000L)) { "ادغام ژورنال کامل نشد؛ دوباره تلاش کنید." }
+                    ComprehensiveResearchExport.create(context, container.settingsStore.read(), container.neuralEngine.state.value,
+                        container.journalStore.trades.value.toList(), container.neuralEngine.exportFullStateJson())
+                }, "application/zip")
+            }) { Text("بله، ساخت خروجی") } },
+            dismissButton = { OutlinedButton(onClick = { confirmComprehensive = false }) { Text("انصراف") } })
+    }
+
     LazyColumn(Modifier.fillMaxSize().background(AurumColors.Bg).padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -104,14 +122,8 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
                 Button(onClick = { exportFile({ StrategyReportExport.create(context, settings, neural, trades) }, "application/zip") }) { Text("خروجی همه ZIP") }
                 OutlinedButton(onClick = { revision++ }) { Text("بازخوانی") }
             }
-            Button(onClick = {
-                exportFile({
-                    val store = viewModel.container.journalStore
-                    check(store.awaitShardMerge(120_000L)) { "ادغام ژورنال کامل نشد؛ دوباره تلاش کنید." }
-                    SessionResearchExport.create(context, viewModel.settings.value, viewModel.neuralState.value, store.trades.value.toList())
-                }, "application/zip")
-            }, modifier = Modifier.fillMaxWidth()) { Text("خروجی کامل تحلیل زمان معاملات ZIP") }
-            Text("شامل معاملات باز، بسته و بک‌تست ژورنال، ویژگی‌های ثبت‌شده و آرشیوهای موجود؛ کندل خام و ویژگی‌های ثبت‌نشده را نمی‌سازد. فایل بدون رمز و حاوی اطلاعات شخصی است؛ فقط برای فرد مورد اعتماد ارسال کنید.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+            Button(onClick = { confirmComprehensive = true }, modifier = Modifier.fillMaxWidth()) { Text("خروجی جامع تحلیل معاملات و هوش ZIP") }
+            Text("معاملات و ویژگی‌ها، شبکه و حافظه، تنظیمات مجاز، آرشیوها و داده‌های بازار موجود. کلید و رمز صادر نمی‌شود؛ دادهٔ ذخیره‌نشده ساخته نمی‌شود. خروجی بدون رمز و شخصی است.", color = AurumColors.TextSecondary, fontSize = 10.sp)
             if (message.isNotBlank()) Text(message, color = AurumColors.Gold, fontSize = 11.sp)
             Text("ZIP حاوی تنظیمات و پروفایل‌ها، گزارش کارها، آخرین نشست و آرشیوهای CSV/JSON موجود است؛ کلیدهای API صادر نمی‌شوند. داده‌ها می‌توانند شامل اطلاعات معاملات شخصی باشند.", color = AurumColors.TextSecondary, fontSize = 10.sp)
         }
