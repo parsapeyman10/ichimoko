@@ -845,6 +845,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                 strategyTitleFa = armedReport.strategyTitleFa,
                                 automatic = true,
                                 signalBarTime = armedReport.triggerBarTime,
+                                signalReport = armedReport,
                             )
                         }
                     }
@@ -1069,6 +1070,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
         automatic: Boolean = false,
         signalBarTime: Long? = null,
+        signalReport: StrategyEvaluationReport? = null,
     ) {
         // قاعدهٔ «یک معامله در هر لحظه»: هم نماد و هم استراتژی، پیش از هر تماس شبکه‌ای/هوش
         // مصنوعی سنجیده می‌شود تا هیچ لایه‌ای (نه رادار، نه گیت عصبی) نتواند بازش کند.
@@ -1078,7 +1080,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         }
         val cfg = settings.value
         if (!cfg.avalAiEnabled) {
-            executeOpenTradeNow(calc, note, entryInterval, strategyId, strategyTitleFa, automatic, signalBarTime)
+            executeOpenTradeNow(calc, note, entryInterval, strategyId, strategyTitleFa, automatic, signalBarTime, signalReport)
             return
         }
 
@@ -1109,9 +1111,9 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                 res.onSuccess { verdict ->
                     _lastAiVerdict.value = verdict
                     val combinedNote = "$note · هوش بیرونی: ${if (verdict.approved) "موافق" else "مخالف"} (${verdict.confidence}٪)، صرفاً مشاهده‌ای: ${verdict.reasonFa}"
-                    executeOpenTradeNow(calc, combinedNote, entryInterval, strategyId, strategyTitleFa, automatic, signalBarTime)
+                    executeOpenTradeNow(calc, combinedNote, entryInterval, strategyId, strategyTitleFa, automatic, signalBarTime, signalReport)
                 }.onFailure {
-                    executeOpenTradeNow(calc, "$note · هوش بیرونی ناموجود؛ ارزیابی پیش‌بینی انجام نشد", entryInterval, strategyId, strategyTitleFa, automatic, signalBarTime)
+                    executeOpenTradeNow(calc, "$note · هوش بیرونی ناموجود؛ ارزیابی پیش‌بینی انجام نشد", entryInterval, strategyId, strategyTitleFa, automatic, signalBarTime, signalReport)
                 }
             } finally {
                 _aiChecking.value = false
@@ -1169,6 +1171,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
         automatic: Boolean = false,
         signalBarTime: Long? = null,
+        signalReport: StrategyEvaluationReport? = null,
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
@@ -1209,8 +1212,10 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
             "⏳ " + sessionPlan.badgeFa
         } else ""
         val effectiveNote = if (sessionWarningFa.isBlank()) note else "$note · $sessionWarningFa".trim(' ', '·')
-        val matchedReport = _dualSymbolStrategyReports.value[normSym]
-            ?.reportFor(entryInterval, strategyId)
+        val matchedReport = signalReport?.takeIf { V1Universe.normalize(it.symbol) == normSym &&
+            it.strategyId == strategyId && it.triggerInterval == entryInterval && it.action == calc.action &&
+            signalBarTime != null && it.triggerBarTime == signalBarTime }
+            ?: _dualSymbolStrategyReports.value[normSym]?.reportFor(entryInterval, strategyId)
         val entryReport = matchedReport?.takeIf {
             signalBarTime != null && it.triggerBarTime == signalBarTime && it.action == calc.action
         }
@@ -1236,6 +1241,21 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
         val gauge4h = LiveQuoteFetcher.peekCachedCandles(normSym, Interval.H4).filter { it.closed && it.time + 14_400_000L <= now }
         val rating1 = freshTechnicalRating(normSym, Interval.H1, now)
         val rating4 = freshTechnicalRating(normSym, Interval.H4, now)
+        // Last shared entry point: evaluate again after any asynchronous advisor work.
+        // Manual entries and the explicitly exempt independent methods remain outside this gate.
+        val neuralEligible = BitcoinStrategyModel.fromId(strategyId).neuralLearningEnabled
+        val gateState = container.neuralEngine.stateFlow.value
+        val hasNeuralSnapshot = entryReport?.triggerSnapshot?.time == signalBarTime && signalBarTime != null
+        val neuralEvaluation = if (automatic && neuralEligible && gateState.gateControlInitialized &&
+            container.neuralEngine.state.value.isGateActive && hasNeuralSnapshot && entryReport != null) {
+            container.neuralEngine.evaluateReport(entryReport, rating1, rating4, now)
+        } else null
+        com.aurum.edge.core.NeuralAutomaticEntryGate.blockReason(automatic, neuralEligible,
+            gateState.gateControlInitialized, container.neuralEngine.state.value.isGateActive,
+            hasNeuralSnapshot, neuralEvaluation)?.let { reason ->
+            _toast.value = "⛔ منع شبکه برای $normSym / $strategyId: $reason"
+            return
+        }
         val entryObservation = entryReport?.let { container.neuralEngine.observeEntry(it, calc.riskReward, now, rating1, rating4) }
         val weightedRating = com.aurum.edge.core.WeightedTechnicalRating.score(calc.action, rating1, rating4)
         val ratingDecision = com.aurum.edge.core.RatingEvidenceGate.evaluate(
@@ -2518,6 +2538,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                                     strategyTitleFa = report.strategyTitleFa,
                                     automatic = true,
                                     signalBarTime = report.triggerBarTime,
+                                    signalReport = report,
                                 )
                             }
                         }

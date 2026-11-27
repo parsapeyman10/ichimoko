@@ -57,6 +57,7 @@ class AppContainer(context: Context) {
 
     private val appExceptionHandler = CoroutineExceptionHandler { _, _ -> }
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + appExceptionHandler)
+    init { appScope.launch { neuralEngine.initializeGateControlOnce() } }
 
     private var protectionMonitorJob: kotlinx.coroutines.Job? = null
     private val _unprotectedQuoteSymbols = MutableStateFlow<Set<String>>(emptySet())

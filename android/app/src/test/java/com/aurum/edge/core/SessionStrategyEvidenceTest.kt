@@ -28,7 +28,8 @@ class SessionStrategyEvidenceTest {
     }
     @Test fun `profiles include independent directions and empty sessions`() {
         val profiles = SessionStrategyEvidence.profiles(listOf(trade("a", 8, 10.0)))
-        assertEquals(3, profiles.size); assertTrue(profiles.all { it.sessions.size == 5 })
-        assertEquals(0, profiles.first { it.direction == "SELL" }.sessions.sumOf { it.count })
+        assertTrue(profiles.all { it.sessions.size == 5 })
+        assertTrue(profiles.any { it.symbol == "BTC/USDT" && it.strategyId == "one" && it.timeframe == "5m" && it.direction == "BUY" && it.sessions.all { row -> row.count == 0 } })
+        assertEquals(0, profiles.first { it.symbol == "XAU/USD" && it.strategyId == "one" && it.timeframe == "5m" && it.direction == "SELL" }.sessions.sumOf { it.count })
     }
 }

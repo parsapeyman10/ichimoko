@@ -349,6 +349,8 @@ data class NeuralNetworkPersistedState(
     val forceActiveBeforeWarmup: Boolean = false,
     // ── شرط دوم فعال‌سازی گیت: تصمیم صریح و قابل برگشت خود کاربر ──
     val gateUserActivationEnabled: Boolean = false,
+    /** One-time migration; later user choices must survive restart. */
+    val gateControlInitialized: Boolean = false,
     // ── دفتر یادگیری: هر معامله فقط یک‌بار (اثرانگشت یکتا) آموزش می‌دهد ──
     val learnedLedger: List<NeuralLearningLedger.LearnedStamp> = emptyList(),
     val learnedLedgerPrunedCount: Int = 0,
@@ -707,7 +709,7 @@ class NeuralSelfLearningEngine(
             learnedTotal = total,
             target = target,
             userActivationEnabled = cur.gateUserActivationEnabled,
-        ).copy(isGateActive = false, summaryFa = "شبکه صرفاً امتیاز و هشدار می‌دهد؛ منع پیش‌بینی فعال نیست. قفل‌های ایمنی مستقل پابرجا هستند.")
+        )
         val progressPct = ((total.toDouble() / target) * 100.0).coerceIn(0.0, 100.0)
         val allClusters = cur.conditionClusters.values.toList()
         val noTradeClusters = allClusters
@@ -983,7 +985,7 @@ class NeuralSelfLearningEngine(
 
         val phaseBadgeFa = when {
             gate.isGateActive ->
-                "فاز ۵ (گیت اجرایی فعال — هر دو شرط کامل): ورود در شرایط پرخطر مسدود می‌شود · پارامترها با CEM + Bayesian تیون‌شده"
+                "گیت اجرایی روشن است؛ ورود خودکار واجد شرایط ممکن است مسدود شود؛ اثبات سودآوری نیست"
             warmupDone ->
                 "فاز ۴ (شرط ۱ کامل شد — منتظر شرط ۲): شبکه آموزش‌دیده و آماده است؛ گیت فقط با فعال‌سازی شما وارد مدار می‌شود"
             cur.autoTunedParameters.samplesAnalyzed >= 5 -> "فاز ۳ (تیونینگ پس از آموزش — نسل #${cur.autoTunedParameters.tuningGeneration}): بهینه‌سازی مستمر پارامترها با CEM + Thompson Sampling"
@@ -2506,7 +2508,7 @@ class NeuralSelfLearningEngine(
         val isNoTrade = policy.blocksTrade ||
             effectiveWinProb * 100.0 < policy.winProbFloorPct ||
             blendedExpectedR < policy.expectedRFloor
-        val isBlocking = false // تصمیم کاربر: امتیاز پیش‌بینی هشدار است، نه منع ورود.
+        val isBlocking = policy.blocksTrade
 
         val summaryFa = "احتمال برد شبکه عصبی: ${(effectiveWinProb * 100).toInt()}% · امید ریاضی: ${String.format(Locale.US, "%+.2fR", blendedExpectedR)} · ${policy.stage.labelFa}"
         val warningFa = when {
@@ -2556,13 +2558,16 @@ class NeuralSelfLearningEngine(
      */
     fun totalLearnedTradesCount(): Int = persistedState.totalLearnedTrades
 
-    /**
-     * شرط دوم فعال‌سازی گیت: تصمیم صریح کاربر.
-     * این کلید هیچ‌گاه شرط اول (۱۰,۰۰۰ معاملهٔ یادگیری‌شده) را دور نمی‌زند؛ فقط به آن اجازهٔ اجرا می‌دهد.
-     */
+    /** User approved activating the control once; the explicit switch choice wins forever after. */
+    @Synchronized
+    fun initializeGateControlOnce() {
+        if (!persistedState.gateControlInitialized) setGateUserActivation(true)
+    }
+
+    /** Persist the user's choice; learning remains independent of this switch. */
     @Synchronized
     fun setGateUserActivation(enabled: Boolean) {
-        if (persistedState.gateUserActivationEnabled == enabled) return
+        if (persistedState.gateControlInitialized && persistedState.gateUserActivationEnabled == enabled) return
         val nowMs = System.currentTimeMillis()
         val entry = NeuralLearningLedger.KnowledgeChangeEntry(
             id = NeuralLearningLedger.shortId("GATE", nowMs, enabled.toString()),
@@ -2570,7 +2575,7 @@ class NeuralSelfLearningEngine(
             kindCode = if (enabled) "GATE_USER_ENABLED" else "GATE_USER_DISABLED",
             titleFa = if (enabled) "فعال‌سازی گیت توسط کاربر" else "غیرفعال‌سازی گیت توسط کاربر",
             detailFa = if (enabled) {
-                "شما اجازهٔ اجرای گیت را دادید. گیت فقط پس از رسیدن به ${persistedState.warmupTargetTrades} معاملهٔ یادگیری‌شده (شرط ۱) وارد مدار می‌شود."
+                "گیت از اولین نمونهٔ یادگیری‌شده برای ورودهای خودکارِ دارای گزارش معتبر فعال است؛ دقت و سودآوری آن تضمین نیست."
             } else {
                 "گیت تا اطلاع بعدی فقط یاد می‌گیرد و هشدار می‌دهد؛ ورودی مسدود نمی‌شود."
             },
@@ -2580,6 +2585,7 @@ class NeuralSelfLearningEngine(
         persistState(
             persistedState.copy(
                 gateUserActivationEnabled = enabled,
+                gateControlInitialized = true,
                 forceActiveBeforeWarmup = false,
                 knowledgeChangeLog = NeuralLearningLedger.appendChange(persistedState.knowledgeChangeLog, entry),
             ),

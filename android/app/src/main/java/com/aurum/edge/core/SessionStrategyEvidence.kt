@@ -40,13 +40,18 @@ object SessionStrategyEvidence {
     }
     @Serializable
     data class Profile(val symbol: String, val strategyId: String, val timeframe: String, val direction: String, val sessions: List<Row>)
-    fun profiles(trades: List<PaperTrade>): List<Profile> {
-        val keys = trades.filter { !it.isBacktest }.map { Triple(V1Universe.normalize(it.symbol), it.strategyId, it.interval) }.distinct()
-        return keys.flatMap { (symbol, strategy, interval) ->
+    fun profiles(trades: List<PaperTrade>, extraStrategyIds: List<String> = emptyList()): List<Profile> {
+        val live = trades.filter { !it.isBacktest }
+        val groups = live.groupBy { Triple(V1Universe.normalize(it.symbol), it.strategyId, it.interval) }
+        val symbols = (V1Universe.allSymbols + live.map { V1Universe.normalize(it.symbol) }).filter { it.isNotBlank() }.distinct().sorted()
+        val strategies = (BitcoinStrategyModel.entries.map { it.id } + extraStrategyIds + live.map { it.strategyId })
+            .filter { it.isNotBlank() }.distinct().sorted()
+        return symbols.flatMap { symbol -> strategies.flatMap { strategy -> Interval.entries.flatMap { interval ->
+            val bucket = groups[Triple(symbol, strategy, interval)].orEmpty()
             listOf(null, SignalAction.BUY, SignalAction.SELL).map { direction ->
-                Profile(symbol, strategy, interval.label, direction?.name ?: "BOTH", build(trades, symbol, strategy, interval, direction))
+                Profile(symbol, strategy, interval.label, direction?.name ?: "BOTH", build(bucket, symbol, strategy, interval, direction))
             }
-        }
+        } } }
     }
     /** Re-evaluates saved prices with the current paper cost model, not a historical execution proof. */
     fun planReviewFa(t: PaperTrade): String {

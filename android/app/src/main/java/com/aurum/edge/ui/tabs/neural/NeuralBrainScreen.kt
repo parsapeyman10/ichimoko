@@ -955,7 +955,7 @@ fun NeuralBrainScreen(
                     ) {
                         Text(
                             modifier = Modifier.weight(1f).padding(end = 6.dp),
-                            text = "شبکه در حالت مشاهده‌ای است؛ پیش‌بینی به تنهایی مانع ورود نمی‌شود.",
+                            text = if (neuralState.isGateActive) "منع شبکه برای ورود خودکار روشن است؛ ممکن است فرصت سودده را هم رد کند." else "شبکه یاد می‌گیرد و هشدار می‌دهد؛ منع پیش‌بینی در مدار نیست.",
                             style = MaterialTheme.typography.labelMedium,
                             color = if (neuralState.isGateActive) AurumColors.Green else AurumColors.Gold,
                             fontWeight = FontWeight.Bold,
@@ -980,15 +980,14 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "منع پیش‌بینی غیرفعال است؛ خروجی شبکه فقط هشدار و اطلاعات است.",
+                            text = if (neuralState.gateUserActivationEnabled) "منع پیش‌بینی روشن است؛ خاموش‌کردن با شماست. ورود دستی و روش‌های مستثنا از این گیت عبور می‌کنند." else "منع پیش‌بینی خاموش است؛ شبکه همچنان یاد می‌گیرد و هشدار می‌دهد.",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextSecondary,
                             modifier = Modifier.weight(1f),
                         )
                         Switch(
-                            checked = false,
-                            enabled = false,
-                            onCheckedChange = {},
+                            checked = neuralState.gateUserActivationEnabled,
+                            onCheckedChange = { viewModel.setNeuralGateUserActivation(it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = AurumColors.Green,
                                 checkedTrackColor = AurumColors.Green.copy(alpha = 0.35f),
