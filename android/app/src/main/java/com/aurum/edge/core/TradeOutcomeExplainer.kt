@@ -72,6 +72,11 @@ object TradeOutcomeExplainer {
         }
     }
 
+    private fun formatPathTime(ms: Long): String = runCatching {
+        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", java.util.Locale.US)
+            .withZone(java.time.ZoneOffset.UTC).format(java.time.Instant.ofEpochMilli(ms))
+    }.getOrDefault("نامعلوم")
+
     /** آمار یک الگو در کل ژورنال. */
     data class PatternStat(
         val tag: String,
@@ -93,7 +98,7 @@ object TradeOutcomeExplainer {
     fun explain(trade: PaperTrade, candles: List<Candle> = emptyList()): Explanation {
         val direction = if (trade.action == SignalAction.SELL) -1.0 else 1.0
         val exit = trade.exitPrice ?: trade.entry
-        val risk = (trade.entry - trade.stopLoss) * direction
+        val risk = (trade.entry - (trade.initialStopLoss ?: trade.stopLoss)) * direction
         val finalR = if (risk > 1e-9) ((exit - trade.entry) * direction) / risk else 0.0
         val pnl = trade.pnlUsd ?: 0.0
         val isWin = pnl >= 0.0
@@ -102,13 +107,22 @@ object TradeOutcomeExplainer {
         var mfeR = -1.0
         var maeR = -1.0
         var barsHeld = 0
+        var pathCoverageFa = ""
         val openedAt = trade.openedAt
         val closedAt = trade.closedAt ?: 0L
-        if (candles.isNotEmpty() && risk > 1e-9) {
-            val window = candles.filter { it.time in openedAt..(if (closedAt > 0) closedAt else Long.MAX_VALUE) }
-            val usable = window.ifEmpty { candles.takeLast(1) }
+        // Legacy gold candles can mix futures, spot and token prices with no per-bar provenance.
+        // They are not evidence of the quotes that protected this paper trade.
+        val unverifiedGold = true // No stored per-bar execution-venue provenance exists for any symbol.
+        if (!unverifiedGold && candles.isNotEmpty() && risk > 1e-9) {
+            val window = candles.filter { it.closed && it.time >= openedAt && closedAt > 0 &&
+                it.time <= closedAt - trade.interval.millis }
+            val usable = window
             if (usable.isNotEmpty()) {
                 barsHeld = usable.size
+                val sorted = usable.sortedBy { it.time }
+                val gaps = sorted.zipWithNext().count { (a, b) -> b.time - a.time > trade.interval.millis }
+                // Timestamps in later text expose partial coverage rather than implying a continuous path.
+                pathCoverageFa = "${barsHeld} کندل کامل، از ${formatPathTime(sorted.first().time)} تا ${formatPathTime(sorted.last().time)} UTC؛ $gaps فاصلهٔ خالی بین کندل‌ها"
                 var best = 0.0
                 var worst = 0.0
                 for (c in usable) {
@@ -138,16 +152,17 @@ object TradeOutcomeExplainer {
 
         // ۲) مسیر قیمت
         if (mfeR >= 0.0) {
-            reasons += "بیشترین سود شناور " + f(mfeR) + "R بود و بیشترین ضرر شناور " + f(maeR) + "R؛ " +
+            reasons += "پوشش دادهٔ مسیر: $pathCoverageFa؛ لبه‌های ورود/خروج و فاصله‌های خالی ممکن است حرکت‌هایی داشته باشند."
+            reasons += "در کندل‌های کامل داخل بازهٔ معامله، بیشترین حرکت مساعد " + f(mfeR) + "R و نامساعد " + f(maeR) + "R بود؛ این مقادیر کندل تاریخی‌اند، نه تیک‌های اجرای معامله؛ منبع ممکن است متفاوت باشد؛ " +
                 when {
-                    isWin && mfeR - finalR >= 0.8 -> "یعنی بعد از هدف هم حرکت ادامه داشت و " +
-                        f(mfeR - finalR) + "R از مسیر بی‌استفاده ماند."
-                    isWin -> "یعنی مسیر تا هدف تقریباً یک‌طرفه بود."
-                    mfeR >= 0.8 -> "یعنی معامله اول در جهت سود رفت و بعد برگشت؛" +
-                        " برگشت از سود می‌آید، نه از ورود اشتباه."
-                    else -> "یعنی معامله از همان ابتدا در جهت مخالف رفت."
+                    isWin && mfeR - finalR >= 0.8 -> "بیشینهٔ ثبت‌شده " +
+                        f(mfeR - finalR) + "R بالاتر از خروج بود؛ ترتیب حرکت در کندل مشخص نیست."
+                    isWin -> "این اعداد نوسان ثبت‌شده را نشان می‌دهند، نه علت قطعی برد."
+                    mfeR >= 0.8 -> "بیشینهٔ ثبت‌شده مثبت بود ولی نتیجه منفی شد؛ ترتیب دقیق در هر کندل مشخص نیست."
+                    else -> "سود شناور ثبت‌شده محدود بود؛ ترتیب دقیق حرکت مشخص نیست."
                 }
         }
+        if (mfeR < 0.0) reasons += if (unverifiedGold) "مسیر معامله نامشخص است: منشأ کندل‌های ذخیره‌شده و تطابق آن با قیمت معامله ثبت نشده؛ سقف و کف کندل اثبات تیک یا فعال‌شدن قفل نیست." else "کندل کامل قابل اتکا در بازهٔ ورود تا خروج موجود نیست؛ مسیر قابل تعیین نیست."
         if (!isWin && mfeR >= 0.0 && mfeR < 0.2) tags += Tags.NEVER_IN_PROFIT
         if (!isWin && mfeR >= 0.8 && finalR < 0.0) tags += Tags.GAVE_BACK_PROFIT
         if (isWin && mfeR >= 0.0 && mfeR - finalR >= 1.0) tags += Tags.LEFT_RUNNER
@@ -158,14 +173,19 @@ object TradeOutcomeExplainer {
             if (kumoThickness >= 0.8) {
                 tags += Tags.HEAVY_KUMO
                 if (!isWin) {
-                    reasons += "ابر لحظهٔ ورود ضخیم بود (" + f(kumoThickness) + " ATR)؛ ورود از داخل/لبهٔ " +
-                        "ابر ضخیم یعنی قیمت باید کل ابر را رد کند و برگشت سریع‌تر رخ می‌دهد."
+                    reasons += "ابر لحظهٔ ورود ضخیم بود (" + f(kumoThickness) + " ATR)؛ این ویژگی به‌تنهایی علت باخت را ثابت نمی‌کند."
                 }
             }
             if (kumoThickness in 0.0..0.25) {
                 tags += Tags.KUMO_ENTRY
-                if (isWin) reasons += "ابر نازک بود (" + f(kumoThickness) + " ATR)؛ عبور از آن کم‌هزینه بود."
+                if (isWin) reasons += "ابر هنگام ورود نازک بود (" + f(kumoThickness) + " ATR)."
             }
+        }
+
+        if (trade.cloudAgeBars > 0 && trade.cloudSignalBarTime > 0L) {
+            val cloud = CloudLifetimeEvidence.Snapshot(trade.cloudAgeBars, trade.cloudAgeCensored,
+                trade.cloudTwistAheadBars.takeIf { it > 0 }, trade.cloudSignalBarTime)
+            reasons += cloud.textFa() + "؛ نتیجهٔ این معامله به‌تنهایی علت را ثابت نمی‌کند."
         }
 
         // ۴) فاصله از کیه‌جین = دیرآمدن
@@ -174,8 +194,7 @@ object TradeOutcomeExplainer {
             if (distKijun >= 1.5) {
                 tags += Tags.FAR_FROM_KIJUN
                 tags += Tags.LATE_ENTRY
-                reasons += "فاصلهٔ ورود از کیه‌جین " + f(distKijun) + " ATR بود؛ ورود دیرهنگام یعنی حد ضرر " +
-                    "دورتر می‌افتد و برگشتِ کوچک هم آن را می‌زند."
+                reasons += "فاصلهٔ ورود از کیه‌جین " + f(distKijun) + " ATR بود؛ برچسب ورود دیرهنگام برای بررسی."
             } else if (distKijun <= 0.6) {
                 reasons += "ورود نزدیک کیه‌جین (" + f(distKijun) + " ATR) بود؛ نقطهٔ ورود متعارف."
             }
@@ -189,7 +208,7 @@ object TradeOutcomeExplainer {
                 reasons += "کارایی روند (ER14) در لحظهٔ ورود " + f(er) + " بود؛ بازار بی‌روند و بازگشتی بود."
             } else if (er >= 0.45) {
                 tags += Tags.CLEAN_TREND
-                if (isWin) reasons += "ER14 برابر " + f(er) + " بود؛ بازار رونددار و هم‌جهت با سیگنال."
+                if (isWin) reasons += "ER14 برابر " + f(er) + " بود؛ کارایی حرکت بالا ثبت شد."
             }
         }
         val atrPct = trade.stateAtrPctOfPrice
@@ -201,7 +220,7 @@ object TradeOutcomeExplainer {
         val vol = trade.stateVolumeRatio20
         if (vol >= 0.0 && vol < 0.8) {
             tags += Tags.THIN_VOLUME
-            reasons += "حجم " + f(vol) + " برابر میانگین ۲۰ کندل بود؛ حرکت پشتوانهٔ حجمی نداشت."
+            reasons += "حجم " + f(vol) + " برابر میانگین ۲۰ کندل بود."
         }
 
         // ۷) زمان
@@ -212,8 +231,7 @@ object TradeOutcomeExplainer {
             }
             if (!isWin && barsHeld >= 20) {
                 tags += Tags.SLOW_BLEED
-                reasons += "باخت " + barsHeld + " کندل طول کشید؛ این‌طور باخت‌ها معمولاً از بی‌روندی " +
-                    "می‌آیند نه از یک شکست ناگهانی."
+                reasons += "باخت " + barsHeld + " کندل طول کشید؛ علت آن از این داده به‌تنهایی مشخص نیست."
             }
         }
 
@@ -225,7 +243,7 @@ object TradeOutcomeExplainer {
             !isWin && Tags.CHOP in tags ->
                 "درس: ER14 زیر ۰٫۲۵ یعنی بازار روند ندارد؛ سیگنال‌های شکست در چنین بازاری برمی‌گردند."
             isWin && Tags.LEFT_RUNNER in tags ->
-                "درس: مسیر ادامه داشت و هدف زودتر بسته شد؛ ارزش بررسی تریلینگ/قفل سود را دارد."
+                "درس: اختلاف بیشینه و خروج ارزش بررسی دارد؛ ترتیب حرکت در کندل مشخص نیست."
             isWin -> "درس: همین ترکیب وضعیت، برد داده است."
             else -> "درس: مسیر معامله ثبت شد تا در آمار همان وضعیت شمرده شود."
         }
@@ -286,17 +304,14 @@ object TradeOutcomeExplainer {
      * می‌شوند (اگر هنگام بسته شدن توضیح ساخته شده باشد) یا از وضعیت ثبت‌شدهٔ ورود بازسازی می‌شوند.
      */
     fun tagsOf(trade: PaperTrade): List<String> {
-        if (trade.outcomeTags.isNotEmpty()) return trade.outcomeTags
+        val unverifiedPathTags = setOf(Tags.NEVER_IN_PROFIT, Tags.GAVE_BACK_PROFIT, Tags.LEFT_RUNNER, Tags.FAST_WIN, Tags.SLOW_BLEED)
+        if (trade.outcomeTags.isNotEmpty()) return trade.outcomeTags.filterNot { it in unverifiedPathTags }
         val tags = mutableListOf<String>()
         if (trade.stateKumoThicknessAtr >= 0.8) tags += Tags.HEAVY_KUMO
         if (trade.stateDistKijunAtr >= 1.5) tags += Tags.LATE_ENTRY
         if (trade.stateEr14 in 0.0..0.25) tags += Tags.CHOP
         if (trade.stateEr14 >= 0.45) tags += Tags.CLEAN_TREND
         if (trade.stateVolumeRatio20 in 0.0..0.8) tags += Tags.THIN_VOLUME
-        if (trade.mfeR >= 0.0 && (trade.pnlUsd ?: 0.0) < 0.0) {
-            if (trade.mfeR < 0.2) tags += Tags.NEVER_IN_PROFIT
-            if (trade.mfeR >= 0.8) tags += Tags.GAVE_BACK_PROFIT
-        }
         return tags
     }
 

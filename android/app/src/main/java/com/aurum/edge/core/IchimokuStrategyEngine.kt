@@ -4819,13 +4819,7 @@ object IchimokuStrategyEngine {
         )
     }
 
-    /**
-     * موتور مدیریت معاملات باز با معماری «حد ضرر ساختاری کاملاً ثابت (غیرپله‌ای) + حفظ R:R اولیه + خروج هوشمند در اتمام روند»:
-     * - حد ضرر (`stopLoss`) تحت هیچ شرایطی به‌صورت پله‌ای (`Break-Even` یا تریل پلکانی) جابجا نمی‌شود و تا پایان معامله
-     *   دقیقاً روی همان حد ضرر ساختاری اولیه (`initialStopLoss ?: stopLoss`) ثابت می‌ماند.
-     * - نسبت `R:R` و حد سود (`takeProfit`) دقیقاً همان مقدار اولیه زمان باز شدن معامله باقی می‌ماند و حتی اگر `R:R > 3.0` باشد،
-     *   حد ضرر ثابت مانده و معامله تا هدف اولیه خود (`takeProfit`) یا تشخیص قطعی برگشت روند ادامه می‌یابد.
-     */
+    /** خروج مبتنی بر روند و تریل ساختاری؛ ریسک اولیه مرجع R است و حد فعال جداگانه حفظ می‌شود. */
     fun evaluateOpenTradeManagement(
         trade: PaperTrade,
         report: StrategyEvaluationReport,
@@ -4848,7 +4842,7 @@ object IchimokuStrategyEngine {
             return PreserveModeEvaluation(
                 tradeId = trade.id,
                 newStopLoss = fixedStopLoss,
-                stageTitleFa = "⚡ خروج هوشمند در سود (اتمام روند در +${round2(currentRMultiple)}R با حد ضرر ثابت)",
+                stageTitleFa = "⚡ خروج هوشمند در سود (اتمام روند در +${round2(currentRMultiple)}R با حد ضرر فعال)",
                 reasonFa = trendHealth.exitTriggerReasonFa,
                 lockedRMultiple = round2(currentRMultiple),
                 shouldCloseImmediatelyInProfit = true,
@@ -4864,7 +4858,7 @@ object IchimokuStrategyEngine {
             trade.note.contains(BE_TAG_MARK) ||
                 trade.note.contains(TRAIL_TAG_MARK) ||
                 trade.note.contains(STRUCT_TAG_MARK) ||
-                fixedStopLoss != (trade.initialStopLoss ?: fixedStopLoss)
+                trade.stopLoss != (trade.initialStopLoss ?: trade.stopLoss)
         val reached3RCeilingForStandardTrade =
             trade.riskReward <= 3.0001 && currentRMultiple >= 3.0 && !hasLockedInProfit
         if (reachedTp || reached3RCeilingForStandardTrade) {
@@ -4872,10 +4866,10 @@ object IchimokuStrategyEngine {
             return PreserveModeEvaluation(
                 tradeId = trade.id,
                 newStopLoss = fixedStopLoss,
-                stageTitleFa = "🎯 اتمام و بستن کامل معامله در هدف R:R اولیه (+${round2(currentRMultiple)}R · حد ضرر ثابت)",
+                stageTitleFa = "🎯 اتمام و بستن کامل معامله در هدف R:R اولیه (+${round2(currentRMultiple)}R · حد ضرر فعال)",
                 reasonFa = String.format(
                     Locale.US,
-                    "رسیدن به هدف تعیین‌شده (%.2fR · R:R اولیه 1:%.2f) با حد ضرر کاملاً ثابت و غیرپله‌ای",
+                    "رسیدن به هدف تعیین‌شده (%.2fR · R:R اولیه 1:%.2f) با حفظ حد ضرر فعال",
                     currentRMultiple,
                     trade.riskReward,
                 ),
@@ -4885,110 +4879,31 @@ object IchimokuStrategyEngine {
             )
         }
 
-        // ── ۳. ریسک‌فری در +۱R و تریل در +۲R (Preserve Mode واقعی) ───────────────
-        // پیش از این، حد ضرر «تحت هیچ شرایطی» جابه‌جا نمی‌شد و هر معامله‌ای که به +۱R می‌رسید
-        // تا −۱R برمی‌گشت. اکنون حد ضرر پله‌ای در سود قفل می‌شود و حد سود جابه‌جا نمی‌شود تا
-        // هندسهٔ اولیهٔ R:R دست‌نخورده بماند.
-        if (config.enablePreserveMode) {
-            // ── قاعدهٔ کاربر (جای قاعدهٔ قدیم «ریسک‌فری در +۱R و تریل در +۲R») ──
-            // ۱) تا وقتی سود باز به ۱٫۵R نرسیده، حق جابه‌جایی حد ضرر را نداریم.
-            // ۲) بعد از آن هم فقط روی یک **سطح ساختاری** (تنکان، یا ۰٫۳۵ ATR عقب‌تر از
-            //    قیمت) جابه‌جا می‌شود، و آن سطح باید سود **مثبتِ خالص بعد از کارمزد**
-            //    قفل کند؛ وگرنه جابه‌جایی یعنی «ریسک‌فری کاغذی» که در واقعیت ضرر است.
-            // آستانهٔ جابه‌جایی «متناسب با شرایط» است، نه یک عدد ثابت برای همهٔ بازارها:
-            // در بازار پرنوسان دیرتر (سخت‌گیرانه‌تر) و در روند قوی/ابر ضخیم زودتر قفل می‌شود.
-            val moveThresholdR = adaptiveStopMoveThresholdR(
-                atrPercentOfPrice = if (trade.entry > 0.0) trigSnap.atr14 / trade.entry * 100.0 else 0.0,
-                tenkanKijunSpreadAtr = kotlin.math.abs(trigSnap.tenkan - trigSnap.kijun) /
-                    trigSnap.atr14.coerceAtLeast(1e-9),
-                cloudThicknessAtr = kotlin.math.abs(trigSnap.currentSpanA - trigSnap.currentSpanB) /
-                    trigSnap.atr14.coerceAtLeast(1e-9),
-                interval = report.triggerInterval,
-            )
-            if (currentRMultiple >= moveThresholdR) {
-                val spec = VenueSpecs.of(trade.symbol)
-                val feePct = (spec.takerFeeBps * 2.0 + spec.spreadBps) / 10_000.0
-                val feePerUnit = trade.entry * feePct
-                // آیا حد ضرر قبلاً یک‌بار جابه‌جا شده؟ (حالت «بعد از جابه‌جایی»)
-                val stopMovedBefore = hasLockedInProfit
-                /**
-                 * ── قاعدهٔ کاربر برای «جابه‌جایی دوم به بعد» ─────────────────────────
-                 * «SL بعد جابه‌جایی زمانی حق جابه‌جایی دارد که یک مقاومت با حد سود مثبت
-                 * داشته باشد؛ حد سود هم حداقل باید از کارمزد آن ترید دو برابر بیشتر باشد.»
-                 *
-                 * پس دو شرط اضافه شد:
-                 *  ۱) از جابه‌جایی دوم به بعد، لنگر باید **سطح واقعی** باشد (تنکان، کیجون یا
-                 *     لبهٔ کومو)، نه «۰٫۳۵ ATR عقب‌تر از قیمت» که سطح نیست و فقط فاصله است.
-                 *  ۲) از آن سطح تا حد سود، فاصله باید ≥ **۲ × کارمزد رفت‌وبرگشت** بمانَد؛
-                 *     یعنی هدفِ باقی‌مانده هنوز هزینهٔ دو معامله را می‌پوشاند. وگرنه قفل‌کردن
-                 *     یعنی «سود هدف کوچک‌تر از کارمزد».
-                 */
-                val levelTenkan = trigSnap.tenkan
-                val levelKijun = trigSnap.kijun
-                val levelKumoNear = if (isBuy) {
-                    maxOf(trigSnap.currentSpanA, trigSnap.currentSpanB)
-                } else {
-                    minOf(trigSnap.currentSpanA, trigSnap.currentSpanB)
-                }
-                val atrBuffer = if (isBuy) livePrice - trigSnap.atr14 * 0.35 else livePrice + trigSnap.atr14 * 0.35
-                val realLevels = listOf(levelTenkan, levelKijun, levelKumoNear)
-                    .filter { it > 0.0 && it.isFinite() }
-                    .filter { if (isBuy) it < livePrice else it > livePrice }
-                val bestRealLevel = if (isBuy) realLevels.maxOrNull() else realLevels.minOrNull()
-                val structuralAnchor = bestRealLevel ?: levelTenkan
-                val structuralCandidate = if (bestRealLevel == null) {
-                    atrBuffer // سطح واقعی پیدا نشد: فقط اولین جابه‌جایی مجاز است
-                } else if (isBuy) {
-                    // اولین جابه‌جایی می‌تواند «سطح یا بافر» هرکدام بهتر بود باشد؛
-                    // جابه‌جایی دوم به بعد فقط روی سطح واقعی.
-                    if (stopMovedBefore) bestRealLevel else maxOf(bestRealLevel, atrBuffer)
-                } else {
-                    if (stopMovedBefore) bestRealLevel else minOf(bestRealLevel, atrBuffer)
-                }
-                // فاصلهٔ هدف باقی‌مانده از لنگر جدید تا حد سود.
-                val targetDistanceFromCandidate = if (isBuy) {
-                    trade.takeProfit - structuralCandidate
-                } else {
-                    structuralCandidate - trade.takeProfit
-                }
-                val targetCoversDoubleFee = targetDistanceFromCandidate >= 2.0 * feePerUnit
-                val levelRequirementOk = if (stopMovedBefore) bestRealLevel != null && targetCoversDoubleFee else true
-                val improvesOnCurrentStop = if (isBuy) {
-                    structuralCandidate > fixedStopLoss && structuralCandidate < livePrice
-                } else {
-                    structuralCandidate < fixedStopLoss && structuralCandidate > livePrice
-                }
-                val lockedNetR = if (isBuy) {
-                    (structuralCandidate - trade.entry - feePerUnit) / oneRDistance
-                } else {
-                    (trade.entry - structuralCandidate - feePerUnit) / oneRDistance
-                }
-                // «سود مثبت» کافی نیست: در بازار پرنوسان باید حاشیهٔ امن هم داشته باشد،
-                // وگرنه یک کندل معمولی همان قفل را می‌زند و کارمزد دوباره پرداخت می‌شود.
-                val minLockedCushionR = 0.10 + 0.25 * (moveThresholdR - MIN_R_TO_MOVE_STOP) / 0.5
-                if (improvesOnCurrentStop && lockedNetR >= minLockedCushionR && levelRequirementOk) {
-                    val tag = if (trade.note.contains(TRAIL_TAG_MARK)) "TRAIL" else "STRUCT"
-                    return PreserveModeEvaluation(
-                        tradeId = trade.id,
-                        newStopLoss = round2(structuralCandidate),
-                        stageTitleFa = "🔒 قفل سود در +${round2(currentRMultiple)}R روی سطح ساختاری " +
-                            "(${round2(structuralAnchor)})",
-                        reasonFa = String.format(
-                            Locale.US,
-                            "سود باز %.2fR (≥ %.1fR) شد؛ حد ضرر روی سطح ساختاری %.2f منتقل شد، " +
-                                "که بعد از کارمزد %.2fR سود خالص قفل می‌کند؛ فاصلهٔ باقی‌مانده تا حد سود " +
-                                "%.2f برابر کارمزد رفت‌وبرگشت است",
-                            currentRMultiple,
-                            moveThresholdR,
-                            structuralAnchor,
-                            lockedNetR,
-                            if (feePerUnit > 0.0) targetDistanceFromCandidate / feePerUnit else 0.0,
-                        ),
-                        lockedRMultiple = round2(currentRMultiple),
-                        updatedStopLoss = round2(structuralCandidate),
-                        stopStageTag = tag,
-                    )
-                }
+        // Tick path moves the first stop to net break-even at 1.5R. Later trailing only
+        // tightens behind a real structural level with room for normal price variation.
+        val originalStop = trade.initialStopLoss ?: trade.stopLoss
+        val alreadyProtected = if (isBuy) trade.stopLoss > originalStop else trade.stopLoss < originalStop
+        val netAtStop = RiskAndCalendarEngine.computeExitPnlUsd(trade, trade.stopLoss).second
+        if (config.enablePreserveMode && alreadyProtected && netAtStop >= 0.0 && trigSnap.atr14.isFinite() && trigSnap.atr14 > 0.0) {
+            val buffer = trigSnap.atr14 * 0.35
+            val levels = listOf(trigSnap.tenkan, trigSnap.kijun,
+                if (isBuy) maxOf(trigSnap.currentSpanA, trigSnap.currentSpanB) else minOf(trigSnap.currentSpanA, trigSnap.currentSpanB))
+                .filter { it.isFinite() && it > 0.0 }
+                .map { if (isBuy) it - buffer else it + buffer }
+                .filter { if (isBuy) it > trade.stopLoss && it <= livePrice - buffer else it < trade.stopLoss && it >= livePrice + buffer }
+                .filter { RiskAndCalendarEngine.computeExitPnlUsd(trade, it).second >= 0.01 }
+            val candidate = if (isBuy) levels.maxOrNull() else levels.minOrNull()
+            if (candidate != null) {
+                val lockedUsd = RiskAndCalendarEngine.computeExitPnlUsd(trade, candidate).second
+                return PreserveModeEvaluation(
+                    tradeId = trade.id,
+                    newStopLoss = candidate,
+                    stageTitleFa = "🔒 حد ضرر ساختاری بهبود یافت (با فاصلهٔ ۰٫۳۵ ATR)",
+                    reasonFa = "حد ضرر فقط در جهت محافظت جابه‌جا شد؛ سود خالص محاسباتی در سطح جدید $lockedUsd دلار است. اجرای واقعی در گپ تضمین نیست.",
+                    lockedRMultiple = if (trade.fixedRiskUsd > 0.0) lockedUsd / trade.fixedRiskUsd else 0.0,
+                    updatedStopLoss = candidate,
+                    stopStageTag = "TRAIL",
+                )
             }
         }
 

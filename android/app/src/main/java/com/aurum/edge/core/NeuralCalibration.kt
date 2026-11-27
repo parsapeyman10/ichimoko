@@ -102,6 +102,7 @@ object NeuralCalibration {
     fun evaluate(
         points: List<NeuralCalibrationPoint>,
         oosFraction: Double = DEFAULT_OOS_FRACTION,
+        baselineProbability: Double? = null,
     ): NeuralCalibrationReport {
         if (points.size < MIN_SAMPLES_FOR_METRICS) {
             return NeuralCalibrationReport(
@@ -113,7 +114,8 @@ object NeuralCalibration {
         val wins = points.count { it.won }
         val base = wins.toDouble() / points.size
         val brier = points.sumOf { p -> (p.predictedWinProb - if (p.won) 1.0 else 0.0).let { it * it } } / points.size
-        val brierBase = points.sumOf { p -> (base - if (p.won) 1.0 else 0.0).let { it * it } } / points.size
+        val reference = baselineProbability?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: base
+        val brierBase = points.sumOf { p -> (reference - if (p.won) 1.0 else 0.0).let { it * it } } / points.size
         val logLoss = points.sumOf { p ->
             val q = p.predictedWinProb.coerceIn(1e-6, 1 - 1e-6)
             if (p.won) -ln(q) else -ln(1.0 - q)
@@ -196,6 +198,8 @@ object NeuralCalibration {
     fun evaluateWalkForward(
         foldPoints: List<List<NeuralCalibrationPoint>>,
         minFoldTestSamples: Int = MIN_FOLD_TEST_SAMPLES,
+        trainingWinRates: List<Double>? = null,
+        trainingSizes: List<Int>? = null,
     ): NeuralWalkForwardReport {
         val folds = ArrayList<NeuralCalibrationFold>()
         var totalTest = 0
@@ -206,14 +210,15 @@ object NeuralCalibration {
             val wins = points.count { it.won }
             val base = wins.toDouble() / points.size
             val brier = points.sumOf { p -> (p.predictedWinProb - if (p.won) 1.0 else 0.0).let { it * it } } / points.size
-            val baseline = points.sumOf { p -> (base - if (p.won) 1.0 else 0.0).let { it * it } } / points.size
+            val reference = if (trainingWinRates != null) trainingWinRates.getOrNull(idx)?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: return@forEachIndexed else base
+            val baseline = points.sumOf { p -> (reference - if (p.won) 1.0 else 0.0).let { it * it } } / points.size
             val logLoss = points.sumOf { p ->
                 val q = p.predictedWinProb.coerceIn(1e-6, 1 - 1e-6)
                 if (p.won) -ln(q) else -ln(1.0 - q)
             } / points.size
             folds += NeuralCalibrationFold(
                 fold = idx + 1,
-                trainSamples = 0,
+                trainSamples = trainingSizes?.getOrNull(idx) ?: 0,
                 testSamples = points.size,
                 brier = r3(brier),
                 brierBaseline = r3(baseline),

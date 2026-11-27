@@ -61,6 +61,7 @@ fun NeuralBrainScreen(
     viewModel: AurumViewModel,
 ) {
     val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
+    val assistantEvidence by viewModel.assistantEvidenceFa.collectAsStateWithLifecycle()
     val allStrategyLearningFa by viewModel.allStrategyLearningFa.collectAsStateWithLifecycle()
     val neuralJournalCalibrationFa by viewModel.neuralJournalCalibrationFa.collectAsStateWithLifecycle()
     val dualReports by viewModel.dualSymbolStrategyReports.collectAsStateWithLifecycle()
@@ -118,6 +119,25 @@ fun NeuralBrainScreen(
             .padding(bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        val rateReview = remember(trades) { com.aurum.edge.core.WinRateReview.calculate(trades) }
+        val riskNow = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades, settings.accountBalance)
+        val rateText = rateReview.ratePct?.let { String.format(Locale.US, "%.1f٪", it) } ?: "نامعلوم"
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp)).background(AurumColors.SurfaceAlt).padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("🧠 خروجی مدیریت و پایش", color = AurumColors.Gold, fontWeight = FontWeight.SemiBold)
+            Text("معاملات آموخته‌شده: ${neuralState.totalLearnedTrades} · گیت عصبی: ${if (neuralState.isGateActive) "فعال" else "غیرفعال"}", color = AurumColors.TextPrimary, fontSize = 11.sp)
+            Text(neuralState.gatePolicySummaryFa, color = AurumColors.TextSecondary, fontSize = 11.sp)
+            Text("ریسک محاسبه‌شدهٔ معاملهٔ بعدی: ${String.format(Locale.US, "%.2f", riskNow)} دلار؛ فرمول مستقل از گیت عصبی است.", color = AurumColors.TextSecondary, fontSize = 11.sp)
+            Text("نرخ برد: $rateText · ${rateReview.wins} برد، ${rateReview.losses} باخت، ${rateReview.flat} سربه‌سر · خالص ${String.format(Locale.US, "%+.2f", rateReview.netUsd)} دلار", color = AurumColors.TextPrimary, fontSize = 11.sp)
+            Text(when {
+                rateReview.samples < 30 -> "برای بازنگری حداقل ۳۰ برد یا باخت بسته لازم است."
+                rateReview.needsReview -> "نرخ برد زیر هدف ۶۵٪ است؛ بازنگری پیشنهاد می‌شود، بدون تغییر خودکار."
+                else -> "نرخ نمونه به ۶۵٪ رسیده؛ عملکرد آینده تضمین نمی‌شود."
+            }, color = if (rateReview.needsReview) Color(0xFFFF8A80) else AurumColors.TextSecondary, fontSize = 11.sp)
+            Text("معاملات باز و بک‌تست و سربه‌سر در نرخ برد شمارش نمی‌شوند؛ این آمار ژورنال، اثبات اثر گیت عصبی نیست.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+        }
+
         // 🧠 عمق یادگیری: شبکهٔ ۱۸۰حالتی (فاز × سشن × نوسان × دالان R) از معامله‌های واقعی
         NeuralDepthCard(trades = trades, settings = settings)
 
@@ -235,9 +255,9 @@ fun NeuralBrainScreen(
 
         // ── پنل رگرسیون ماتریسی پارامترها با بهترین متود روز دنیا (Ridge L2 + Huber Robust IRLS + Walk-Forward CV) ──
         SectionCard(
-            title = "📐 پنل رگرسیون ماتریسی پارامترها (بهترین متود روز دنیا: Ridge L2 + Huber IRLS)",
+            title = "📐 پنل تحلیل اکتشافی پارامترها",
             onCopy = { viewModel.copyNeuralBrainSection("regression") },
-            subtitle = "رگرسیون هم‌زمان ۱۰ پارامتر ساختاری، دالان طلایی حد ضرر [0.80..2.10 ATR]، شیب ۲۴ ویژگی و قفل R:R در [1.5..3.0]",
+            subtitle = "محاسبهٔ اکتشافی روی نمونه‌های حافظه؛ آزمون مستقل نیست و تنظیمات را تغییر نمی‌دهد.",
             initiallyExpanded = false,
         ) {
             val regReport = neuralState.autoTunedParameters.latestRegressionReport
@@ -375,14 +395,15 @@ fun NeuralBrainScreen(
                             modifier = Modifier.weight(1f),
                         )
                         StatTile(
-                            label = "خطای Walk-Forward RMSE",
+                            label = "خطای برازش RMSE",
                             value = String.format(Locale.US, "%.2fR", regReport.walkForwardRmse),
                             valueColor = AurumColors.Cyan,
                             modifier = Modifier.weight(1f),
                         )
                         StatTile(
-                            label = "ارتقای نرخ برد و R",
-                            value = "+${regReport.expectedWinRateLiftPct}% | +${regReport.expectedRLiftPerTrade}R",
+                            label = "بهبود خارج نمونه",
+                            value = "سنجیده نشده",
+
                             valueColor = AurumColors.Gold,
                             modifier = Modifier.weight(1f),
                         )
@@ -414,7 +435,7 @@ fun NeuralBrainScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
-                            text = "🚀 اجرای رگرسیون ماتریسی پارامترها (Ridge L2 + Huber IRLS) و اعمال فوری",
+                            text = "📐 اجرای تحلیل اکتشافی (بدون اعمال تنظیمات)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                         )
@@ -494,7 +515,7 @@ fun NeuralBrainScreen(
                     }
                 }
 
-                // کشویی ۲: شیب رگرسیونی تک‌تک ۲۴ ویژگی ورودی شبکه عصبی (پیش‌فرض بسته)
+                // کشویی ۲: شیب رگرسیونی تک‌تک ۲۸ ویژگی ورودی شبکه عصبی (پیش‌فرض بسته)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -513,13 +534,13 @@ fun NeuralBrainScreen(
                     ) {
                         Text(
                             modifier = Modifier.weight(1f).padding(end = 6.dp),
-                            text = "🧬 شیب رگرسیونی ۲۴ ویژگی ورودی (Huber β_R & Ridge β_Win)",
+                            text = "🧬 شیب رگرسیونی ۲۸ ویژگی ورودی (Huber β_R & Ridge β_Win)",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = if (showRegSlopesTable) "▲ بستن" else "▼ باز کردن (۲۴ ویژگی)",
+                            text = if (showRegSlopesTable) "▲ بستن" else "▼ باز کردن (۲۸ ویژگی)",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Gold,
                         )
@@ -846,7 +867,7 @@ fun NeuralBrainScreen(
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             Text(
-                                text = "🛠️ دستور دقیق اصلاح (برای اعمال الان یا در نسخه بعدی):",
+                                text = "🛠️ پیشنهاد بررسی‌نشده (اثربخشی هنوز ثابت نیست):",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Green,
                                 fontWeight = FontWeight.Bold,
@@ -862,7 +883,7 @@ fun NeuralBrainScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Text(
-                                        text = "⚡ اعمال خودکار این تنظیم پیشنهادی دستیار روی استراتژی",
+                                        text = "⚠️ اعمال دستی پیشنهادِ ارزیابی‌نشده",
                                         fontSize = 11.sp,
                                         color = AurumColors.Gold,
                                         fontWeight = FontWeight.Bold,
@@ -872,6 +893,18 @@ fun NeuralBrainScreen(
                         }
                     }
                 }
+            }
+        }
+
+        SectionCard(title = "🧪 دستیار بهبود: ارزیابی و کنترل", initiallyExpanded = true) {
+            Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(assistantEvidence, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { viewModel.runAiTraderCycleNow() }) { Text("ارزیابی اکنون") }
+                    OutlinedButton(onClick = { viewModel.resetAssistantDiagnosticChoice() }) { Text("بازگشت به پایه") }
+                }
+                OutlinedButton(onClick = { viewModel.enableAssistantDiagnosticChoice() }) { Text("فعال‌سازی انتخاب خودکار گزارش") }
+                Text("تغییر تنظیمات معامله با این انتخاب انجام نمی‌شود؛ گزارش تغییر انتخاب روی گوشی ثبت می‌شود.", style = MaterialTheme.typography.labelSmall)
             }
         }
 
@@ -922,14 +955,7 @@ fun NeuralBrainScreen(
                     ) {
                         Text(
                             modifier = Modifier.weight(1f).padding(end = 6.dp),
-                            text = when {
-                                neuralState.isGateActive ->
-                                    "✅ گیت اجرایی فعال است — هر دو شرط کامل (۱۰,۰۰۰ معامله + اجازهٔ شما)"
-                                neuralState.volumeConditionMet ->
-                                    "🟡 شرط ۱ کامل شد (۱۰,۰۰۰ معامله) — منتظر فعال‌سازی شما (شرط ۲)"
-                                else ->
-                                    "⏳ فاز یادگیری عمیق تا ۱۰,۰۰۰ معامله (${String.format(Locale.US, "%.2f%%", neuralState.warmupProgressPercent)})"
-                            },
+                            text = if (neuralState.isGateActive) "منع شبکه برای ورود خودکار روشن است؛ ممکن است فرصت سودده را هم رد کند." else "شبکه یاد می‌گیرد و هشدار می‌دهد؛ منع پیش‌بینی در مدار نیست.",
                             style = MaterialTheme.typography.labelMedium,
                             color = if (neuralState.isGateActive) AurumColors.Green else AurumColors.Gold,
                             fontWeight = FontWeight.Bold,
@@ -954,7 +980,7 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "شرط ۲ — فعال‌سازی گیت مسدودسازی تله‌های ضررده توسط من (هر زمان قابل خاموش‌کردن)",
+                            text = if (neuralState.gateUserActivationEnabled) "منع پیش‌بینی روشن است؛ خاموش‌کردن با شماست. ورود دستی و روش‌های مستثنا از این گیت عبور می‌کنند." else "منع پیش‌بینی خاموش است؛ شبکه همچنان یاد می‌گیرد و هشدار می‌دهد.",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextSecondary,
                             modifier = Modifier.weight(1f),
@@ -1499,7 +1525,7 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۱-پ-۲. تیونینگ اختصاصی تمام ۲۴ ویژگی یادگرفته‌شده شبکه عصبی به تفکیک هر استراتژی ──
+        // ── ۱-پ-۲. تیونینگ اختصاصی تمام ۲۸ ویژگی یادگرفته‌شده شبکه عصبی به تفکیک هر استراتژی ──
         SectionCard(
             title = "🧬 شخصیت آموخته‌شدهٔ هر نماد بازار (۱۵ نماد)",
             onCopy = { viewModel.copyNeuralBrainSection("persymbol") },
@@ -1618,9 +1644,9 @@ fun NeuralBrainScreen(
         }
 
         SectionCard(
-            title = "🧬 تیونینگ اختصاصی تمام ۲۴ ویژگی شبکه عصبی برای هر استراتژی",
+            title = "🧬 تیونینگ اختصاصی تمام ۲۸ ویژگی شبکه عصبی برای هر استراتژی",
             onCopy = { viewModel.copyNeuralBrainSection("perstrategy") },
-            subtitle = "تنظیم مستقل وزن، ضریب اهمیت و آستانه هر ۲۴ ویژگی یادگرفته‌شده شبکه عصبی + پارامترهای ساختاری مختص هر یک از استراتژی‌های مشمول یادگیری",
+            subtitle = "تنظیم مستقل وزن، ضریب اهمیت و آستانه هر ۲۸ ویژگی یادگرفته‌شده شبکه عصبی + پارامترهای ساختاری مختص هر یک از استراتژی‌های مشمول یادگیری",
             initiallyExpanded = false,
         ) {
             var selectedStratId by rememberSaveable {
@@ -1635,7 +1661,7 @@ fun NeuralBrainScreen(
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "انتخاب استراتژی جهت مشاهده و تیونینگ اختصاصی ۲۴ ویژگی شبکه عصبی:",
+                    text = "انتخاب استراتژی جهت مشاهده و تیونینگ اختصاصی ۲۸ ویژگی شبکه عصبی:",
                     style = MaterialTheme.typography.labelMedium,
                     color = AurumColors.Gold,
                     fontWeight = FontWeight.Bold,
@@ -1734,7 +1760,7 @@ fun NeuralBrainScreen(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
-                                text = "⚡ تیونینگ خودکار اختصاصی «${selectedModel.badgeFa}» (هر ۲۴ ویژگی + پارامترها)",
+                                text = "⚡ تیونینگ خودکار اختصاصی «${selectedModel.badgeFa}» (هر ۲۸ ویژگی + پارامترها)",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -1871,7 +1897,7 @@ fun NeuralBrainScreen(
                         }
                     }
 
-                    // کشویی ۲: تیونینگ تک‌تک ۲۴ ویژگی یادگرفته‌شده شبکه عصبی مختص همین استراتژی (پیش‌فرض بسته)
+                    // کشویی ۲: تیونینگ تک‌تک ۲۸ ویژگی یادگرفته‌شده شبکه عصبی مختص همین استراتژی (پیش‌فرض بسته)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1890,13 +1916,13 @@ fun NeuralBrainScreen(
                         ) {
                             Text(
                                 modifier = Modifier.weight(1f).padding(end = 6.dp),
-                                text = "🧠 تیونینگ تک‌تک ۲۴ ویژگی یادگرفته‌شده در «${selectedModel.badgeFa}»",
+                                text = "🧠 تیونینگ تک‌تک ۲۸ ویژگی یادگرفته‌شده در «${selectedModel.badgeFa}»",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = AurumColors.Green,
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                text = if (showFeaturesDrawer) "▲ بستن" else "▼ باز کردن (۲۴ ویژگی)",
+                                text = if (showFeaturesDrawer) "▲ بستن" else "▼ باز کردن (۲۸ ویژگی)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Cyan,
                             )
@@ -2318,11 +2344,11 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۵. وزن و اهمیت ۲۴ ویژگی ورودی شبکه (FT-Transformer Self-Attention) ──
+        // ── ۵. وزن و اهمیت ۲۸ ویژگی ورودی شبکه (FT-Transformer Self-Attention) ──
         SectionCard(
-            title = "⚖️ کالبدشکافی ۲۴ ویژگی ایچیموکو در مغز شبکه (FT-Attention Weights)",
+            title = "⚖️ کالبدشکافی ۲۸ ویژگی ایچیموکو در مغز شبکه (FT-Attention Weights)",
             onCopy = { viewModel.copyNeuralBrainSection("features") },
-            subtitle = "کدام شروط ایچیموکو و پرایس‌اکشن بیشترین وزن را در تصمیم‌گیری شبکه عصبی دارند؟",
+            subtitle = "چهار ورودی سنجش ۱H/۴H در مسیر جداگانه‌اند و سهم توجه ندارند؛ اعداد دیگر وزن‌های خام، نه اثر علّی هستند.",
             initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -2348,7 +2374,7 @@ fun NeuralBrainScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             Pill(
-                                text = "توجه: ${feat.attentionPercent}%",
+                                text = if (feat.index >= 25) "بدون سهم توجه" else "شاخص وزن خام: ${feat.attentionPercent}%",
                                 color = AurumColors.Gold,
                             )
                         }

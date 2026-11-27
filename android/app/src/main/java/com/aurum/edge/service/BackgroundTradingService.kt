@@ -61,6 +61,7 @@ class BackgroundTradingService : Service() {
         if (monitorJob?.isActive == true) return
         monitorJob = serviceScope.launch {
             val app = application as? AurumApplication ?: return@launch
+            app.container.startProtectionMonitor()
             while (isActive) {
                 runCatching {
                     val settings = app.container.settingsStore.read()
@@ -71,6 +72,9 @@ class BackgroundTradingService : Service() {
                         append(if (autoOn) "معامله خودکار: روشن" else "پایش: روشن")
                         append(" · پوزیشن باز: ").append(openCount)
                         append(" · ").append(stratName)
+                        val missing = app.container.unprotectedQuoteSymbols.value
+                        if (missing.isNotEmpty()) append(" · ⚠️ قیمت معتبر نیست: ").append(missing.joinToString())
+                        if (app.container.journalStore.protectionStorageError.value) append(" · ⚠️ ذخیره قفل ناموفق")
                     }
                     updateNotification("Aurum Edge · رادار ۱۵ نماد (15m)", statusText)
                     renewWakeLockIfNeeded()

@@ -362,11 +362,7 @@ fun SettingsScreen(
             1 -> {
                 // اعداد عنوان از خود تنظیمات خوانده می‌شوند؛ قبلاً «۱۰۰,۰۰۰$ و ۵$» دستی نوشته شده
                 // بود و اگر کاربر مقدار دیگری می‌گذاشت، عنوان دروغ می‌گفت.
-                val activeRiskUsd = if (settings.useFixedDollarRisk) {
-                    settings.fixedRiskUsd
-                } else {
-                    settings.accountBalance * settings.riskPercent / 100.0
-                }
+                val activeRiskUsd = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades, settings.accountBalance)
                 SectionCard(
                     title = "💰 سرمایه و ریسک هر معامله (" + String.format(Locale.US, "%.2f", activeRiskUsd) + "$)",
                     subtitle = descOrNull(
@@ -397,7 +393,7 @@ fun SettingsScreen(
 
                     // دامنهٔ دلاری هدف، از همان مبلغ ریسک: ۱٫۵R تا ۳R
                     Text(
-                        text = "۱٫۵R → " + String.format(Locale.US, "$%.2f", activeRiskUsd * 1.5) +
+                        text = "۲R → " + String.format(Locale.US, "$%.2f", activeRiskUsd * 2.0) +
                             "  ·  ۳R → " + String.format(Locale.US, "$%.2f", activeRiskUsd * 3.0),
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.Green,
@@ -406,7 +402,7 @@ fun SettingsScreen(
                     )
                     // هر اصلاح و هر هشدارِ همین تنظیمات، همان‌جا و بی‌پرده (نه در لاگ پنهان).
                     CapitalFindingsBlock(
-                        findings = com.aurum.edge.core.CapitalPolicy.from(settings).findings(),
+                        findings = com.aurum.edge.core.CapitalPolicy.from(settings).copy(useFixedDollarRisk = true, fixedRiskUsd = activeRiskUsd).findings(),
                     )
                     Row(
                         modifier = Modifier
@@ -438,55 +434,12 @@ fun SettingsScreen(
                             fontWeight = FontWeight.Bold,
                         )
                     }
-                    AnimatedVisibility(visible = showDesc) {
-                        Text(
-                            text = "انتخاب سریع مبلغ ریسک ثابت (ضرر در SL) برای هر معامله:",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AurumColors.TextSecondary.copy(alpha = 0.78f),
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        FIXED_RISK_USD_PRESETS.forEach { usd ->
-                            val selected = settings.useFixedDollarRisk && abs(settings.fixedRiskUsd - usd) < 0.01
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (selected) AurumColors.Gold.copy(alpha = 0.22f) else AurumColors.SurfaceAlt)
-                                    .border(1.dp, if (selected) AurumColors.Gold else AurumColors.Line, RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        // انتخاب «ریسک ثابت دلاری» نباید ترمزهای ریسک را پاک کند.
-                                        viewModel.saveRiskAndCapitalSettings(
-                                            accountBalance = settings.accountBalance,
-                                            initialCapital = settings.initialCapital,
-                                            riskPercent = settings.riskPercent,
-                                            dailyLossLimitPercent = settings.dailyLossLimitPercent,
-                                            maxDrawdownLimitPercent = settings.maxDrawdownLimitPercent,
-                                            targetCapital = settings.targetCapital,
-                                            useFixedDollarRisk = true,
-                                            fixedRiskUsd = usd,
-                                        )
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                            ) {
-                                Text(
-                                    text = "$" + if (usd % 1.0 == 0.0) {
-                                        String.format(Locale.US, "%.0f", usd)
-                                    } else {
-                                        String.format(Locale.US, "%.2f", usd)
-                                    } + " در هر معامله",
-                                    color = if (selected) AurumColors.Gold else AurumColors.TextPrimary,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        text = "فرمول فعال: ۵ دلار + ۰٫۵٪ سود خالص معاملات بسته، تا سقف مازاد موجودی بر ۱۰۰٬۰۰۰ دلار. سود شناور و بک‌تست حساب نمی‌شود.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
 
                     Button(
                         onClick = {
@@ -511,7 +464,7 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     ) {
                         Text(
-                            text = "⚡ تنظیم فوری موجودی روی ۱۰۰,۰۰۰ دلار + هر باخت ۵ دلار",
+                            text = "⚡ تنظیم موجودی پایه روی ۱۰۰,۰۰۰ دلار",
                             fontWeight = FontWeight.Bold,
                         )
                     }
@@ -523,6 +476,7 @@ fun SettingsScreen(
                     symbol = activeSymbol,
                     referencePrice = liveTicks[activeSymbol]?.price,
                     lastTrade = trades.maxByOrNull { it.openedAt },
+                    trades = trades,
                 )
 
                 CapitalAndRiskLimitsCard(
@@ -648,6 +602,7 @@ fun SettingsScreen(
             }
 
             3 -> {
+                DailyBackupCard()
                 NeuralDirectNavigationCard(
                     neuralState = neuralState,
                     showDescriptions = showDesc,

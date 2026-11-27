@@ -36,6 +36,7 @@ class JournalSingleOpenTradeTest {
         val file = File(context.filesDir, name)
         file.delete()
         File(file.path + ".bak").delete()
+        File(file.path + ".protection").delete()
         val settings = SettingsStore(context)
         return JournalStore(context, file = file, settingsStore = settings) to settings
     }
@@ -106,7 +107,7 @@ class JournalSingleOpenTradeTest {
         assertEquals(2, journal.trades.value.count { it.isOpen })
 
         // با روشن شدن تکلیف معاملهٔ اول، پوزیشن باز نمی‌مانَد…
-        journal.onLiveTick("BTC/USDT", PriceTick(price = first.takeProfit + 5.0, at = first.openedAt + 5_000L))
+        journal.onLiveTick("BTC/USDT", PriceTick(price = first.takeProfit + 5.0, at = first.openedAt + 5_000L), nowMillis = first.openedAt + 5_000L)
         assertNull(journal.openTradeForStrategy(BitcoinStrategyModel.BASE_ICHIMOKU.id))
         // …ولی ورود فوری دوباره به همان (نماد، استراتژی) ممنوع است: دورهٔ خنک‌شدن.
         val blockRightAfterClose = journal.openTradeBlockedByFa("BTC/USDT", BitcoinStrategyModel.BASE_ICHIMOKU.id)
@@ -183,6 +184,21 @@ class JournalSingleOpenTradeTest {
     }
 
     @Test
+    fun signalTimeIsPreservedAndFutureTimeIsNotInvented() {
+        val (journal, _) = freshJournal("test_signal_time.json")
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "ETH/USDT", accountBalance = 1_000.0, riskPercent = 0.5,
+            entry = 3_000.0, stopLoss = 2_960.0, takeProfit = 3_080.0,
+        )!!
+        val now = 2_000_000L
+        val trade = journal.openTrade(calc, now = now, signalBarTime = now - 60_000L)!!
+        assertEquals(now - 60_000L, trade.signalBarTime)
+        val (other, _) = freshJournal("test_signal_future.json")
+        val future = other.openTrade(calc, now = now, signalBarTime = now + 1L)!!
+        assertNull(future.signalBarTime)
+    }
+
+    @Test
     fun gaugeSnapshotIsRecordedAtOpenForBothTimeframes() {
         val (journal, _) = freshJournal("test_gauge_snapshot.json")
         val calc = RiskAndCalendarEngine.calculatePosition(
@@ -194,11 +210,13 @@ class JournalSingleOpenTradeTest {
             takeProfit = 3_080.0,
         )!!
         val hourlyUp = trendingSeries(90, step = 1.6, stepMs = 3_600_000L, start = 100.0)
+            .map { it.copy(time = it.time + 270 * 3_600_000L) }
         val fourHourDown = trendingSeries(90, step = -4.0, stepMs = 4 * 3_600_000L, start = 4_000.0)
 
         val trade = journal.openTrade(
             calc = calc,
             note = "سنجش لحظهٔ ورود",
+            now = 360 * 3_600_000L,
             strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
             gaugeCandles1h = hourlyUp,
             gaugeCandles4h = fourHourDown,
@@ -223,7 +241,7 @@ class JournalSingleOpenTradeTest {
         assertTrue(trade.techSnapshotLineFa.contains("۴ ساعته"))
 
         // اسنپ‌شات پس از بسته شدن معامله نباید عوض شود.
-        journal.onLiveTick("ETH/USDT", PriceTick(price = trade.takeProfit + 10.0, at = trade.openedAt + 60_000L))
+        journal.onLiveTick("ETH/USDT", PriceTick(price = trade.takeProfit + 10.0, at = trade.openedAt + 60_000L), nowMillis = trade.openedAt + 60_000L)
         val closed = journal.trades.value.first { it.id == trade.id }
         assertFalse(closed.isOpen)
         assertEquals(trade.tech1hBuy, closed.tech1hBuy)
@@ -307,4 +325,98 @@ class JournalSingleOpenTradeTest {
         assertEquals("کندل‌های بعد از ورود نباید در بازسازی دخالت کنند", -1, rebuilt.tech1hBuy)
         assertFalse(rebuilt.techSnapshotRebuilt)
     }
+    @Test
+    fun activeStopSurvivesReloadAndLiveExitUsesIt() {
+        val (journal, settings) = freshJournal("active_stop_reload.json")
+        val context = RuntimeEnvironment.getApplication()
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "BTC/USDT", accountBalance = 100_000.0, riskPercent = 0.1,
+            entry = 100.0, stopLoss = 90.0, takeProfit = 130.0,
+        )!!
+        val at = System.currentTimeMillis() - 60_000L
+        val opened = journal.openTrade(calc, now = at)!!
+        val moved = journal.updateTradeStopLoss(opened.id, 102.0, "🔒 STRUCT test", allowRatchet = true, updatedAt = at + 10_000L)!!
+        val reload = JournalStore(context, File(context.filesDir, "active_stop_reload.json"), settings)
+        val restored = reload.trades.value.single()
+        assertEquals(moved.stopLoss, restored.stopLoss, 0.0)
+        assertEquals(opened.initialStopLoss, restored.initialStopLoss)
+        assertEquals(at + 10_000L, restored.stopUpdatedAt)
+        val tick = PriceTick(101.99, at + 20_000L)
+        val exits = reload.onLiveTick("BTC/USDT", tick, nowMillis = tick.at)
+        assertEquals(1, exits.size)
+        assertEquals(101.99, exits.single().exitPrice, 0.00001)
+        assertFalse(reload.trades.value.single().isOpen)
+    }
+
+    @Test
+    fun tickAtThresholdMovesTheStopImmediatelyAndNeverBackwards() {
+        val (journal, _) = freshJournal("tick_break_even.json")
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "BTC/USDT", accountBalance = 100_000.0, riskPercent = 0.1,
+            entry = 100.0, stopLoss = 90.0, takeProfit = 130.0,
+        )!!
+        val at = System.currentTimeMillis() - 60_000L
+        val opened = journal.openTrade(calc, now = at)!!
+        val fee = opened.settlementFeeUsd
+        val thresholdPrice = opened.entry + (1.5 * opened.fixedRiskUsd + fee + 0.02) / opened.positionOz
+        val tick = PriceTick(thresholdPrice, at + 20_000L)
+        journal.onLiveTick("BTC/USDT", tick, nowMillis = tick.at)
+        val protected = journal.trades.value.single()
+        assertTrue(protected.stopLoss > opened.entry)
+        assertTrue(RiskAndCalendarEngine.computeExitPnlUsd(protected, protected.stopLoss).second >= 0.01)
+        assertNull(journal.updateTradeStopLoss(opened.id, opened.stopLoss, "backwards", allowRatchet = true))
+        assertNull(journal.repairOpenTradePlan(opened.id, opened.stopLoss, opened.takeProfit, "repair"))
+    }
+
+    @Test
+    fun olderQuoteCannotCloseAfterNewerQuote() {
+        val (journal, _) = freshJournal("tick_order_guard.json")
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "BTC/USDT", accountBalance = 100_000.0, riskPercent = 0.1,
+            entry = 100.0, stopLoss = 90.0, takeProfit = 130.0,
+        )!!
+        val at = System.currentTimeMillis() - 30_000L
+        journal.openTrade(calc, now = at)!!
+        journal.onLiveTick("BTC/USDT", PriceTick(101.0, at + 20_000L), nowMillis = at + 20_000L)
+        val obsolete = journal.onLiveTick("BTC/USDT", PriceTick(89.0, at + 10_000L), nowMillis = at + 21_000L)
+        assertTrue(obsolete.isEmpty())
+        assertTrue(journal.trades.value.single().isOpen)
+    }
+
+    @Test
+    fun staleAndFutureQuotesCannotCloseOrLock() {
+        val (journal, _) = freshJournal("stale_quote_guard.json")
+        val calc = RiskAndCalendarEngine.calculatePosition(symbolInput = "BTC/USDT", accountBalance = 100_000.0,
+            riskPercent = 0.1, entry = 100.0, stopLoss = 90.0, takeProfit = 130.0)!!
+        val at = System.currentTimeMillis() - 120_000L
+        val t = journal.openTrade(calc, now = at)!!
+        assertTrue(journal.onLiveTick("BTC/USDT", PriceTick(80.0, at + 1_000L), nowMillis = at + 100_000L).isEmpty())
+        assertTrue(journal.onLiveTick("BTC/USDT", PriceTick(80.0, at + 200_000L), nowMillis = at + 100_000L).isEmpty())
+        assertEquals(t.stopLoss, journal.trades.value.single().stopLoss, 0.0)
+        assertTrue(journal.trades.value.single().isOpen)
+    }
+
+    @Test
+    fun durableCheckpointRestoresMonotonicLockWhenMainJournalIsOld() {
+        val name = "checkpoint_lock_recovery.json"
+        val (journal, settings) = freshJournal(name)
+        val context = RuntimeEnvironment.getApplication()
+        val file = File(context.filesDir, name)
+        val calc = RiskAndCalendarEngine.calculatePosition(symbolInput = "BTC/USDT", accountBalance = 100_000.0,
+            riskPercent = 0.1, entry = 100.0, stopLoss = 90.0, takeProfit = 130.0)!!
+        val at = System.currentTimeMillis() - 60_000L
+        val t = journal.openTrade(calc, now = at)!!
+        val original = file.readText()
+        val price = t.entry + (1.5 * t.fixedRiskUsd + t.settlementFeeUsd + 0.02) / t.positionOz
+        journal.onLiveTick("BTC/USDT", PriceTick(price, at + 20_000L), nowMillis = at + 20_000L)
+        val stop = journal.trades.value.single().stopLoss
+        assertTrue(stop > t.stopLoss)
+        assertFalse(journal.protectionStorageError.value)
+        // Simulate recovery from an older journal while a complete checkpoint survived.
+        Thread.sleep(200)
+        file.writeText(original)
+        val reload = JournalStore(context, file, settings)
+        assertEquals(stop, reload.trades.value.single().stopLoss, 0.0)
+    }
+
 }

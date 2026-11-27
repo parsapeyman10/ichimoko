@@ -329,11 +329,57 @@ class NeuralStateAndCalibrationTest {
 
     @Test
     fun `network input dimension is sixteen plus eight state features`() {
-        assertEquals(24, NeuralSelfLearningEngine.INPUT_DIM)
+        assertEquals(28, NeuralSelfLearningEngine.INPUT_DIM)
         assertEquals(16, NeuralSelfLearningEngine.LEGACY_INPUT_DIM)
         assertEquals(
             NeuralSelfLearningEngine.INPUT_DIM,
-            NeuralSelfLearningEngine.LEGACY_INPUT_DIM + NeuralStateFeatures.COUNT,
+            NeuralSelfLearningEngine.LEGACY_INPUT_DIM + NeuralStateFeatures.COUNT + NeuralGaugeFeatures.COUNT,
         )
     }
+    @Test
+    fun `unknown zero journal time is not the asia session`() {
+        val trade = PaperTrade(id = "unknown", symbol = "XAU/USD", interval = com.aurum.edge.domain.Interval.M15,
+            action = com.aurum.edge.domain.SignalAction.BUY, entry = 100.0, stopLoss = 99.0,
+            takeProfit = 102.0, confidence = 0.0, riskReward = 2.0, openedAt = 0L)
+        assertEquals("", NeuralStateFeatures.fromTrade(trade).sessionCode)
+    }
+
+    @Test
+    fun `closed trade features use recorded state without guessing missing candle data`() {
+        val engine = NeuralSelfLearningEngine(context = null, storageFile = null)
+        val trade = PaperTrade(id = "state", symbol = "XAU/USD", interval = com.aurum.edge.domain.Interval.M15,
+            action = com.aurum.edge.domain.SignalAction.BUY, entry = 100.0, stopLoss = 99.0,
+            takeProfit = 102.0, confidence = 80.0, riskReward = 2.0, openedAt = 28_800_000L,
+            closedAt = 30_000_000L, stateEr14 = 0.6, stateKumoThicknessAtr = 1.1, stateDistKijunAtr = 1.5)
+        val (features, _, _) = engine.extractConditionFeaturesForClosedTrade(trade)
+        assertEquals(0.2, features[10], 1e-9)
+        assertEquals(0.3, features[11], 1e-9)
+        assertEquals(0.2, features[12], 1e-9)
+        assertEquals(0.0, features[13], 1e-9)
+        val missing = engine.extractConditionFeaturesForClosedTrade(trade.copy(stateEr14 = -1.0, stateKumoThicknessAtr = -1.0, stateDistKijunAtr = -1.0)).first
+        assertEquals(0.0, missing[10], 0.0)
+        assertEquals(0.0, missing[11], 0.0)
+        assertEquals(0.0, missing[12], 0.0)
+        assertEquals(0.0, missing[13], 0.0)
+    }
+
+    @Test
+    fun `training uses the exact observed entry vector and rejects invalid snapshots`() {
+        val engine = NeuralSelfLearningEngine(context = null, storageFile = null)
+        val features = List(24) { (it - 12) / 24.0 }
+        val observation = NeuralEntryObservation(evaluatedAt = 30_000_000L, signalBarTime = 29_000_000L,
+            features = features, conditionKey = "observation", predictedWinProbability = 0.42, expectedR = 0.1)
+        val trade = PaperTrade(id = "snapshot", symbol = "XAU/USD", interval = com.aurum.edge.domain.Interval.M15,
+            action = com.aurum.edge.domain.SignalAction.BUY, entry = 100.0, stopLoss = 99.0, takeProfit = 102.0,
+            confidence = 80.0, riskReward = 2.0, openedAt = 30_000_000L, closedAt = 31_000_000L, pnlUsd = 4.0,
+            signalBarTime = 29_000_000L, neuralEntryObservation = observation)
+        val (observed, key) = engine.extractConditionFeaturesForClosedTrade(trade)
+        assertEquals(features + List(4) { 0.0 }, observed)
+        assertEquals("observation", key)
+        assertEquals(observed, engine.buildJournalTrainingSamples(listOf(trade)).single().features)
+        val invalid = listOf(observation.copy(evaluatedAt = 30_000_001L), observation.copy(schema = 99),
+            observation.copy(features = List(24) { Double.NaN }), observation.copy(signalBarTime = 28_000_000L))
+        invalid.forEach { bad -> assertTrue(engine.extractConditionFeaturesForClosedTrade(trade.copy(neuralEntryObservation = bad)).second != "observation") }
+    }
+
 }

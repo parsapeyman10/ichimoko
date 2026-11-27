@@ -13,6 +13,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +57,38 @@ class AppContainer(context: Context) {
 
     private val appExceptionHandler = CoroutineExceptionHandler { _, _ -> }
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + appExceptionHandler)
+    init { appScope.launch { neuralEngine.initializeGateControlOnce() } }
+
+    private var protectionMonitorJob: kotlinx.coroutines.Job? = null
+    private val _unprotectedQuoteSymbols = MutableStateFlow<Set<String>>(emptySet())
+    val unprotectedQuoteSymbols: StateFlow<Set<String>> = _unprotectedQuoteSymbols.asStateFlow()
+
+    /** One process-wide monitor, also started by a restarted foreground service. */
+    @Synchronized
+    fun startProtectionMonitor() {
+        if (protectionMonitorJob?.isActive == true) return
+        protectionMonitorJob = appScope.launch {
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                val symbols = journalStore.trades.value.filter { it.isOpen }
+                    .map { com.aurum.edge.core.V1Universe.normalize(it.symbol) }.distinct()
+                    .filterNot { com.aurum.edge.core.MarketHours.closedFor(it, System.currentTimeMillis()) }
+                val results = kotlinx.coroutines.coroutineScope {
+                    symbols.map { symbol -> async {
+                        val ok = runCatching {
+                            val tick = com.aurum.edge.data.LiveQuoteFetcher.fetchLiveTick(symbol)
+                            if (tick != null && com.aurum.edge.core.TradeQuotePolicy.accepts(tick)) {
+                                journalStore.onLiveTick(symbol, tick)
+                                true
+                            } else false
+                        }.getOrDefault(false)
+                        symbol to ok
+                    } }.awaitAll()
+                }
+                _unprotectedQuoteSymbols.value = results.filterNot { it.second }.map { it.first }.toSet()
+                delay(if (symbols.isEmpty()) 10_000L else 3_000L)
+            }
+        }
+    }
 
     val clock: StateFlow<Long> = flow {
         while (true) {

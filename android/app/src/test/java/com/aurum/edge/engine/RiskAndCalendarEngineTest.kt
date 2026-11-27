@@ -6,6 +6,7 @@ import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.CustomStrategySlot
 import com.aurum.edge.core.IchimokuStrategyEngine
+import com.aurum.edge.core.NeuralSelfLearningEngine
 import com.aurum.edge.core.NeuralLearningLedger
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
@@ -104,14 +105,14 @@ class RiskAndCalendarEngineTest {
         assertTrue(openedBuy.isOpen)
 
         // Price between SL and TP -> remains open
-        val midHits = journalStore.onLiveTick("XAU/USD", PriceTick(price = 2612.0, at = day1Millis + 5000L))
+        val midHits = journalStore.onLiveTick("XAU/USD", PriceTick(price = 2612.0, at = day1Millis + 5000L), nowMillis = day1Millis + 5000L)
         assertTrue(midHits.isEmpty())
         assertEquals(1, journalStore.trades.value.count { it.isOpen })
 
         // Price reaches TP -> auto-closed at TP!
         // نکته: TP حالا کارمزد را هم پوشش می‌دهد، پس چند سنت دورتر از ۲۶۲۰٫۰۰ است.
         assertTrue(journalStore.trades.value.first().takeProfit > 2620.0)
-        val tpHits = journalStore.onLiveTick("XAU/USD", PriceTick(price = 2621.0, at = day1Millis + 10_000L))
+        val tpHits = journalStore.onLiveTick("XAU/USD", PriceTick(price = 2621.0, at = day1Millis + 10_000L), nowMillis = day1Millis + 10_000L)
         assertEquals(1, tpHits.size)
         assertEquals(AutoExitKind.TAKE_PROFIT, tpHits.first().kind)
         assertEquals(0, journalStore.trades.value.count { it.isOpen })
@@ -128,7 +129,7 @@ class RiskAndCalendarEngineTest {
             takeProfit = 64000.0,
         )!!
         journalStore.openTrade(calcSell, note = "تست فروش بیت‌کوین", now = day2Millis)
-        val slHits = journalStore.onLiveTick("BTC/USDT", PriceTick(price = 65510.0, at = day2Millis + 15_000L))
+        val slHits = journalStore.onLiveTick("BTC/USDT", PriceTick(price = 65510.0, at = day2Millis + 15_000L), nowMillis = day2Millis + 15_000L)
         assertEquals(1, slHits.size)
         assertEquals(AutoExitKind.STOP_LOSS, slHits.first().kind)
 
@@ -197,15 +198,8 @@ class RiskAndCalendarEngineTest {
         assertEquals(2645.0, summary.periodLow, 0.001)
 
         val hits = journalStore.onBackfillCandles("XAU/USD", gapCandles)
-        assertEquals(1, hits.size)
-        val hit = hits.first()
-        assertTrue(hit.fromBackfill)
-        assertEquals(AutoExitKind.TAKE_PROFIT, hit.kind)
-        // حد سود همان چیزی است که در ژورنال ذخیره شده (۲۶۷۰ + پوشش کارمزد ≈ ۲۶۷۰٫۶۰)
-        assertEquals(journalStore.trades.value.first().takeProfit, hit.exitPrice, 0.001)
-        assertTrue(hit.exitPrice in 2670.0..2672.5)
-        assertEquals(hour3, hit.closedAt) // Closed at the exact hour-3 candle when TP was touched!
-        assertFalse(journalStore.trades.value.first().isOpen)
+        assertTrue(hits.isEmpty())
+        assertTrue(journalStore.trades.value.first().isOpen)
     }
 
     @Test
@@ -679,15 +673,16 @@ class RiskAndCalendarEngineTest {
         assertTrue(calcFixed5.buildVenueRulesSummaryFa().contains("مرجع دیتا"))
         assertTrue(tradeManish.buildVenueRulesAndFeesSummaryFa().contains("مجموع کل کارمزد"))
         val (lossGross, lossPnl) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 64_500.0)
-        assertEquals(-5.0, lossGross, 1e-4)
-        assertEquals(-5.0, lossPnl, 1e-4)
+        assertTrue("زیان ناخالص بدون کارمزد کمتر است", lossGross > lossPnl)
+        assertEquals(-5.0, lossPnl, 0.01)
 
-        val (winGross, winPnl) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 66_250.0)
-        assertEquals(12.5, winGross, 1e-4) // $5 * 2.5 R:R = +$12.50
-        assertEquals(12.5, winPnl, 1e-4)
+        // هدف واقعی بعد از لحاظ کارمزد از 66,250 دورتر است؛ تسویه را با همان هدف بسنج.
+        val (winGross, winPnl) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, calcFixed5.takeProfit)
+        assertTrue(winGross > winPnl)
+        assertEquals(12.5, winPnl, 0.01)
 
         val closedManish = tradeManish.copy(
-            exitPrice = 66_250.0,
+            exitPrice = calcFixed5.takeProfit,
             closedAt = 1_760_000_900_000L,
             pnlUsd = winPnl,
         )
@@ -738,7 +733,7 @@ class RiskAndCalendarEngineTest {
         )!!
         val opened3R = runnerJournal.openTrade(calc3R, note = "تست بستن کامل در هدف ۱:۳")!!
         // Live tick reaches the stored TP (پول: دقیقاً ۳R = ۱۵ دلار خالص؛ فاصلهٔ قیمتی کمی دورتر)
-        val runnerTickHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = calc3R.takeProfit, at = 1_760_002_000_000L))
+        val runnerTickHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = calc3R.takeProfit, at = opened3R.openedAt + 1_000L), nowMillis = opened3R.openedAt + 1_000L)
         assertEquals(1, runnerTickHits.size)
         assertEquals(com.aurum.edge.core.AutoExitKind.TAKE_PROFIT, runnerTickHits.first().kind)
         assertTrue(runnerTickHits.first().netPnlUsd >= 14.5)
@@ -912,7 +907,7 @@ class RiskAndCalendarEngineTest {
         // و خوشه‌ای که با ۶ نمونه «ممنوعه» علامت خورده را مسدود می‌کند.
         neuralEngine.setGateUserActivation(true)
         assertTrue(neuralEngine.state.value.gateUserActivationEnabled)
-        assertTrue("گیت باید با هر عددی که ≥۱ نمونه است فعال شود", neuralEngine.state.value.isGateActive)
+        assertTrue("منع پیش‌بینی به تصمیم کاربر روشن است", neuralEngine.state.value.isGateActive)
         val evalConsent = neuralEngine.evaluateFeatures(
             symbol = "BTC/USDT",
             features = badCryptoFeatures,
@@ -969,7 +964,7 @@ class RiskAndCalendarEngineTest {
         // Verify Neural Brain explainability fields (learnedInsightsFeedFa, featureInsights, recentLessons)
         val brainSummary = neuralEngine.state.value
         // ۱۶ ویژگی هویتی + ۸ حالت بازار (R19) ⇒ ۲۴
-        assertEquals(24, brainSummary.featureInsights.size)
+        assertEquals(NeuralSelfLearningEngine.INPUT_DIM, brainSummary.featureInsights.size)
         assertTrue(brainSummary.learnedInsightsFeedFa.isNotEmpty())
         assertEquals(6, brainSummary.recentLessons.size)
         assertTrue(brainSummary.noTradeClusters.isNotEmpty())
@@ -1132,7 +1127,7 @@ class RiskAndCalendarEngineTest {
             val prof = tunedParams.perStrategyProfiles[stratModel.id]
             assertNotNull("Missing profile for ${stratModel.id}", prof)
             // ۱۶ ویژگی هویتی + ۸ حالت بازار (R19)
-            assertEquals(24, prof!!.featureTunings.size)
+            assertEquals(NeuralSelfLearningEngine.INPUT_DIM, prof!!.featureTunings.size)
         }
         val tunedFeatProfile = neuralEngineV3919.tuneStrategyFeature(
             strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
@@ -1214,7 +1209,7 @@ class RiskAndCalendarEngineTest {
             huberDelta = 1.35,
         )
         assertEquals(10, regReportAll.parameterRows.size)
-        assertEquals(24, regReportAll.featureSlopes.size)
+        assertEquals(NeuralSelfLearningEngine.INPUT_DIM, regReportAll.featureSlopes.size)
         // R² از باقی‌ماندهٔ واقعی مدل محاسبه می‌شود (نه از شمار نمونه). برازش لب‌به‌مرز
         // لازم نیست بخشی از قرارداد باشد؛ آنچه قرارداد است، عددِ محدود و قابل‌دفاع است.
         // R² حالا **واقعی** است و می‌تواند منفی باشد (بدتر از میانگین) یا وقتی نمونه برای

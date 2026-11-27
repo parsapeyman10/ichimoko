@@ -221,6 +221,7 @@ fun BitcoinIchimokuStrategyCard(
                 dualReport = dualReports[focusedSymbol],
                 aiChecking = aiChecking,
                 avalAiEnabled = settings.avalAiEnabled,
+                cloudConfig = currentConfig,
                 onSelectSymbol = { sym -> viewModel.selectFocusedStrategySymbol(sym) },
                 onSelectInterval = { interval -> viewModel.selectFocusedStrategyInterval(interval) },
                 onSelectStrategy = { stratId -> viewModel.activateSingleBitcoinStrategy(stratId, enableExecution = settings.autoPaperTrading) },
@@ -238,7 +239,7 @@ fun BitcoinIchimokuStrategyCard(
                         stopLoss = sl,
                         takeProfit = tp,
                         preferredAction = evalReport.action,
-                        fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(settings.fixedRiskUsd),
+                        fixedRiskUsdOverride = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades, settings.accountBalance),
                     )
                     if (calc != null) {
                         viewModel.openAutoTrackedTrade(
@@ -426,6 +427,7 @@ private fun Live12ConditionChecklistPage(
     dualReport: DualTimeframeSymbolReport?,
     aiChecking: Boolean,
     avalAiEnabled: Boolean,
+    cloudConfig: BaseStrategyConfig,
     onSelectSymbol: (String) -> Unit,
     onSelectInterval: (Interval) -> Unit,
     onSelectStrategy: (String) -> Unit,
@@ -497,6 +499,24 @@ private fun Live12ConditionChecklistPage(
             )
             return@Column
         }
+
+        val cloudPreview = remember(report, cloudConfig) {
+            com.aurum.edge.core.CloudLifetimeEvidence.measure(
+                com.aurum.edge.data.LiveQuoteFetcher.peekMemoryCandles(report.symbol, report.triggerInterval),
+                report.triggerInterval, report.triggerBarTime, System.currentTimeMillis(), cloudConfig)
+        }
+        Text(
+            text = "☁️ " + (cloudPreview?.textFa() ?: "سن و انتهای ابر نامعلوم؛ کندل بستهٔ هم‌زمان کافی نیست."),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (cloudPreview?.longNearTwist == true) AurumColors.Gold else AurumColors.TextSecondary,
+        )
+
+        val structureEvidence = remember(report) { com.aurum.edge.core.TrendStructureEvidence.extract(report) }
+        Text(
+            text = "🔎 " + (structureEvidence?.textFa() ?: "ساختار جهت‌دار کندل سیگنال نامعلوم است."),
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextSecondary,
+        )
 
         val statusColor = when (report.readiness) {
             StrategyReadinessState.SIGNAL_BUY -> AurumColors.Green
@@ -1161,7 +1181,7 @@ internal fun BaseStrategyRefinementPanel(
         RuleToggleRow("ماشه ۱: پولبک کیجون/تنکان/S-Point", enablePullback) { enablePullback = it }
         RuleToggleRow("ماشه ۲: شکست کومو و سقف چیکو", enableBreakout) { enableBreakout = it }
         RuleToggleRow(
-            "سیو سود خودکار (ریسک‌فری در +۱R · قفل سود روی تنکان در +۲R)",
+            "حفاظت: سربه‌سر خالص پس از +۱٫۵R؛ سپس تریل ساختاری با فضای نوسان",
             enablePreserve,
         ) { enablePreserve = it }
 

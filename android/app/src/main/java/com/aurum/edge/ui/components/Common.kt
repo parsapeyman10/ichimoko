@@ -284,9 +284,11 @@ fun TradingViewPositionBox(
     val isBuy = trade.action == SignalAction.BUY
     val slDist = abs(trade.entry - trade.stopLoss).coerceAtLeast(1e-8)
     val tpDist = abs(trade.takeProfit - trade.entry).coerceAtLeast(1e-8)
-    val rr = (tpDist / slDist).coerceIn(0.1, 50.0)
-    val riskUsd = if (trade.fixedRiskUsd > 0.0) trade.fixedRiskUsd else 5.0
-    val rewardUsd = riskUsd * rr
+    val riskUsd = trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 0.0
+    val rewardUsd = com.aurum.edge.core.RiskAndCalendarEngine.computeExitPnlUsd(trade, trade.takeProfit).second
+    val rr = if (riskUsd > 0.0) rewardUsd / riskUsd else 0.0
+    val stopNetUsd = com.aurum.edge.core.RiskAndCalendarEngine.computeExitPnlUsd(trade, trade.stopLoss).second
+    val stopNetR = if (riskUsd > 0) stopNetUsd / riskUsd else null
     val tpPct = (tpDist / trade.entry.coerceAtLeast(1e-8)) * 100.0
     val slPct = (slDist / trade.entry.coerceAtLeast(1e-8)) * 100.0
 
@@ -388,7 +390,7 @@ fun TradingViewPositionBox(
             ) {
                 Column {
                     Text(
-                        text = "🎯 حد سود (Take Profit)",
+                        text = "🎯 حد سود؛ برآورد خالص (TP)",
                         style = MaterialTheme.typography.labelSmall,
                         color = tvGreen,
                         fontWeight = FontWeight.Bold,
@@ -402,7 +404,7 @@ fun TradingViewPositionBox(
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "+$${String.format(Locale.US, "%.2f", rewardUsd)} (+${String.format(Locale.US, "%.2f", rr)}R)",
+                        text = "${String.format(Locale.US, "%+.2f", rewardUsd)}$ (${String.format(Locale.US, "%+.2f", rr)}R)",
                         style = MaterialTheme.typography.labelMedium,
                         color = tvGreen,
                         fontWeight = FontWeight.Bold,
@@ -474,13 +476,14 @@ fun TradingViewPositionBox(
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "-$${String.format(Locale.US, "%.2f", riskUsd)} (-1.00R)",
+                        text = "خالص در حد فعال: ${String.format(Locale.US, "%+.2f", stopNetUsd)}$" +
+                            (stopNetR?.let { " (${String.format(Locale.US, "%+.2f", it)}R)" } ?: " (R نامعلوم)"),
                         style = MaterialTheme.typography.labelMedium,
                         color = tvRed,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "-${String.format(Locale.US, "%.2f%%", slPct)}",
+                        text = "فاصله از ورود ${String.format(Locale.US, "%.2f%%", slPct)} · گپ تضمین نیست",
                         style = MaterialTheme.typography.labelSmall,
                         color = tvRed.copy(alpha = 0.9f),
                     )

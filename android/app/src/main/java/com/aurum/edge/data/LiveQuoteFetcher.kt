@@ -74,6 +74,10 @@ object LiveQuoteFetcher {
         }
     }
 
+    /** Memory only: safe for the price-tick and exit paths. */
+    fun peekMemoryCandles(symbolInput: String, interval: Interval): List<Candle> =
+        candleCache["${V1Universe.normalize(symbolInput)}|${interval.label}"]?.bars.orEmpty()
+
     fun peekCachedCandles(symbolInput: String, interval: Interval): List<Candle> {
         val symbol = V1Universe.normalize(symbolInput)
         val cached = candleCache["$symbol|${interval.label}"]?.bars.orEmpty()
@@ -135,8 +139,8 @@ object LiveQuoteFetcher {
                                 val tick = PriceTick(
                                     price = price,
                                     at = nowMillis,
-                                    isTradeTick = true,
-                                    provider = "Binance Batch",
+                                    isTradeTick = false,
+                                    provider = "Binance Batch (زمان معامله نامعلوم)",
                                 )
                                 result[norm] = tick
                                 applyLiveTickToCachedCandles(norm, tick)
@@ -152,7 +156,7 @@ object LiveQuoteFetcher {
 
         // Fallback for any symbol not returned by batch
         for (sym in targets) {
-            if (sym !in result) {
+            if (result[sym]?.isTradeTick != true) {
                 val single = fetchLiveTick(sym)
                 if (single != null) {
                     result[sym] = single
@@ -239,13 +243,21 @@ object LiveQuoteFetcher {
             else -> emptyList()
         }
 
+        var displayOnly: PriceTick? = null
         for (attempt in fetchers) {
             val tick = runCatching { attempt() }.getOrNull()
             if (tick != null && tick.price.isFinite() && tick.price > 0.0) {
-                return@withContext tick
+                val proxy = when (symbol) {
+                    "XAU/USD" -> tick.provider?.contains("GC=F") == true || tick.provider?.contains("PAXG") == true || tick.provider == "KuCoin"
+                    "XAG/USD" -> tick.provider?.contains("SI=F") == true
+                    "DOW" -> tick.provider?.contains("YM=F") == true
+                    else -> tick.provider?.contains("-USD)") == true || tick.provider == "Coinbase"
+                }
+                if (!proxy && com.aurum.edge.core.TradeQuotePolicy.accepts(tick)) return@withContext tick
+                if (displayOnly == null) displayOnly = tick.copy(isTradeTick = false)
             }
         }
-        null
+        displayOnly
     }
 
     /**
@@ -888,10 +900,11 @@ object LiveQuoteFetcher {
         val root = json.parseToJsonElement(body).jsonObject
         val price = root["price"]?.asDouble() ?: return null
         if (!price.isFinite() || price <= 0.0) return null
+        val sourceTime = sourceTimeMillis(root["updatedAt"])
         return PriceTick(
             price = price,
-            at = System.currentTimeMillis(),
-            isTradeTick = true,
+            at = sourceTime ?: System.currentTimeMillis(),
+            isTradeTick = sourceTime != null,
             provider = provider,
         )
     }
@@ -913,7 +926,7 @@ object LiveQuoteFetcher {
                         at = System.currentTimeMillis(),
                         bid = bid,
                         ask = ask,
-                        isTradeTick = true,
+                        isTradeTick = false,
                         provider = "Swissquote",
                     )
                 }
@@ -935,11 +948,12 @@ object LiveQuoteFetcher {
             val meta = result["meta"]?.jsonObject ?: continue
             val price = meta["regularMarketPrice"]?.asDouble() ?: continue
             if (price.isFinite() && price > 0.0) {
+                val sourceTime = sourceTimeMillis(meta["regularMarketTime"])
                 return PriceTick(
                     price = price,
-                    at = System.currentTimeMillis(),
-                    isTradeTick = true,
-                    provider = "Yahoo Finance",
+                    at = sourceTime ?: System.currentTimeMillis(),
+                    isTradeTick = sourceTime != null,
+                    provider = "Yahoo Finance ($yahooTicker)",
                 )
             }
         }
@@ -982,12 +996,13 @@ object LiveQuoteFetcher {
         if (!price.isFinite() || price <= 0.0) return null
         val bid = data["bestBid"]?.asDouble()
         val ask = data["bestAsk"]?.asDouble()
+        val sourceTime = sourceTimeMillis(data["time"])
         return PriceTick(
             price = price,
-            at = System.currentTimeMillis(),
+            at = sourceTime ?: System.currentTimeMillis(),
             bid = bid,
             ask = ask,
-            isTradeTick = true,
+            isTradeTick = sourceTime != null,
             provider = "KuCoin",
         )
     }
@@ -1001,7 +1016,7 @@ object LiveQuoteFetcher {
         return PriceTick(
             price = price,
             at = System.currentTimeMillis(),
-            isTradeTick = true,
+            isTradeTick = false,
             provider = "Coinbase",
         )
     }
@@ -1015,7 +1030,7 @@ object LiveQuoteFetcher {
         return PriceTick(
             price = price,
             at = System.currentTimeMillis(),
-            isTradeTick = true,
+            isTradeTick = false,
             provider = "Binance",
         )
     }
@@ -1028,12 +1043,13 @@ object LiveQuoteFetcher {
         if (!last.isFinite() || last <= 0.0) return null
         val bid = data["bidPx"]?.asDouble()
         val ask = data["askPx"]?.asDouble()
+        val sourceTime = sourceTimeMillis(data["ts"])
         return PriceTick(
             price = last,
-            at = System.currentTimeMillis(),
+            at = sourceTime ?: System.currentTimeMillis(),
             bid = bid,
             ask = ask,
-            isTradeTick = true,
+            isTradeTick = sourceTime != null,
             provider = "OKX",
         )
     }
@@ -1046,7 +1062,7 @@ object LiveQuoteFetcher {
         return PriceTick(
             price = last,
             at = System.currentTimeMillis(),
-            isTradeTick = true,
+            isTradeTick = false,
             provider = "Gate.io",
         )
     }
@@ -1059,7 +1075,7 @@ object LiveQuoteFetcher {
         return PriceTick(
             price = price,
             at = System.currentTimeMillis(),
-            isTradeTick = true,
+            isTradeTick = false,
             provider = "MEXC",
         )
     }
@@ -1096,6 +1112,18 @@ object LiveQuoteFetcher {
             }
             null
         }
+    }
+
+    internal fun sourceTimeMillis(element: JsonElement?): Long? {
+        val raw = (element as? JsonPrimitive)?.content ?: return null
+        val number = raw.toLongOrNull()
+        if (number != null) return when (number) {
+            in 1_000_000_000L..9_999_999_999L -> number * 1000L
+            in 1_000_000_000_000L..9_999_999_999_999L -> number
+            else -> null
+        }
+        return runCatching { java.time.Instant.parse(raw).toEpochMilli() }.getOrNull()
+            ?.takeIf { it > 0L }
     }
 
     private fun JsonElement.asDouble(): Double? =

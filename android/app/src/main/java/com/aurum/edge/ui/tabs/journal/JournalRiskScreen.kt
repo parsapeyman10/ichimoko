@@ -4,6 +4,7 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -35,6 +36,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -150,6 +152,11 @@ fun JournalRiskScreen(
 
     var subPage by rememberSaveable { mutableIntStateOf(0) }
     var selectedStrategyFilter by rememberSaveable { mutableStateOf("ALL") }
+    if (subPage == 4) {
+        BackHandler { subPage = 0 }
+        TradeFilterScreen(trades = trades, onBack = { subPage = 0 }, onChart = onChartSymbol)
+        return
+    }
 
     val strategyCategories = remember(trades.size, trades.firstOrNull()?.id, trades.firstOrNull()?.closedAt, settings.customStrategies) {
         RiskAndCalendarEngine.categorizeTradesByStrategy(trades, settings.customStrategies)
@@ -292,6 +299,7 @@ fun JournalRiskScreen(
             // ترتیب تب‌ها = ترتیب منطقی کار: تقویم ← معاملات باز ← ماشین‌حساب ← خروجی
             // ژورنال: معاملات، تقویم و گزارش‌ها. هیچ تب تصویری در این صفحه نیست.
             listOf(
+                4 to "🔎 فیلتر همهٔ معاملات",
                 0 to "📅 تقویم ژورنال (${filteredClosedTrades.size})",
                 1 to "📜 معاملات باز (${filteredOpenTrades.size})",
                 2 to "🧮 ماشین‌حساب حجم",
@@ -316,6 +324,7 @@ fun JournalRiskScreen(
                     onDeleteTrade = viewModel::deleteJournalTrade,
                     onClearAll = viewModel::clearAllJournalTrades,
                     onOpenChart = onChartSymbol,
+                    onRefreshPath = viewModel::refreshJournalTradePath,
                 )
 
         // ── ۱. کارنامهٔ کلی بازطراحی‌شده (تحلیل کمّی: منحنی سرمایه، ریسک، تفکیک گروه‌ها) ──
@@ -545,7 +554,7 @@ fun JournalRiskScreen(
                     liveTick = liveTicks[activeSymbol],
                     accountBalance = settings.accountBalance,
                     riskPercent = settings.riskPercent,
-                    fixedRiskUsdOverride = RiskAndCalendarEngine.fixedRiskUsdOrNull(settings.fixedRiskUsd),
+                    fixedRiskUsdOverride = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades, settings.accountBalance),
                     riskLimits = riskLimits,
                     avalAiEnabled = settings.avalAiEnabled,
                     aiChecking = aiChecking,
@@ -2170,10 +2179,10 @@ internal fun OfflineGapBackfillCard(
 ) {
     SectionCard(
         title = "🔄 بازیابی دیتای ساعات قطعی (Backfill)",
-        subtitle = "دریافت یکجای کندل‌های ساعاتی که آفلاین بودید و بررسی خودکار برخورد High/Low به TP و SL",
+        subtitle = "کندل فقط برای بررسی است؛ ترتیب، قیمت و زمان خروج در قطعی نامعلوم است و معامله با کندل بسته نمی‌شود. قیمت نامعتبر نیز محافظت نمی‌کند.",
         trailing = {
             Pill(
-                text = if (isBackfilling) "در حال دریافت..." else if (summary != null) "همگام تا این لحظه ✓" else "آماده همگام‌سازی",
+                text = if (isBackfilling) "در حال دریافت..." else if (summary != null) "کندل دریافت شد" else "آماده همگام‌سازی",
                 color = if (isBackfilling) AurumColors.Gold else if (summary != null) AurumColors.Green else AurumColors.Cyan,
             )
         },
@@ -2225,7 +2234,7 @@ internal fun OfflineGapBackfillCard(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "بازهٔ پوشش: از ${formatDateTime(summary.fromMillis)} تا ${formatDateTime(summary.toMillis)}",
+                    text = "زمان شروع نخستین تا آخرین کندل دریافتی: از ${formatDateTime(summary.fromMillis)} تا ${formatDateTime(summary.toMillis)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
                 )
@@ -2405,7 +2414,7 @@ private fun AutoMonitoredOpenTradesCard(
                                 color = AurumColors.Cyan,
                             )
                             Text(
-                                text = "🧭 خروج هوشمند فقط بالای +۲R: تا سود معامله به ۲ برابر ریسک نرسد هیچ خروج هوشمندی اجرا نمی‌شود. بالای +۲R: شکست کیجون/TK، شدوی بازگشتی C-Clamp، چرخه هوسودا (9/17/26) با تنکان فلت، یا قفل چیکو و افت ER<20%",
+                                text = "🛡️ پس از تیک تازه با سود خالص حداقل ۱٫۵R، حد فعال به سربه‌سر خالص منتقل می‌شود؛ سپس تریل ساختاری فقط بهبود می‌یابد. سود جاری با سود محافظت‌شده یکی نیست؛ در قطعی یا گپ خروج تضمین ندارد.",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Gold,
                             )
@@ -2474,6 +2483,7 @@ private fun MonthlyPnlCalendarSection(
     onDeleteTrade: (String) -> Unit,
     onClearAll: () -> Unit,
     onOpenChart: (String) -> Unit,
+    onRefreshPath: (String) -> Unit,
 ) {
     val todayZoned = remember(now) { Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()) }
     val todayYm = remember(todayZoned) { YearMonth.from(todayZoned) }
@@ -2843,6 +2853,7 @@ private fun MonthlyPnlCalendarSection(
                         trade = trade,
                         onDelete = { onDeleteTrade(trade.id) },
                         onOpenChart = { onOpenChart(trade.symbol) },
+                        onRefreshPath = { onRefreshPath(trade.id) },
                     )
                 }
             }
@@ -3041,6 +3052,7 @@ private fun ClosedJournalTradeRow(
     trade: PaperTrade,
     onDelete: () -> Unit,
     onOpenChart: () -> Unit,
+    onRefreshPath: () -> Unit,
 ) {
     var detailsExpanded by rememberSaveable("closed_row_${trade.id}") { mutableStateOf(false) }
     val pnl = trade.pnlUsd ?: 0.0
@@ -3278,7 +3290,7 @@ private fun ClosedJournalTradeRow(
                 }
             }
 
-            if (!trade.isOpen && trade.outcomeReasonFa.isNotBlank()) {
+            if (!trade.isOpen && trade.pnlUsd != null) {
                 // «دلیل برد/باخت» که موتور عصبی هنگام بسته شدن معامله نوشته است.
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -3290,8 +3302,13 @@ private fun ClosedJournalTradeRow(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
+                    Text("گزارش قدیمی همهٔ نمادها ممکن است کندل نامرتبط داشته باشد؛ برای حذف اعداد و برچسب‌های نامطمئن بازخوانی کنید. کندل تاریخی اثبات تیک یا اجرای قفل نیست.", color = AurumColors.TextMuted, fontSize = 9.sp)
+                    TextButton(onClick = onRefreshPath) { Text("بازخوانی مسیر کندل‌های این معامله") }
                     Text(
-                        text = trade.outcomeReasonFa,
+                        text = trade.outcomeReasonFa.ifBlank {
+                            "اطلاعات ثبت‌شدهٔ همین معامله؛ مسیر کندل‌ها در دسترس نیست:\n" +
+                                com.aurum.edge.core.TradeOutcomeExplainer.explain(trade).textFa()
+                        },
                         color = AurumColors.TextSecondary,
                         fontSize = 10.sp,
                         lineHeight = 15.sp,

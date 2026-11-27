@@ -525,10 +525,10 @@ private fun NativeIchimokuCanvasChart(
     val bars = series.bars
     val futureKumo = series.futureKumo
 
-    var focusFutureKumo by rememberSaveable { mutableStateOf(true) }
+    var focusFutureKumo by rememberSaveable { mutableStateOf(false) }
     var visibleBarsCount by rememberSaveable { mutableIntStateOf(60) }
     var panOffsetBars by rememberSaveable(symbol, timeframe) { mutableFloatStateOf(0f) }
-    var fitTradeTpSl by rememberSaveable(symbol) { mutableStateOf(true) }
+    var fitTradeTpSl by rememberSaveable(symbol) { mutableStateOf(false) }
     var inspectedIndex by remember(bars) { mutableStateOf<Int?>(bars.lastIndex.takeIf { it >= 0 }) }
     var inspectedFutureStep by remember(bars) { mutableStateOf<Int?>(null) }
 
@@ -544,7 +544,7 @@ private fun NativeIchimokuCanvasChart(
         val sel = bars[inspectIdx]
 
         // محاسبه ابر آینده ۲۶ کندلی (حتی اگر کاربر چارت را به عقب اسکرول کرده باشد)
-        val endIdx = (bars.lastIndex - panOffsetBars.roundToInt()).coerceIn(10, bars.lastIndex)
+        val endIdx = (bars.lastIndex - panOffsetBars.roundToInt()).coerceIn(0, bars.lastIndex)
         val startIdx = (endIdx - visibleBarsCount + 1).coerceAtLeast(0)
         val visibleSlice = bars.subList(startIdx, endIdx + 1)
 
@@ -697,20 +697,7 @@ private fun NativeIchimokuCanvasChart(
                         fontWeight = FontWeight.Bold,
                         color = if (inspectedFk.spanA >= inspectedFk.spanB) AurumColors.Green else AurumColors.Red,
                     )
-                    // راهنمای نشانه‌ها: همان چهار رنگی که روی کندل‌ها کشیده می‌شود.
-        if (markerTrade != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text("● ورود", color = Color(0xFFFF9800), fontSize = 11.sp)
-                Text("● خروج سودده", color = Color(0xFF00E676), fontSize = 11.sp)
-                Text("● خروج زیان‌ده", color = Color(0xFFFF5252), fontSize = 11.sp)
-                Text("● بهترین کندل مسیر", color = Color(0xFF40C4FF), fontSize = 11.sp)
-            }
-        }
-
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Text(
                             text = "SSA: ${formatPrice(inspectedFk.spanA)} | SSB: ${formatPrice(inspectedFk.spanB)}",
                             style = MaterialTheme.typography.labelSmall,
@@ -719,6 +706,15 @@ private fun NativeIchimokuCanvasChart(
                         )
                     }
                 }
+            }
+        }
+
+        if (markerTrade != null) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("● ورود", color = Color(0xFFFF9800), fontSize = 10.sp)
+                Text("● خروج سودده", color = Color(0xFF00E676), fontSize = 10.sp)
+                Text("● خروج زیان‌ده", color = Color(0xFFFF5252), fontSize = 10.sp)
+                Text("● بهترین کندل مسیر", color = Color(0xFF40C4FF), fontSize = 10.sp)
             }
         }
 
@@ -757,14 +753,11 @@ private fun NativeIchimokuCanvasChart(
         val padMax = windowPadded.max
         val padRange = windowPadded.span
 
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+          CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Canvas(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    // اگر ارتفاع والدی نامحدود باشد، weight به صفر می‌رسد و بوم بی‌صدا خالی
-                    // می‌ماند؛ این کف ارتفاع تضمین می‌کند چارت همیشه قابل دیدن باشد.
-                    .heightIn(min = 240.dp)
+                    .fillMaxSize()
                     .pointerInput(bars.size, visibleBarsCount, focusFutureKumo) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
@@ -791,6 +784,7 @@ private fun NativeIchimokuCanvasChart(
             ) {
                 val w = size.width
                 val h = size.height
+                if (!w.isFinite() || !h.isFinite() || w <= 0f || h <= 0f) return@Canvas
                 val slotW = w / totalSlots.toFloat()
 
                 fun yOf(price: Double): Float {
@@ -932,7 +926,7 @@ private fun NativeIchimokuCanvasChart(
                     val tipBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
                     fun drawFutureTipTag(label: String, priceVal: Double, bgInt: Int) {
-                        val y = yOf(priceVal).coerceIn(18f, h - 18f)
+                        val y = com.aurum.edge.core.ChartViewport.clampY(yOf(priceVal), h, 18f)
                         val txt = "$label: ${formatPriceFor(symbol, priceVal)}"
                         val tw = tipPaint.measureText(txt)
                         val left = (w - tw - 18f).coerceAtLeast(dividerX + 4f)
@@ -1044,11 +1038,11 @@ private fun NativeIchimokuCanvasChart(
                     }
 
                     // هـ) برچسب‌های حرفه‌ای تریدینگ‌ویو روی خطوط TP، Entry و SL
-                    val slDist = abs(activeTrade.entry - activeTrade.stopLoss).coerceAtLeast(1e-8)
-                    val tpDist = abs(activeTrade.takeProfit - activeTrade.entry).coerceAtLeast(1e-8)
-                    val rr = (tpDist / slDist).coerceIn(0.1, 50.0)
-                    val riskUsd = if (activeTrade.fixedRiskUsd > 0.0) activeTrade.fixedRiskUsd else 5.0
-                    val rewardUsd = riskUsd * rr
+                    val riskUsd = activeTrade.fixedRiskUsd.takeIf { it > 0.0 } ?: 0.0
+                    val rewardUsd = com.aurum.edge.core.RiskAndCalendarEngine.computeExitPnlUsd(activeTrade, activeTrade.takeProfit).second
+                    val stopUsd = com.aurum.edge.core.RiskAndCalendarEngine.computeExitPnlUsd(activeTrade, activeTrade.stopLoss).second
+                    val rr = if (riskUsd > 0.0) rewardUsd / riskUsd else 0.0
+                    val stopR = if (riskUsd > 0.0) stopUsd / riskUsd else 0.0
                     val valuation = LiveTradeValuation.from(activeTrade, curP)
                     val pnlUsd = valuation?.netPnlUsd ?: 0.0
                     val pnlSign = if (pnlUsd >= 0.0) "+" else "-"
@@ -1077,7 +1071,7 @@ private fun NativeIchimokuCanvasChart(
                         } else {
                             (boxStartX + 8f).coerceAtMost(w - textW - padH * 2f - 8f)
                         }
-                        val top = (anchorY - boxH / 2f).coerceIn(4f, h - boxH - 4f)
+                        val top = com.aurum.edge.core.ChartViewport.clampY(anchorY - boxH / 2f, (h - boxH).coerceAtLeast(0f), 4f)
                         val rect = RectF(left, top, left + textW + padH * 2f, top + boxH)
                         bgPaint.color = bgColorInt
                         drawContext.canvas.nativeCanvas.drawRoundRect(rect, 8f, 8f, bgPaint)
@@ -1091,14 +1085,14 @@ private fun NativeIchimokuCanvasChart(
 
                     // تگ حد سود (TP)
                     drawTvBadge(
-                        text = "TP: ${formatPriceFor(symbol, activeTrade.takeProfit)}  (+$${String.format(Locale.US, "%.2f", rewardUsd)} | ${String.format(Locale.US, "%.2f", rr)}R)",
+                        text = "TP: ${formatPriceFor(symbol, activeTrade.takeProfit)}  (${String.format(Locale.US, "%+.2f", rewardUsd)}$ | ${String.format(Locale.US, "%+.2f", rr)}R net)",
                         anchorY = tpY,
                         bgColorInt = AndroidColor.argb(235, 8, 153, 129),
                         alignRight = true,
                     )
                     // تگ حد ضرر (SL)
                     drawTvBadge(
-                        text = "SL: ${formatPriceFor(symbol, activeTrade.stopLoss)}  (-$${String.format(Locale.US, "%.2f", riskUsd)} | -1R)",
+                        text = "SL: ${formatPriceFor(symbol, activeTrade.stopLoss)}  (${String.format(Locale.US, "%+.2f", stopUsd)}$ | ${String.format(Locale.US, "%+.2f", stopR)}R net)",
                         anchorY = slY,
                         bgColorInt = AndroidColor.argb(235, 242, 54, 69),
                         alignRight = true,
@@ -1179,12 +1173,9 @@ private fun NativeIchimokuCanvasChart(
                 //    بهترین کندل در جهت معامله (آبی). فقط روی کندل‌هایی که در پنجرهٔ دید هستند.
                 if (markerTrade != null) {
                     fun slotOfTime(ms: Long): Int? {
-                        if (ms <= 0L) return null
-                        var found: Int? = null
-                        for (i in visibleSlice.indices) {
-                            if (visibleSlice[i].candle.time <= ms) found = i
-                        }
-                        return found
+                        return com.aurum.edge.core.ChartViewport.candleSlot(
+                            visibleSlice.map { it.candle.time }, ms, Interval.fromLabel(timeframe).millis,
+                        )
                     }
                     fun ring(slot: Int, color: Color, radius: Float) {
                         val bar = visibleSlice[slot].candle
@@ -1204,15 +1195,16 @@ private fun NativeIchimokuCanvasChart(
                         }
                     } else null
                     if (entrySlot != null) ring(entrySlot, Color(0xFFFF9800), 10f)
-                    if (exitSlot != null && exitSlot != entrySlot) {
+                    if (exitSlot != null) {
                         val win = (markerTrade.pnlUsd ?: 0.0) >= 0.0
-                        ring(exitSlot, if (win) Color(0xFF00E676) else Color(0xFFFF5252), 10f)
+                        ring(exitSlot, if (win) Color(0xFF00E676) else Color(0xFFFF5252), if (exitSlot == entrySlot) 6f else 10f)
                     }
                     if (bestSlot != null && bestSlot != entrySlot && bestSlot != exitSlot) {
                         ring(bestSlot, Color(0xFF40C4FF), 8f)
                     }
                 }
             }
+          }
         }
     }
 }

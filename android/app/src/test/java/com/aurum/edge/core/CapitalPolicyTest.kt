@@ -31,7 +31,7 @@ class CapitalPolicyTest {
         assertHealthy(policy)
         assertTrue("حالت پیش‌فرض ریسک ثابت دلاری است", policy.useFixedDollarRisk)
         assertEquals(5.0, policy.riskBudgetUsd, 1e-9)
-        assertEquals(7.5, policy.rewardFloorUsd, 1e-9)
+        assertEquals(10.0, policy.rewardFloorUsd, 1e-9)
         assertEquals(15.0, policy.rewardCeilingUsd, 1e-9)
         assertEquals(0.005, policy.riskBudgetPctOfEquity, 1e-9) // ۵ دلار از ۱۰۰٬۰۰۰ = ۰٫۰۰۵٪
     }
@@ -47,7 +47,7 @@ class CapitalPolicyTest {
             fixedRiskUsd = 0.0,
         )
         assertEquals(30.0, percentOnly.riskBudgetUsd, 1e-9)
-        assertEquals(45.0, percentOnly.rewardFloorUsd, 1e-9)
+        assertEquals(60.0, percentOnly.rewardFloorUsd, 1e-9)
         assertEquals(90.0, percentOnly.rewardCeilingUsd, 1e-9)
 
         val withFixedAmount = percentOnly.copy(fixedRiskUsd = 5.0)

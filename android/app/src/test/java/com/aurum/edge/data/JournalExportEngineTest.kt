@@ -168,4 +168,37 @@ class JournalExportEngineTest {
         assertEquals(4, restoredFromCsv.size)
         assertTrue(restoredFromCsv.any { it.id == "t2" && it.symbol == "BTC/USDT" })
     }
+    @Test
+    fun csvRoundTripPreservesEntryEvidenceAndLegacyTimes() {
+        val original = sampleTrades().first().copy(
+            interval = Interval.H4, signalBarTime = 1_699_999_000_000L,
+            origin = PaperTrade.ORIGIN_BACKTEST, tech1hBuy = 3, tech1hNeutral = 2, tech1hSell = 1,
+            tech4hBuy = 1, tech4hNeutral = 2, tech4hSell = 3, techSnapshotRebuilt = true,
+            stateEr14 = 0.42, stateTrendPhaseCode = "GENESIS", stateKumoThicknessAtr = 1.2,
+            neuralEntryObservation = com.aurum.edge.core.NeuralEntryObservation(
+                evaluatedAt = 1_700_000_000_000L, signalBarTime = 1_699_999_000_000L,
+                features = List(24) { it / 24.0 }, conditionKey = "real|evidence", predictedWinProbability = 0.43, expectedR = -0.2,
+            ),
+        )
+        val report = JournalExportEngine.buildInstitutionalTearSheet(listOf(original), 100_000.0, 100_000.0, nowEpochMs = 1_700_020_000_000L)
+        val csv = JournalExportEngine.generateCsvContent(report)
+        val restored = JournalExportEngine.parseBackupContent(csv).getOrThrow().single()
+        assertEquals(original.openedAt, restored.openedAt)
+        assertEquals(original.closedAt, restored.closedAt)
+        assertEquals(original.signalBarTime, restored.signalBarTime)
+        assertEquals(original.neuralEntryObservation, restored.neuralEntryObservation)
+        assertEquals(original.interval, restored.interval)
+        assertEquals(original.origin, restored.origin)
+        assertEquals(original.tech1hBuy, restored.tech1hBuy)
+        assertEquals(original.tech4hSell, restored.tech4hSell)
+        assertTrue(restored.techSnapshotRebuilt)
+        assertEquals(original.stateEr14, restored.stateEr14, 0.0)
+        assertEquals(original.stateKumoThicknessAtr, restored.stateKumoThicknessAtr, 0.0)
+        val oldCsv = csv.lines().filter { it.isNotBlank() }.joinToString("\n") { it.split(",").take(29).joinToString(",") }
+        val old = JournalExportEngine.parseBackupContent(oldCsv).getOrThrow().single()
+        assertEquals(original.openedAt, old.openedAt)
+        assertEquals(original.closedAt, old.closedAt)
+        assertEquals("UNKNOWN", old.origin)
+    }
+
 }

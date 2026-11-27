@@ -182,6 +182,25 @@ data class PreEntry3CandleContext(
     val candles: List<PreEntryCandleSlot> = emptyList(),
 )
 
+/** پیش‌بینی مشاهده‌ای و بردار واقعی همان ارزیابی، نه نتیجه یا بازسازی تاریخی. */
+@Serializable
+data class NeuralEntryObservation(
+    val schema: Int = 1,
+    val evaluatedAt: Long,
+    val signalBarTime: Long,
+    val features: List<Double>,
+    val conditionKey: String,
+    val predictedWinProbability: Double,
+    val expectedR: Double,
+) {
+    fun isUsableFor(openedAt: Long): Boolean = ((schema == 1 && features.size == 24) || (schema == 2 && features.size == 28)) &&
+        evaluatedAt > 0 && evaluatedAt <= openedAt && signalBarTime > 0 && signalBarTime <= evaluatedAt &&
+        features.all { it.isFinite() && it in -1.0..1.0 } &&
+        (schema != 2 || ((features[25] == 0.0 || features[25] == 1.0) && (features[27] == 0.0 || features[27] == 1.0) &&
+            (features[25] == 1.0 || features[24] == 0.0) && (features[27] == 1.0 || features[26] == 0.0))) && conditionKey.isNotBlank() &&
+        predictedWinProbability.isFinite() && predictedWinProbability in 0.0..1.0 && expectedR.isFinite()
+}
+
 @Serializable
 data class PaperTrade(
     val id: String,
@@ -203,6 +222,9 @@ data class PaperTrade(
     val positionUnit: String = "",
     val autoOpened: Boolean = false,
     val signalBarTime: Long? = null,
+    /** Actual time at which the active stop was last changed; unknown for old journals. */
+    val stopUpdatedAt: Long? = null,
+    val neuralEntryObservation: NeuralEntryObservation? = null,
     val entryConditions: List<PaperConditionRecord> = emptyList(),
     val leverage: Int = 10,
     val marginUsd: Double = 0.0,
@@ -215,6 +237,9 @@ data class PaperTrade(
     val strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
     val strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
     val fixedRiskUsd: Double = 0.0,
+    /** New trades settle from actual units and the entry-time fee estimate; older trades retain legacy settlement. */
+    val netSettlementEnabled: Boolean = false,
+    val settlementFeeUsd: Double = 0.0,
     val optimalRiskReward: Double = 0.0,
     val rrBreakdownFa: String = "",
     val preEntry3CandleCategoryCode: String = "",
@@ -269,6 +294,11 @@ data class PaperTrade(
     val stateDistKijunAtr: Double = -1.0,
     val stateKumoThicknessAtr: Double = -1.0,
     val stateVolumeRatio20: Double = -1.0,
+    // Snapshot at signal time; -1 means unknown, not zero. Never reconstructed after exit.
+    val cloudAgeBars: Int = -1,
+    val cloudAgeCensored: Boolean = false,
+    val cloudTwistAheadBars: Int = -1,
+    val cloudSignalBarTime: Long = 0L,
 
     // ── سنجش تکنیکال در لحظهٔ ورود (فقط داده — هیچ اثری در تصمیم ندارد) ──────────
     // تعداد رأی‌های «خرید / خنثی / فروش» نوار سنجش تکنیکال در تایم‌فریم ۱ ساعته و ۴ ساعته.

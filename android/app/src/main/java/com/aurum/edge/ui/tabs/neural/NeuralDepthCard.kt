@@ -68,7 +68,9 @@ internal fun NeuralDepthCard(
             runCatching {
                 NeuralDepthAudit.fromTrades(
                     trades = trades,
-                    targets = NeuralDepthTargets.from(CapitalPolicy.from(settings)),
+                    targets = NeuralDepthTargets.from(CapitalPolicy.from(settings).copy(
+                        fixedRiskUsd = com.aurum.edge.core.ProfitRiskPolicy.riskUsd(trades, settings.accountBalance),
+                    )),
                 )
             }.getOrNull()
         }
