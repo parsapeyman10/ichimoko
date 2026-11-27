@@ -168,7 +168,7 @@ fun NeuralBrainScreen(
                     fontWeight = FontWeight.Bold,
                 )
                 Pill(
-                    text = "R:R قفل در [1:1.50 .. 1:3.00]",
+                    text = "هدف خالص: ۲ تا ۳R",
                     color = AurumColors.Green,
                 )
             }
