@@ -28,7 +28,8 @@ class SessionResearchExportTest {
         val closed = PaperTrade(id = "abc", symbol = "XAU/USD", interval = Interval.M5, action = SignalAction.BUY,
             entry = 100.0, stopLoss = 99.0, initialStopLoss = 98.0, takeProfit = 104.0, confidence = 70.0,
             riskReward = 2.0, openedAt = entry, closedAt = entry + 60_000, exitPrice = 104.0, pnlUsd = 10.0,
-            fixedRiskUsd = 5.0, signalBarTime = entry - 60_000, neuralEntryObservation = observation)
+            fixedRiskUsd = 5.0, signalBarTime = entry - 60_000, neuralEntryObservation = observation,
+            stopObservations = listOf(com.aurum.edge.core.StopObservation("STOP_HIT", entry + 60_000, actualStop = 99.0)))
         val open = closed.copy(id = "backtest2", symbol = "BTC/USD", origin = "BACKTEST", closedAt = null,
             exitPrice = null, pnlUsd = null, initialStopLoss = null, neuralEntryObservation = null, signalBarTime = null)
         val file = SessionResearchExport.create(context, AppSettings(apiKey = "secret-api-key"), NeuralLearningStateSummary(), listOf(closed, open))
@@ -41,6 +42,7 @@ class SessionResearchExportTest {
             val journal = read("journal_trades.jsonl").lines().filter { it.isNotBlank() }
             assertEquals(2, journal.size)
             assertTrue(journal[0].contains("neuralEntryObservation"))
+            assertTrue(journal[0].contains("\"kind\":\"STOP_HIT\""))
             assertTrue(journal[0].contains("\"features\""))
             assertTrue(journal[1].contains("\"initialStopLoss\":null"))
             assertTrue(journal[1].contains("\"origin\":\"BACKTEST\""))

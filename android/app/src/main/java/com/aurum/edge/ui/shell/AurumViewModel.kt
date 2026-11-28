@@ -2374,6 +2374,14 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                         val closed = container.journalStore.closeTradeAtPrice(openTrade.id, px, reason, now)
                         if (closed != null) { _toast.value = reason; continue }
                     }
+                    // Observation only: uses closed candles and a fresh quote, never modifies the actual plan.
+                    if (quote != null && px != null) runCatching {
+                        val observation = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            val candles = LiveQuoteFetcher.peekMemoryCandles(openTrade.symbol, openTrade.interval)
+                            com.aurum.edge.core.StopObservationPolicy.shadow(openTrade, quote, candles, now)
+                        }
+                        observation?.let { container.journalStore.recordStopShadow(openTrade.id, it) }
+                    }
                     val preserveUpdate = if (px == null) null else IchimokuStrategyEngine.evaluateOpenTradeManagement(
                         trade = openTrade,
                         report = matchingReport.copy(livePrice = px),
@@ -2392,6 +2400,7 @@ class AurumViewModel(internal val container: AppContainer) : ViewModel() {
                             newTakeProfit = preserveUpdate.updatedTakeProfit,
                             allowRatchet = true,
                             updatedAt = now,
+                            observedQuote = quote,
                         )
                         if (ratcheted != null) {
                             _toast.value = "${preserveUpdate.stageTitleFa}: ${openTrade.symbol} (${openTrade.interval.label})"

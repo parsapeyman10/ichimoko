@@ -149,7 +149,9 @@ class JournalStore(
             }
             if (better) trade.copy(stopLoss = checkpoint!!.stopLoss,
                 initialStopLoss = trade.initialStopLoss ?: checkpoint.initialStopLoss,
-                stopUpdatedAt = checkpoint.stopUpdatedAt, note = checkpoint.note) else trade
+                stopUpdatedAt = checkpoint.stopUpdatedAt, note = checkpoint.note,
+                stopObservations = checkpoint.stopObservations,
+                netBreakEvenObservedAt = checkpoint.netBreakEvenObservedAt) else trade
         })
     }
 
@@ -591,6 +593,7 @@ class JournalStore(
         newTakeProfit: Double? = null,
         allowRatchet: Boolean = false,
         updatedAt: Long = System.currentTimeMillis(),
+        observedQuote: PriceTick? = null,
     ): PaperTrade? {
         if (!newStopLoss.isFinite() || newStopLoss <= 0.0) return null
         val target = _trades.value.firstOrNull { it.id == tradeId && it.isOpen } ?: return null
@@ -618,6 +621,13 @@ class JournalStore(
                 stopLoss = newStopLoss,
                 initialStopLoss = target.initialStopLoss ?: target.stopLoss,
                 stopUpdatedAt = updatedAt.takeIf { it >= target.openedAt },
+                stopObservations = com.aurum.edge.core.StopObservationPolicy.append(target,
+                    com.aurum.edge.core.StopObservation("STOP_UPDATE", updatedAt,
+                        quoteAt = observedQuote?.at, quotePrice = observedQuote?.price,
+                        quoteProvider = observedQuote?.provider?.take(80), previousStop = current,
+                        actualStop = newStopLoss,
+                        pnlAtStopUsd = RiskAndCalendarEngine.computeExitPnlUsd(target, newStopLoss).second,
+                        status = "STRUCTURAL")),
                 takeProfit = newTakeProfit ?: target.takeProfit,
                 note = updatedNote,
             )
@@ -636,6 +646,18 @@ class JournalStore(
         )
         persist(_trades.value.map { if (it.id == tradeId) modified else it })
         return modified
+    }
+
+    /** Best-effort observational record; it cannot alter stop, target, or exit. */
+    @Synchronized
+    fun recordStopShadow(tradeId: String, observation: com.aurum.edge.core.StopObservation) {
+        if (observation.kind != "SHADOW" || observation.barTime == null) return
+        val target = _trades.value.firstOrNull { it.id == tradeId && it.isOpen && !it.isBacktest } ?: return
+        if (target.stopLoss != observation.actualStop ||
+            target.stopObservations.any { it.kind == "SHADOW" && it.barTime == observation.barTime }) return
+        val updated = target.copy(stopObservations = com.aurum.edge.core.StopObservationPolicy.append(target, observation))
+        _trades.value = _trades.value.map { if (it.id == tradeId) updated else it }
+        ioScope.launch { synchronized(this@JournalStore) { persist(_trades.value) } }
     }
 
     /**
@@ -724,6 +746,14 @@ class JournalStore(
                         exitPrice = hit.exitPrice,
                         exitReason = effectiveReason,
                         pnlUsd = hit.netPnlUsd,
+                        stopObservations = if (hit.kind == com.aurum.edge.core.AutoExitKind.STOP_LOSS)
+                            com.aurum.edge.core.StopObservationPolicy.append(trade,
+                                com.aurum.edge.core.StopObservation("STOP_HIT", nowMillis,
+                                    quoteAt = tick.at, quotePrice = tick.price, quoteProvider = tick.provider?.take(80),
+                                    actualStop = trade.stopLoss,
+                                    pnlAtStopUsd = RiskAndCalendarEngine.computeExitPnlUsd(trade, trade.stopLoss).second,
+                                    actualPnlUsd = hit.netPnlUsd, status = "OBSERVED_TICK"))
+                        else trade.stopObservations,
                     )
                     val explained = explainClosedTrade(closedTrade)
                     closedTradesForAlarm += explained to isProfitableClose
@@ -736,7 +766,14 @@ class JournalStore(
                         protectedAny = true
                         val note = "${IchimokuStrategyEngine.BE_TAG_MARK} حد ضرر سربه‌سر خالص پس از ۱٫۵R؛ اجرا در گپ تضمین نیست"
                         trade.copy(stopLoss = stop, initialStopLoss = trade.initialStopLoss ?: trade.stopLoss,
-                            stopUpdatedAt = tick.at, note = "${trade.note} · $note".trim(' ', '·'))
+                            stopUpdatedAt = tick.at, note = "${trade.note} · $note".trim(' ', '·'),
+                            netBreakEvenObservedAt = tick.at,
+                            stopObservations = com.aurum.edge.core.StopObservationPolicy.append(trade,
+                                com.aurum.edge.core.StopObservation("STOP_UPDATE", nowMillis,
+                                    quoteAt = tick.at, quotePrice = tick.price, quoteProvider = tick.provider?.take(80),
+                                    previousStop = trade.stopLoss, actualStop = stop,
+                                    pnlAtStopUsd = RiskAndCalendarEngine.computeExitPnlUsd(trade, stop).second,
+                                    status = "NET_BREAK_EVEN")))
                     }
                 }
             }
