@@ -3290,6 +3290,16 @@ private fun ClosedJournalTradeRow(
                 }
             }
 
+            if (trade.stopObservations.isNotEmpty()) {
+                Text("🔎 ممیزی استاپ و پیشنهاد مشاهده‌ای", color = AurumColors.Gold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Text("فقط مقایسهٔ سطح‌ها تا زمان بسته‌شدن واقعی است، نه اجرای فرضی یا اثبات سود بیشتر. حداکثر ۶۴ رویداد اخیر در ZIP جامع ثبت می‌شود؛ دادهٔ پیش از این نسخه نامعلوم است.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+                trade.stopObservations.takeLast(4).asReversed().forEach { event ->
+                    val title = when (event.kind) { "STOP_HIT" -> "برخورد استاپ با تیک"; "STOP_UPDATE" -> "تغییر استاپ واقعی"; else -> "بررسی روند (فقط مشاهده)" }
+                    val state = when (event.status) { "WAIT_PROTECTION" -> "محافظ ۱٫۵R در ثبت جدید مشاهده نشده"; "TREND_UNCONFIRMED" -> "روند هم‌جهت تأیید نشد"; "HOLD" -> "بدون پیشنهاد بهبود"; "CANDIDATE" -> "سطح پیشنهادی"; "NET_BREAK_EVEN" -> "سربه‌سر خالص"; "STRUCTURAL" -> "تریل ساختاری"; else -> event.status }
+                    val at = runCatching { Instant.ofEpochMilli(event.recordedAt).toString() }.getOrDefault("نامعلوم")
+                    Text("$title · $state · $at UTC\nاستاپ قبلی ${event.previousStop ?: "—"} · فعال ${event.actualStop ?: "—"} · پیشنهاد ${event.suggestedStop ?: "—"}\nقیمت مشاهده ${event.quotePrice ?: "—"} · زمان قیمت ${event.quoteAt?.let { runCatching { Instant.ofEpochMilli(it).toString() }.getOrNull() } ?: "نامعلوم"} · P/L در استاپ ${event.pnlAtStopUsd ?: "—"} دلار · خروج واقعی ${event.actualPnlUsd ?: "—"} دلار", color = AurumColors.TextSecondary, fontSize = 10.sp, lineHeight = 15.sp)
+                }
+            }
             if (!trade.isOpen && trade.pnlUsd != null) {
                 // «دلیل برد/باخت» که موتور عصبی هنگام بسته شدن معامله نوشته است.
                 Column(

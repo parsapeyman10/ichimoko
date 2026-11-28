@@ -47,14 +47,14 @@ fun DailyBackupCard() {
     }
     SectionCard(title = "🔐 ارسال روزانهٔ رمزگذاری‌شده به گیت", initiallyExpanded = false) {
         Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("هر ۲۴ ساعت با اینترنت؛ ممکن است اندروید اجرا را عقب بیندازد. معاملات، حافظهٔ هوش و تنظیمات بدون کلیدهای خدمات ارسال می‌شوند. اجرای اول فوری است. مقصد: شاخهٔ همین درخواست؛ مخزن عمومی است و تنها متن رمزگذاری‌شده منتشر می‌شود.")
+            Text("هر ۲۴ ساعت با اینترنت؛ ممکن است اندروید اجرا را عقب بیندازد. معاملات، حافظهٔ هوش و تنظیمات بدون کلیدهای خدمات ارسال می‌شوند. اجرای اول فوری است. مقصد: شاخهٔ arena/7db61d5d-ichimoko همین مخزن؛ مخزن عمومی است و تنها متن رمزگذاری‌شده منتشر می‌شود. پس از حذف شاخه ارسال متوقف می‌شود.")
             Text("یک GitHub App اختصاصی با Device Flow و مجوز Contents: Read and write بسازید و فقط روی همین مخزن نصب کنید؛ شناسهٔ عمومی Client ID آن را اینجا وارد کنید. هیچ رمز یا توکن گیت‌هاب در برنامه وارد نکنید.")
             OutlinedTextField(value = clientId, onValueChange = { clientId = it.trim() },
                 label = { Text("Client ID عمومی GitHub App") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             OutlinedTextField(value = passphrase, onValueChange = { passphrase = it },
                 label = { Text("عبارت رمزگذاری جدید، حداقل ۱۲ نویسه") }, modifier = Modifier.fillMaxWidth(),
                 singleLine = true, visualTransformation = PasswordVisualTransformation())
-            Text("عبارت را نزد خود نگه دارید؛ بدون آن نسخه‌ها قابل بازیابی یا تحلیل نیستند. زمان دقیق و یکپارچگی هم‌زمان همهٔ اجزا تضمین نمی‌شود.")
+            Text("عبارت را نزد خود نگه دارید؛ بدون آن نسخه‌ها قابل بازیابی نیستند. آخرین ارسال تأییدشده جدا از آخرین خطا نمایش داده می‌شود. زمان دقیق و یکپارچگی هم‌زمان همهٔ اجزا تضمین نمی‌شود.")
             Button(enabled = !busy, onClick = {
                 scope.launch {
                     busy = true

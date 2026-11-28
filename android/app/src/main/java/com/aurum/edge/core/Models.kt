@@ -224,6 +224,10 @@ data class PaperTrade(
     val signalBarTime: Long? = null,
     /** Actual time at which the active stop was last changed; unknown for old journals. */
     val stopUpdatedAt: Long? = null,
+    /** Bounded, forward-only audit; absence in older trades means unknown. */
+    val stopObservations: List<StopObservation> = emptyList(),
+    /** Time the new audit observed net 1.5R activation; null is unknown, not proof it never occurred. */
+    val netBreakEvenObservedAt: Long? = null,
     val neuralEntryObservation: NeuralEntryObservation? = null,
     val entryConditions: List<PaperConditionRecord> = emptyList(),
     val leverage: Int = 10,
