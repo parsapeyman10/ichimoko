@@ -287,7 +287,7 @@ fun BacktestScreen(container: com.aurum.edge.app.AppContainer) {
 
         // ── ۱. داده‌ها ─────────────────────────────────────────────────────
         if (dataSets.isNotEmpty()) {
-            SectionCard(initiallyExpanded = true, title = "📁 داده‌های وارد‌شده (${dataSets.size})") {
+            SectionCard(initiallyExpanded = false, title = "📁 داده‌های وارد‌شده (${dataSets.size})") {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     dataSets.forEach { set ->
                         val isSelected = set.id == selectedId
@@ -1352,7 +1352,7 @@ private fun BackgroundJobsSection(
     onDelete: (String) -> Unit,
     onClearFinished: () -> Unit,
 ) {
-    SectionCard(initiallyExpanded = true, title = "🌙 بک‌آزمون پس‌زمینه") {
+    SectionCard(initiallyExpanded = false, title = "🌙 بک‌آزمون پس‌زمینه") {
         Text(
             text = "کار را این‌جا صف کن، از اپ بیرون برو؛ اجرا در پس‌زمینه ادامه پیدا می‌کند " +
                 "(شرط: باتری و حافظه کم نباشد) و نتیجه روی گوشی ذخیره می‌شود. بعداً همان کار را " +

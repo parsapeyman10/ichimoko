@@ -308,13 +308,6 @@ fun SettingsScreen(
                     }
                 }
 
-                // ۱.۳ کارت انتقال مستقیم به صفحه اختصاصی شبکه عصبی خودآموز
-                NeuralDirectNavigationCard(
-                    neuralState = neuralState,
-                    showDescriptions = showDesc,
-                    onOpenNeuralBrain = onOpenNeuralBrain,
-                )
-
                 // ۱.۵ تنظیمات صدا دقیقاً به سبک آلارم گوشی (Phone Clock Alarm UI) — ۱ اعلان و ۱ صدا برای هر مرحله
                 PhoneStyleTradeAlarmsCard(
                     settings = settings,

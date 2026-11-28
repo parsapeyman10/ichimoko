@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -97,10 +100,10 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
     }
     val strategies = remember(settings, neural) { StrategyAuditReport.build(settings, neural) }
     val performance = remember(trades) { SessionPerformanceReport.build(trades) }
-    var chosenSymbol by remember { mutableStateOf("XAU/USD") }
-    var chosenStrategy by remember { mutableStateOf(com.aurum.edge.core.BitcoinStrategyModel.BASE_ICHIMOKU.id) }
-    var chosenInterval by remember { mutableStateOf(Interval.M5) }
-    var chosenDirection by remember { mutableStateOf("هر دو") }
+    var chosenSymbol by rememberSaveable { mutableStateOf("XAU/USD") }
+    var chosenStrategy by rememberSaveable { mutableStateOf(com.aurum.edge.core.BitcoinStrategyModel.BASE_ICHIMOKU.id) }
+    var chosenInterval by rememberSaveable { mutableStateOf(Interval.M5) }
+    var chosenDirection by rememberSaveable { mutableStateOf("هر دو") }
     val symbols = remember(trades) { (V1Universe.allSymbols + trades.map { V1Universe.normalize(it.symbol) }).filter { it.isNotBlank() }.distinct().sorted() }
     val strategyIds = remember(strategies, trades) { (strategies.map { it.id } + trades.map { it.strategyId }).filter { it.isNotBlank() }.distinct().sorted() }
     val direction = when (chosenDirection) { "خرید" -> SignalAction.BUY; "فروش" -> SignalAction.SELL; else -> null }
@@ -111,7 +114,8 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
     val evidence = remember(trades, chosenSymbol, chosenStrategy, chosenInterval, direction) {
         SessionStrategyEvidence.build(trades, chosenSymbol, chosenStrategy, chosenInterval, direction)
     }
-    var grouping by remember { mutableStateOf("استراتژی") }
+    var section by rememberSaveable { mutableStateOf("تحلیل معاملات") }
+    var grouping by rememberSaveable { mutableStateOf("استراتژی") }
     val groups = when (grouping) { "نماد" -> performance.bySymbol; "سشن" -> performance.bySession; else -> performance.byStrategy }
     fun exportFile(make: () -> File, mime: String) {
         scope.launch {
@@ -148,17 +152,22 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Text("📋 گزارش استراتژی‌ها و آزمایش‌ها", color = AurumColors.Gold, fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.padding(top = 12.dp))
-            Text("مرجع = پیش‌فرض نسخهٔ فعلی؛ تاریخچهٔ قبل از تغییر ذخیره نشده است. مقدار ثبت‌شده، حل عمومی بدون نماد و پروفایل عصبی جدا نشان داده می‌شوند؛ موتور ممکن است بر اساس نماد و خود مدل مقدار دیگری استفاده کند. پروفایل لزوماً اعمال نشده است. نتایج حذف‌شده قابل بازیابی نیستند.", color = AurumColors.TextSecondary, fontSize = 11.sp)
+            Text("اطلاعات ثبت‌نشده یا حذف‌شده قابل بازیابی نیستند. آمار گذشته تضمین آینده نیست.", color = AurumColors.TextSecondary, fontSize = 11.sp)
             Text("گیت عصبی: ${if (neural.isGateActive) "فعال" else "غیرفعال"} · ${neural.gatePolicySummaryFa}", color = AurumColors.TextSecondary, fontSize = 11.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { exportFile({ StrategyReportExport.create(context, settings, neural, trades) }, "application/zip") }) { Text("خروجی همه ZIP") }
+                Button(onClick = { exportFile({ StrategyReportExport.create(context, settings, neural, trades) }, "application/zip") }) { Text("گزارش آزمایش‌ها ZIP") }
                 OutlinedButton(onClick = { revision++ }) { Text("بازخوانی") }
             }
             Button(onClick = { confirmComprehensive = true }, modifier = Modifier.fillMaxWidth()) { Text("خروجی جامع تحلیل معاملات و هوش ZIP") }
             Text("معاملات و ویژگی‌ها، شبکه و حافظه، تنظیمات مجاز، آرشیوها و داده‌های بازار موجود. کلید و رمز صادر نمی‌شود؛ دادهٔ ذخیره‌نشده ساخته نمی‌شود. خروجی بدون رمز و شخصی است.", color = AurumColors.TextSecondary, fontSize = 10.sp)
             if (message.isNotBlank()) Text(message, color = AurumColors.Gold, fontSize = 11.sp)
-            Text("ZIP حاوی تنظیمات و پروفایل‌ها، گزارش کارها، آخرین نشست و آرشیوهای CSV/JSON موجود است؛ کلیدهای API صادر نمی‌شوند. داده‌ها می‌توانند شامل اطلاعات معاملات شخصی باشند.", color = AurumColors.TextSecondary, fontSize = 10.sp)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("تحلیل معاملات", "کارنامه", "استراتژی و شبکه", "آزمایش‌ها").forEach { label ->
+                    OutlinedButton(onClick = { section = label }) { Text(if (section == label) "✓ $label" else label, fontSize = 10.sp) }
+                }
+            }
         }
+        if (section == "تحلیل معاملات") {
         item {
             Text("🛡️ ممیزی حد سود و ضرر", color = AurumColors.Gold, fontWeight = FontWeight.Bold)
             Text("قواعد پلن: ریسک پایه ۵ دلار به‌علاوه ۰٫۵٪ سود واجد شرایط، هدف خالص ۲ تا ۳R؛ قفل سربه‌سر با تیک معتبر پس از ۱٫۵R خالص و سپس فقط بهبود. ممیزی پلن بر اساس مدل هزینهٔ فعلی است، نه تضمین اجرا یا گواه مسیر تاریخی. گپ/قطعی و بافر ۱۰ ثانیهٔ اولیهٔ برخی نمادهای کریپتو می‌تواند باعث فاصلهٔ اجرا از حد شود. اصلاح خودکار پلن باز متوقف است.", color = AurumColors.TextSecondary, fontSize = 10.sp)
@@ -188,6 +197,8 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
                 Text("ورود ${t.entry} · حد اولیه ${t.initialStopLoss ?: "نامعلوم"} · حد فعلی ${t.stopLoss} · هدف ${t.takeProfit} · ریسک ${t.fixedRiskUsd} دلار · P/L ${t.pnlUsd ?: "نامعلوم"}\n${SessionStrategyEvidence.planReviewFa(t)}\nشبکه در ورود: ${if (n == null) "ثبت نشده" else "احتمال ${n.predictedWinProbability}, R پیش‌بینی ${n.expectedR}, ویژگی‌ها ${n.features.size}, اعتبار زمانی ${n.isUsableFor(t.openedAt)}"}", color = AurumColors.TextSecondary, fontSize = 10.sp)
             }
         }
+        }
+        if (section == "کارنامه") {
         item {
             Text("📈 کارنامهٔ دسته‌بندی‌شده", color = AurumColors.Gold, fontWeight = FontWeight.Bold)
             val best = performance.bestSession
@@ -210,6 +221,8 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
                 OutlinedButton(onClick = { exportFile({ jsonFile("performance_${g.key.replace(Regex("[^A-Za-z0-9_-]"), "_")}.json", reportJson.encodeToString(SessionPerformanceReport.Group.serializer(), g)) }, "application/json") }) { Text("خروجی این گروه") }
             }
         }
+        }
+        if (section == "استراتژی و شبکه") {
         item {
             Text("تاریخچهٔ تغییرات ثبت‌شدهٔ هوش عصبی (${neural.knowledgeChangeLog.size})", color = AurumColors.Gold, fontWeight = FontWeight.Bold)
             if (neural.knowledgeChangeLog.isEmpty()) Text("تغییری در دفتر ثبت نشده است؛ نبود سابقه به معنی تغییر نکردن نیست.", color = AurumColors.TextSecondary, fontSize = 10.sp)
@@ -242,6 +255,8 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
                 }
             }
         }
+        }
+        if (section == "آزمایش‌ها") {
         item {
             Text("آزمایش‌های ذخیره‌شده (${inventory?.jobs?.size ?: 0})", color = AurumColors.Gold, fontWeight = FontWeight.Bold)
             if (inventory == null) Text("در حال بارگذاری…", color = AurumColors.TextSecondary)
@@ -269,6 +284,7 @@ fun StrategyReportsScreen(viewModel: AurumViewModel) {
         }
         items(inventory?.archives.orEmpty(), key = { "archive:" + it.name }) { file ->
             OutlinedButton(onClick = { exportFile({ file }, if (file.extension.equals("csv", true)) "text/csv" else "application/json") }, modifier = Modifier.fillMaxWidth()) { Text(file.name, fontSize = 10.sp) }
+        }
         }
         item { Text("", modifier = Modifier.padding(bottom = 12.dp)) }
     }

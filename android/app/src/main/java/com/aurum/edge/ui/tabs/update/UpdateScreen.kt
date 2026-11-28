@@ -161,9 +161,7 @@ fun UpdateScreen(viewModel: AurumViewModel) {
         ) {
             if (crashReports.isEmpty()) {
                 Text(
-                    "هیچ گزارشی ثبت نشده است. اگر برنامه بسته شد یا پیام «اپ پاسخ نمی‌دهد» آمد، دوباره اپ را باز کنید و " +
-                        "همین کارت را ببینید؛ گزارش با نام صفحه‌ای که در آن بودید و مسیر دقیق کدی که رشتهٔ اصلی را " +
-                        "قفل کرده بود ذخیره می‌شود.",
+                    "گزارشی ثبت نشده است. پس از خطا یا کندی، برنامه را دوباره باز کنید و این بخش را ببینید.",
                     style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextSecondary,
                 )
@@ -241,22 +239,7 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                 modifier = Modifier.padding(top = 5.dp))
         }
 
-        SectionCard("نسخهٔ ۳ — چه چیزی آماده شد", "نسخهٔ ۳٫۰٫۰ · کد ۷۰۰") {
-            Text("• بستهٔ کامل منبع: همهٔ فایل‌های Kotlin / Jetpack Compose که برای ساخت APK لازم‌اند در مخزن حاضرند؛ پوشهٔ android/ دیگر ناقص نیست و CI می‌تواند از همین درخت بیلد بگیرد.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-            Text("• شمارهٔ نسخه ۳٫۰٫۰ با کد ۷۰۰، بالاتر از ۲٫۰٫۱۱ (کد ۶۸۳) است؛ اگر APK با همان گواهی منتشر شود، Android اجازهٔ بروزرسانی روی نصب قبلی را می‌دهد.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 5.dp))
-            Text("• همین صفحه دو چیز را جدا نشان می‌دهد: SHA-256 گواهی نصبِ همین گوشی و SHA-256 کانال Release. اگر این دو یکی نباشند، فایل درست هم نصب نمی‌شود؛ بنابراین پیش از دانلود معلوم است.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 5.dp))
-            Text("• بررسی خودکار حداکثر هر ۱۵ دقیقه یک‌بار و از سه کانال (manifest داخل Release، manifest شاخهٔ main، فهرست Releases) انجام می‌شود؛ دکمهٔ «بررسی نسخه جدید» همیشه فوری است.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
-                modifier = Modifier.padding(top = 5.dp))
-            Text("• جزئیات فنی این نسخه در docs/RELEASE_3_0_FA.md و فهرست تغییرات در CHANGELOG_FA.md نگهداری می‌شود.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 5.dp))
-        }
+
     }
 }
 
